@@ -576,6 +576,9 @@ const MODULES_FILE = path.join(__dirname, 'modules.json');
 const MODULES_TIMEOUT = 90_000;          // per-project npm outdated timeout
 const MODULES_CONCURRENCY = 3;           // parallel scans (registry-bound)
 const MODULES_INTERVAL_MS = 6 * 3600_000; // refresh every 6h
+const MOD_UPDATE_TIMEOUT = 5 * 60_000;   // per-update timeout
+const MOD_UPDATE_LOG_MAX = 50;
+const PKG_NAME_RE = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
 const MOD_SKIP_DIRS = new Set([
   'node_modules', 'dist', 'build', '.next', '.nuxt', '.cache', 'cache',
   'coverage', '.git', 'tmp', '.turbo', '.vite', '.parcel-cache', '.svelte-kit',
@@ -584,19 +587,31 @@ const MOD_SKIP_DIRS = new Set([
 let modulesCache = null;
 let modulesScanInProgress = false;
 let modulesScanProgress = { total: 0, done: 0, current: null, startedAt: null };
+const moduleUpdatesActive = {};   // key: realpath dir -> { user, packages, startedAt }
+let moduleUpdateLog = [];          // recent results, newest last
 
 function loadModulesCache() {
   try {
     const data = JSON.parse(fs.readFileSync(MODULES_FILE, 'utf8'));
-    if (data && typeof data === 'object') modulesCache = data;
+    if (data && typeof data === 'object') {
+      modulesCache = data;
+      moduleUpdateLog = Array.isArray(data.updateLog) ? data.updateLog : [];
+    }
   } catch (_) { /* first run */ }
 }
 
 function saveModulesCache() {
   try {
+    if (modulesCache) modulesCache.updateLog = moduleUpdateLog;
     fs.writeFileSync(MODULES_FILE + '.tmp', JSON.stringify(modulesCache));
     fs.renameSync(MODULES_FILE + '.tmp', MODULES_FILE);
   } catch (e) { console.error('modules save failed:', e.message); }
+}
+
+function detectPM(dir) {
+  try { if (fs.existsSync(path.join(dir, 'pnpm-lock.yaml'))) return 'pnpm'; } catch {}
+  try { if (fs.existsSync(path.join(dir, 'yarn.lock'))) return 'yarn'; } catch {}
+  return 'npm';
 }
 
 // Walk a tree looking for installed projects (dirs with both package.json AND node_modules).
@@ -728,6 +743,7 @@ async function collectModules() {
         relDir: relPath(p.dir),
         user: p.user,
         scope: p.scope,
+        pm: detectPM(p.dir),
         pkgName: pkg.name || path.basename(p.dir),
         pkgVersion: pkg.version || null,
         depCount: Object.keys(direct).length,
@@ -764,6 +780,7 @@ async function collectModules() {
           dir: p.dir,
           relDir: p.relDir,
           pkgName: p.pkgName,
+          pm: p.pm,
           package: name,
           current: info.current || null,
           wanted: info.wanted || null,
@@ -788,6 +805,7 @@ async function collectModules() {
       },
       projects: enriched,
       outdated: rows,
+      updateLog: moduleUpdateLog,
     };
     saveModulesCache();
   } catch (e) {
@@ -797,6 +815,142 @@ async function collectModules() {
     modulesScanProgress = { total: 0, done: 0, current: null, startedAt: null };
   }
   return modulesCache;
+}
+
+function recomputeModulesSummary() {
+  if (!modulesCache) return;
+  const rows = [];
+  let major = 0, minor = 0, patch = 0;
+  for (const p of modulesCache.projects) {
+    if (!p.outdated) continue;
+    for (const [name, info] of Object.entries(p.outdated)) {
+      const sev = severityOf(info.current, info.latest);
+      rows.push({
+        user: p.user, dir: p.dir, relDir: p.relDir, pkgName: p.pkgName, pm: p.pm,
+        package: name,
+        current: info.current || null,
+        wanted: info.wanted || null,
+        latest: info.latest || null,
+        type: info.type || 'dependencies',
+        severity: sev,
+      });
+      if (sev === 'major') major++;
+      else if (sev === 'minor') minor++;
+      else if (sev === 'patch') patch++;
+    }
+  }
+  modulesCache.outdated = rows;
+  modulesCache.summary = {
+    projects: modulesCache.projects.length,
+    projectsOutdated: modulesCache.projects.filter((p) => p.outdated && Object.keys(p.outdated).length).length,
+    outdatedTotal: rows.length,
+    major, minor, patch,
+    errors: modulesCache.projects.filter((p) => p.error).length,
+  };
+}
+
+async function rescanProject(dir, user) {
+  if (!modulesCache) return;
+  const idx = modulesCache.projects.findIndex((p) => p.dir === dir);
+  if (idx < 0) return;
+  const r = await npmOutdated({ dir, user });
+  const pkg = readPkgJson(dir) || {};
+  const direct = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+  const proj = modulesCache.projects[idx];
+  proj.outdated = r.outdated || {};
+  proj.error = r.error || null;
+  proj.scannedAt = new Date().toISOString();
+  proj.pkgName = pkg.name || path.basename(dir);
+  proj.pkgVersion = pkg.version || null;
+  proj.depCount = Object.keys(direct).length;
+  proj.pm = detectPM(dir);
+  recomputeModulesSummary();
+  modulesCache.generated_at = new Date().toISOString();
+  saveModulesCache();
+}
+
+function appendUpdateLog(entry) {
+  moduleUpdateLog.push(entry);
+  if (moduleUpdateLog.length > MOD_UPDATE_LOG_MAX) {
+    moduleUpdateLog.splice(0, moduleUpdateLog.length - MOD_UPDATE_LOG_MAX);
+  }
+  if (modulesCache) modulesCache.updateLog = moduleUpdateLog;
+  saveModulesCache();
+}
+
+// Validate inputs and run an update for one project. packages is array of npm names; if empty, update all outdated in the project.
+async function runModuleUpdate(dir, user, packagesIn) {
+  if (!modulesCache) return { success: false, error: 'no scan cache; rescan first' };
+  const project = modulesCache.projects.find((p) => p.dir === dir);
+  if (!project) return { success: false, error: 'project not in scan cache' };
+
+  // Verify dir is owned by claimed user (defense in depth — UI sends both)
+  let actualUser;
+  try { actualUser = uidToName(fs.statSync(dir).uid); }
+  catch (e) { return { success: false, error: 'cannot stat dir: ' + e.message }; }
+  if (actualUser !== user) return { success: false, error: `user mismatch (dir owned by '${actualUser}', not '${user}')` };
+
+  // Compose the package list
+  let packages;
+  if (Array.isArray(packagesIn) && packagesIn.length) {
+    packages = packagesIn;
+  } else {
+    packages = Object.keys(project.outdated || {});
+  }
+  if (!packages.length) return { success: false, error: 'no packages to update' };
+  for (const pkg of packages) {
+    if (!PKG_NAME_RE.test(pkg)) return { success: false, error: 'invalid package name: ' + pkg };
+    if (!project.outdated || !project.outdated[pkg]) {
+      return { success: false, error: `package '${pkg}' not in outdated list for this project (rescan?)` };
+    }
+  }
+
+  const pm = project.pm || 'npm';
+  const dirEsc = dir.replace(/'/g, `'\\''`);
+  const pkgsAtLatest = packages.map((p) => `'${p}@latest'`).join(' ');
+  let shCmd;
+  if (pm === 'npm') {
+    // --legacy-peer-deps: matches how most non-trivial Next/React/eslint-heavy projects
+    // are installed; without it, modern npm refuses to install on any peer-dep mismatch.
+    shCmd = `cd '${dirEsc}' && npm install --legacy-peer-deps --no-fund --no-audit --no-progress ${pkgsAtLatest} 2>&1`;
+  } else if (pm === 'pnpm') {
+    shCmd = `cd '${dirEsc}' && pnpm add ${pkgsAtLatest} 2>&1`;
+  } else if (pm === 'yarn') {
+    shCmd = `cd '${dirEsc}' && yarn add ${pkgsAtLatest} 2>&1`;
+  } else {
+    return { success: false, error: 'unsupported package manager: ' + pm };
+  }
+
+  if (moduleUpdatesActive[dir]) {
+    return { success: false, error: 'an update is already running for this project' };
+  }
+  moduleUpdatesActive[dir] = { user, packages, startedAt: new Date().toISOString() };
+  const startedAt = Date.now();
+
+  return await new Promise((resolve) => {
+    const isRoot = user === 'root';
+    const bin = isRoot ? 'sh' : 'sudo';
+    const args = isRoot ? ['-c', shCmd] : ['-n', '-H', '-u', user, 'sh', '-c', shCmd];
+    execFile(bin, args, { timeout: MOD_UPDATE_TIMEOUT, maxBuffer: 16 * 1024 * 1024 },
+      async (err, stdout) => {
+        const output = (stdout || '').toString();
+        const success = !err;
+        const result = {
+          timestamp: new Date().toISOString(),
+          dir, relDir: project.relDir, user,
+          packages, pm,
+          success,
+          error: err ? String(err.code || err.signal || err.message) : null,
+          output: output.slice(-4000),
+          duration_ms: Date.now() - startedAt,
+        };
+        appendUpdateLog(result);
+        delete moduleUpdatesActive[dir];
+        // Rescan the project so the UI immediately reflects the new state
+        try { await rescanProject(dir, user); } catch (e) { console.error('post-update rescan failed:', e.message); }
+        resolve(result);
+      });
+  });
 }
 
 /* ---------------------------------------------------------------- collect */
@@ -1667,6 +1821,9 @@ function renderModules(){
   const view = document.getElementById('modulesview');
   if (!lastModules) { view.innerHTML = '<div class="mod-empty">Loading…</div>'; return; }
   const d = lastModules;
+  const active = d.activeUpdates || {};
+  const isUpdating = (dir) => !!active[dir];
+
   document.getElementById('host').textContent = 'modules';
   const ts = d.generated_at ? new Date(d.generated_at).toLocaleString() : 'never';
   let stamp = 'Last scan: ' + ts + ' · refresh every 6h';
@@ -1674,6 +1831,8 @@ function renderModules(){
     const sp = d.scanProgress || {};
     stamp = 'Scanning… ' + (sp.done||0) + '/' + (sp.total||'?') + (sp.current ? ' · ' + sp.current : '');
   }
+  const activeCount = Object.keys(active).length;
+  if (activeCount) stamp += ' · ' + activeCount + ' update' + (activeCount>1?'s':'') + ' running…';
   document.getElementById('updated').textContent = stamp;
 
   const banner = document.getElementById('banner');
@@ -1743,11 +1902,19 @@ function renderModules(){
   } else {
     html += '<div style="overflow-x:auto"><table class="mod-table">';
     const hdr = (k,l) => '<th data-modsort="'+k+'" class="'+(state.modSort===k?'active':'')+'">'+l+(state.modSort===k?' ▾':'')+'</th>';
-    html += '<tr>'+hdr('severity','Sev')+hdr('package','Package')+'<th>Installed</th><th>Wanted</th><th>Latest</th>'+hdr('user','User')+hdr('project','Project')+'<th></th></tr>';
+    html += '<tr>'+hdr('severity','Sev')+hdr('package','Package')+'<th>Installed</th><th>Wanted</th><th>Latest</th>'+hdr('user','User')+hdr('project','Project')+'<th>PM</th><th style="width:130px;text-align:right"></th></tr>';
     for (const r of filtered) {
       const sev = r.severity || 'none';
       const isDev = (r.type||'').includes('dev');
-      const cmd = "sudo -u " + r.user + " sh -c 'cd " + r.dir + " && npm update " + r.package + "'";
+      const pm = r.pm || 'npm';
+      const cmd = pm === 'npm'
+        ? "sudo -u " + r.user + " sh -c 'cd " + r.dir + " && npm install " + r.package + "@latest'"
+        : "sudo -u " + r.user + " sh -c 'cd " + r.dir + " && " + pm + " add " + r.package + "@latest'";
+      const updating = isUpdating(r.dir);
+      const upBtn = updating
+        ? '<button class="mod-cmd" disabled style="opacity:.6">⏳ updating…</button>'
+        : '<button class="mod-cmd" data-update-pkg="'+esc(r.package)+'" data-update-dir="'+esc(r.dir)+'" data-update-user="'+esc(r.user)+'" title="Run: '+esc(pm)+' install '+esc(r.package)+'@latest" style="background:#1f4e34;color:#5cdd8b;border-color:#2e6e4a">⬆ Update</button>';
+      const cpyBtn = '<button class="mod-cmd" data-cmd="'+esc(cmd)+'" title="Copy command">📋</button>';
       html += '<tr>'
         + '<td><span class="sev '+sev+'">'+(r.severity||'—')+'</span></td>'
         + '<td><span class="mod-pkg'+(isDev?' dev':'')+'">'+esc(r.package)+'</span>'+(isDev?' <span style="color:#6b7280;font-size:10.5px;text-transform:uppercase">dev</span>':'')+'</td>'
@@ -1756,7 +1923,8 @@ function renderModules(){
         + '<td class="mod-ver new">'+esc(r.latest||'—')+'</td>'
         + '<td>'+esc(r.user)+'</td>'
         + '<td><span class="mod-path" title="'+esc(r.dir)+'">'+esc(r.relDir)+'</span></td>'
-        + '<td><button class="mod-cmd" title="Click to copy" data-cmd="'+esc(cmd)+'">📋 cmd</button></td>'
+        + '<td style="color:#6b7280;font-size:11px;text-transform:uppercase">'+esc(pm)+'</td>'
+        + '<td style="text-align:right;white-space:nowrap">'+upBtn+' '+cpyBtn+'</td>'
         + '</tr>';
     }
     html += '</table></div>';
@@ -1772,23 +1940,54 @@ function renderModules(){
   if (projects.length) {
     html += '<div class="mod-card"><h3>Scanned Projects <span style="font-weight:400;font-size:12px;color:#6b7280">'+projects.length+' total</span></h3>';
     html += '<div style="overflow-x:auto"><table class="mod-table">';
-    html += '<tr><th>User</th><th>Project</th><th>Path</th><th>Deps</th><th>Outdated</th><th>Last scan</th></tr>';
+    html += '<tr><th>User</th><th>Project</th><th>Path</th><th>PM</th><th>Deps</th><th>Outdated</th><th>Last scan</th><th style="text-align:right"></th></tr>';
     for (const p of projects) {
       const od = p.outdated ? Object.keys(p.outdated).length : 0;
       const odLabel = p.error
         ? '<span class="sev major" title="'+esc(p.error)+'">err</span>'
         : (od ? '<span class="sev minor">'+od+'</span>' : '<span class="sev patch">0</span>');
+      const updating = isUpdating(p.dir);
+      const allBtn = updating
+        ? '<button class="mod-cmd" disabled style="opacity:.6">⏳ updating…</button>'
+        : (od ? '<button class="mod-cmd" data-update-all="'+esc(p.dir)+'" data-update-user="'+esc(p.user)+'" data-update-count="'+od+'" title="Update all '+od+' outdated packages to @latest" style="background:#3a2d10;color:#f8a306;border-color:#5a4e1f">⬆ Update all ('+od+')</button>'
+              : '');
       html += '<tr>'
         + '<td>'+esc(p.user)+'</td>'
         + '<td><span class="mod-pkg">'+esc(p.pkgName||'—')+'</span>'+(p.pkgVersion?' <span style="color:#6b7280;font-size:11px">'+esc(p.pkgVersion)+'</span>':'')+'</td>'
         + '<td><span class="mod-path" title="'+esc(p.dir)+'">'+esc(p.relDir)+'</span></td>'
+        + '<td style="color:#6b7280;font-size:11px;text-transform:uppercase">'+esc(p.pm||'npm')+'</td>'
         + '<td>'+(p.depCount||0)+'</td>'
         + '<td>'+odLabel+'</td>'
         + '<td><span style="color:#6b7280;font-size:11.5px">'+(p.scannedAt? new Date(p.scannedAt).toLocaleString() : '—')+'</span></td>'
+        + '<td style="text-align:right">'+allBtn+'</td>'
         + '</tr>';
     }
     html += '</table></div></div>';
   }
+
+  // Recent updates log
+  const log = (d.updateLog || []).slice().reverse();
+  html += '<div class="mod-card"><div class="head"><h3 style="margin:0">Recent Updates <span style="font-weight:400;font-size:12px;color:#6b7280">'+log.length+' entries</span></h3>';
+  if (log.length) html += '<button class="btn" id="modClearLog" style="font-size:11px;padding:4px 10px;background:#3a2020;color:#ff8088">🗑 Clear</button>';
+  html += '</div>';
+  if (!log.length) {
+    html += '<div class="mod-empty">No updates have been run yet.</div>';
+  } else {
+    html += '<div class="upd-log">';
+    for (const e of log) {
+      const icon = e.success ? '✅' : '❌';
+      const colorStyle = e.success ? '' : ' style="color:#ff8088"';
+      const dur = e.duration_ms ? Math.round(e.duration_ms/1000)+'s' : '';
+      const pkgs = (e.packages||[]).slice(0,4).join(', ') + ((e.packages||[]).length>4 ? ' +'+((e.packages||[]).length-4)+' more' : '');
+      html += '<div class="upd-log-entry">'
+        + '<span class="time">' + new Date(e.timestamp).toLocaleString() + '</span>'
+        + '<span class="comp"' + colorStyle + '>' + icon + ' ' + esc(e.user) + ' · ' + esc(e.relDir) + '</span>'
+        + '<span class="result" title="'+esc((e.output||e.error||'').slice(0,2000))+'">'+esc(pkgs)+(dur?' · '+dur:'')+(e.error?' · '+esc(e.error):'')+'</span>'
+        + '</div>';
+    }
+    html += '</div>';
+  }
+  html += '</div>';
 
   view.innerHTML = html;
 
@@ -1797,14 +1996,44 @@ function renderModules(){
   if (mq) mq.addEventListener('input', e => { state.modQ = e.target.value; saveState(); renderModules(); });
   view.querySelectorAll('[data-modf]').forEach(b => b.addEventListener('click', () => { state.modFilter = b.dataset.modf; saveState(); renderModules(); }));
   view.querySelectorAll('[data-modsort]').forEach(t => t.addEventListener('click', () => { state.modSort = t.dataset.modsort; saveState(); renderModules(); }));
-  view.querySelectorAll('.mod-cmd').forEach(b => b.addEventListener('click', () => {
+  view.querySelectorAll('[data-cmd]').forEach(b => b.addEventListener('click', () => {
     const txt = b.dataset.cmd;
     if (navigator.clipboard) navigator.clipboard.writeText(txt).then(() => {
-      const old = b.textContent; b.textContent = '✓ copied'; setTimeout(() => b.textContent = old, 1200);
+      const old = b.textContent; b.textContent = '✓'; setTimeout(() => b.textContent = old, 1200);
     });
+  }));
+  view.querySelectorAll('[data-update-pkg]').forEach(b => b.addEventListener('click', () => {
+    triggerModuleUpdate(b.dataset.updateDir, b.dataset.updateUser, [b.dataset.updatePkg]);
+  }));
+  view.querySelectorAll('[data-update-all]').forEach(b => b.addEventListener('click', () => {
+    const n = b.dataset.updateCount;
+    if (!confirm('Update all '+n+' outdated packages to @latest in this project?\\n\\nThis runs the package manager and modifies package.json + lockfile. Make sure the working tree is committed.')) return;
+    triggerModuleUpdate(b.dataset.updateAll, b.dataset.updateUser, []);
   }));
   const mr = document.getElementById('modRefresh');
   if (mr) mr.addEventListener('click', () => triggerModulesRescan());
+  const cl = document.getElementById('modClearLog');
+  if (cl) cl.addEventListener('click', async () => {
+    if (!confirm('Clear update log?')) return;
+    await fetch('api/modules/log', { method: 'DELETE' });
+    if (lastModules) lastModules.updateLog = [];
+    renderModules();
+  });
+}
+
+let modulesPollTimer = null;
+function ensureModulesPoll(active) {
+  if (active && !modulesPollTimer) {
+    modulesPollTimer = setInterval(async () => {
+      try {
+        const m = await fetch('api/modules').then(r => r.json());
+        lastModules = m;
+        if (state.tab === 'modules') renderModules();
+        const stillActive = m.scanInProgress || (m.activeUpdates && Object.keys(m.activeUpdates).length);
+        if (!stillActive) { clearInterval(modulesPollTimer); modulesPollTimer = null; }
+      } catch(_) {}
+    }, 3000);
+  }
 }
 
 async function triggerModulesRescan(){
@@ -1817,16 +2046,41 @@ async function triggerModulesRescan(){
     }
     if (lastModules) lastModules.scanInProgress = true;
     if (state.tab === 'modules') renderModules();
-    // Poll every 5s while scan runs
-    const poll = setInterval(async () => {
-      try {
-        const m = await fetch('api/modules').then(r => r.json());
-        lastModules = m;
-        if (state.tab === 'modules') renderModules();
-        if (!m.scanInProgress) clearInterval(poll);
-      } catch(_) {}
-    }, 5000);
+    ensureModulesPoll(true);
   } catch(e) { alert('Error: '+e.message); }
+}
+
+async function triggerModuleUpdate(dir, user, packages){
+  // Optimistically mark this dir as updating
+  if (lastModules) {
+    lastModules.activeUpdates = lastModules.activeUpdates || {};
+    lastModules.activeUpdates[dir] = { user, packages, startedAt: new Date().toISOString() };
+  }
+  if (state.tab === 'modules') renderModules();
+  ensureModulesPoll(true);
+  try {
+    const res = await fetch('api/modules/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dir, user, packages: packages || [] }),
+    });
+    const result = await res.json();
+    // Refresh state immediately
+    try {
+      const m = await fetch('api/modules').then(r => r.json());
+      lastModules = m;
+    } catch(_) {}
+    if (state.tab === 'modules') renderModules();
+    if (!result.success) {
+      const out = (result.output || '').split('\\n').slice(-6).join('\\n');
+      alert('❌ Update failed: ' + (result.error || 'unknown') + (out ? '\\n\\n' + out : ''));
+    }
+  } catch(e) {
+    alert('Error: '+e.message);
+    // Clear the optimistic state
+    if (lastModules && lastModules.activeUpdates) delete lastModules.activeUpdates[dir];
+    if (state.tab === 'modules') renderModules();
+  }
 }
 
 async function checkUpdates(){
@@ -2085,8 +2339,8 @@ const server = http.createServer((req, res) => {
   if (url === '/api/modules') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify(modulesCache
-      ? { ...modulesCache, scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress }
-      : { generated_at: null, summary: {}, projects: [], outdated: [], scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress }));
+      ? { ...modulesCache, scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress, activeUpdates: moduleUpdatesActive, updateLog: moduleUpdateLog }
+      : { generated_at: null, summary: {}, projects: [], outdated: [], scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress, activeUpdates: moduleUpdatesActive, updateLog: moduleUpdateLog }));
   }
   if (url === '/api/modules/check' && req.method === 'POST') {
     if (modulesScanInProgress) {
@@ -2096,6 +2350,35 @@ const server = http.createServer((req, res) => {
     collectModules().catch((e) => console.error('modules scan failed:', e.message));
     res.writeHead(202, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true, started: true }));
+  }
+  if (url === '/api/modules/update' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 64 * 1024) req.destroy(); });
+    req.on('end', () => {
+      let payload;
+      try { payload = JSON.parse(body); }
+      catch { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'invalid JSON' })); }
+      const { dir, user, packages } = payload || {};
+      if (!dir || !user) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'dir and user required' }));
+      }
+      runModuleUpdate(dir, user, packages || []).then((result) => {
+        res.writeHead(result.success ? 200 : 500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      }).catch((e) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: e.message }));
+      });
+    });
+    return;
+  }
+  if (url === '/api/modules/log' && req.method === 'DELETE') {
+    moduleUpdateLog = [];
+    if (modulesCache) modulesCache.updateLog = [];
+    saveModulesCache();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: true }));
   }
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('not found\n');
