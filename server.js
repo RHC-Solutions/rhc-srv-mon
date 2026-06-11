@@ -571,6 +571,234 @@ async function collectSites() {
   return sitesCache;
 }
 
+/* ---------------------------------------------------------------- modules */
+const MODULES_FILE = path.join(__dirname, 'modules.json');
+const MODULES_TIMEOUT = 90_000;          // per-project npm outdated timeout
+const MODULES_CONCURRENCY = 3;           // parallel scans (registry-bound)
+const MODULES_INTERVAL_MS = 6 * 3600_000; // refresh every 6h
+const MOD_SKIP_DIRS = new Set([
+  'node_modules', 'dist', 'build', '.next', '.nuxt', '.cache', 'cache',
+  'coverage', '.git', 'tmp', '.turbo', '.vite', '.parcel-cache', '.svelte-kit',
+]);
+
+let modulesCache = null;
+let modulesScanInProgress = false;
+let modulesScanProgress = { total: 0, done: 0, current: null, startedAt: null };
+
+function loadModulesCache() {
+  try {
+    const data = JSON.parse(fs.readFileSync(MODULES_FILE, 'utf8'));
+    if (data && typeof data === 'object') modulesCache = data;
+  } catch (_) { /* first run */ }
+}
+
+function saveModulesCache() {
+  try {
+    fs.writeFileSync(MODULES_FILE + '.tmp', JSON.stringify(modulesCache));
+    fs.renameSync(MODULES_FILE + '.tmp', MODULES_FILE);
+  } catch (e) { console.error('modules save failed:', e.message); }
+}
+
+// Walk a tree looking for installed projects (dirs with both package.json AND node_modules).
+// Stops descending into a project once found (its own node_modules is uninteresting).
+function findInstalledProjects(root, maxDepth = 5) {
+  const results = [];
+  const stack = [{ dir: root, depth: 0 }];
+  while (stack.length) {
+    const { dir, depth } = stack.pop();
+    if (depth > maxDepth) continue;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    let hasPkg = false, hasNm = false;
+    for (const e of entries) {
+      if (e.name === 'package.json' && e.isFile()) hasPkg = true;
+      else if (e.name === 'node_modules' && e.isDirectory()) hasNm = true;
+    }
+    if (hasPkg && hasNm) { results.push(dir); continue; }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      if (MOD_SKIP_DIRS.has(e.name) || e.name.startsWith('.')) continue;
+      stack.push({ dir: path.join(dir, e.name), depth: depth + 1 });
+    }
+  }
+  return results;
+}
+
+function dirOwner(dir) {
+  try { return uidToName(fs.statSync(dir).uid); } catch { return 'root'; }
+}
+
+function discoverModuleProjects() {
+  const found = [];
+  // /home/<user>/htdocs/...
+  let users;
+  try { users = fs.readdirSync('/home'); } catch { users = []; }
+  for (const user of users) {
+    const htdocs = path.join('/home', user, 'htdocs');
+    let st;
+    try { st = fs.statSync(htdocs); } catch { continue; }
+    if (!st.isDirectory()) continue;
+    for (const dir of findInstalledProjects(htdocs)) {
+      found.push({ dir, user: dirOwner(dir), scope: user });
+    }
+  }
+  // /opt/<dir>
+  try {
+    for (const e of fs.readdirSync('/opt', { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      if (e.name.startsWith('.')) continue;
+      const root = path.join('/opt', e.name);
+      for (const dir of findInstalledProjects(root, 4)) {
+        found.push({ dir, user: dirOwner(dir), scope: 'opt:' + e.name });
+      }
+    }
+  } catch (_) { /* no /opt */ }
+  // Dedup by realpath
+  const seen = new Set();
+  const out = [];
+  for (const p of found) {
+    let real;
+    try { real = fs.realpathSync(p.dir); } catch { real = p.dir; }
+    if (seen.has(real)) continue;
+    seen.add(real);
+    out.push({ ...p, dir: real });
+  }
+  return out;
+}
+
+function readPkgJson(dir) {
+  try { return JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')); }
+  catch { return null; }
+}
+
+function npmOutdated(project) {
+  return new Promise((resolve) => {
+    const cwdEsc = project.dir.replace(/'/g, `'\\''`);
+    const shCmd = `cd '${cwdEsc}' && npm outdated --json --depth=0 2>/dev/null || true`;
+    const isRoot = !project.user || project.user === 'root';
+    const bin = isRoot ? 'sh' : 'sudo';
+    const args = isRoot ? ['-c', shCmd] : ['-n', '-H', '-u', project.user, 'sh', '-c', shCmd];
+    execFile(bin, args, { timeout: MODULES_TIMEOUT, maxBuffer: 8 * 1024 * 1024 },
+      (err, stdout) => {
+        if (err && !stdout) return resolve({ error: String(err.code || err.signal || err.message) });
+        const trimmed = (stdout || '').trim();
+        if (!trimmed) return resolve({ outdated: {} });
+        try { return resolve({ outdated: JSON.parse(trimmed) }); }
+        catch (_) { return resolve({ error: 'npm outdated parse failed' }); }
+      });
+  });
+}
+
+function semverParts(v) {
+  const m = String(v || '').match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return null;
+  return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
+}
+
+function severityOf(current, latest) {
+  const a = semverParts(current);
+  const b = semverParts(latest);
+  if (!a || !b) return null;
+  if (a[0] !== b[0]) return 'major';
+  if (a[1] !== b[1]) return 'minor';
+  if (a[2] !== b[2]) return 'patch';
+  return null;
+}
+
+function relPath(dir) {
+  const m = dir.match(/^\/home\/([^/]+)\/(.*)$/);
+  if (m) return '~' + m[1] + '/' + m[2];
+  return dir;
+}
+
+async function collectModules() {
+  if (modulesScanInProgress) return modulesCache;
+  modulesScanInProgress = true;
+  modulesScanProgress = { total: 0, done: 0, current: null, startedAt: new Date().toISOString() };
+  try {
+    const projects = discoverModuleProjects();
+    modulesScanProgress.total = projects.length;
+
+    // Pre-fill metadata from package.json
+    const enriched = projects.map((p) => {
+      const pkg = readPkgJson(p.dir) || {};
+      const direct = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+      return {
+        dir: p.dir,
+        relDir: relPath(p.dir),
+        user: p.user,
+        scope: p.scope,
+        pkgName: pkg.name || path.basename(p.dir),
+        pkgVersion: pkg.version || null,
+        depCount: Object.keys(direct).length,
+        outdated: null,
+        error: null,
+        scannedAt: null,
+      };
+    });
+
+    let idx = 0;
+    async function worker() {
+      while (idx < enriched.length) {
+        const i = idx++;
+        const p = enriched[i];
+        modulesScanProgress.current = p.dir;
+        const r = await npmOutdated({ dir: p.dir, user: p.user });
+        p.error = r.error || null;
+        p.outdated = r.outdated || {};
+        p.scannedAt = new Date().toISOString();
+        modulesScanProgress.done++;
+      }
+    }
+    await Promise.all(Array.from({ length: MODULES_CONCURRENCY }, () => worker()));
+
+    // Flatten outdated rows + classify severity
+    const rows = [];
+    let major = 0, minor = 0, patch = 0;
+    for (const p of enriched) {
+      if (!p.outdated) continue;
+      for (const [name, info] of Object.entries(p.outdated)) {
+        const sev = severityOf(info.current, info.latest);
+        rows.push({
+          user: p.user,
+          dir: p.dir,
+          relDir: p.relDir,
+          pkgName: p.pkgName,
+          package: name,
+          current: info.current || null,
+          wanted: info.wanted || null,
+          latest: info.latest || null,
+          type: info.type || 'dependencies',
+          severity: sev,
+        });
+        if (sev === 'major') major++;
+        else if (sev === 'minor') minor++;
+        else if (sev === 'patch') patch++;
+      }
+    }
+
+    modulesCache = {
+      generated_at: new Date().toISOString(),
+      summary: {
+        projects: enriched.length,
+        projectsOutdated: enriched.filter((p) => p.outdated && Object.keys(p.outdated).length).length,
+        outdatedTotal: rows.length,
+        major, minor, patch,
+        errors: enriched.filter((p) => p.error).length,
+      },
+      projects: enriched,
+      outdated: rows,
+    };
+    saveModulesCache();
+  } catch (e) {
+    console.error('collectModules failed:', e.message);
+  } finally {
+    modulesScanInProgress = false;
+    modulesScanProgress = { total: 0, done: 0, current: null, startedAt: null };
+  }
+  return modulesCache;
+}
+
 /* ---------------------------------------------------------------- collect */
 
 function discoverDaemons() {
@@ -870,6 +1098,47 @@ const PAGE = `<!doctype html>
   .site-card .procs .prow .pstat .dim { color:#6b7280; }
   .btn { background:#2a2f40; border:none; color:#e9e9e9; border-radius:8px; padding:4px 10px; font-size:11px; font-weight:600; cursor:pointer; }
   .btn:hover { background:#3a4054; }
+  /* Modules tab */
+  .mod-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:18px; }
+  .mod-stat { background:#1e2230; border-radius:14px; padding:14px 18px; box-shadow:0 2px 8px rgba(0,0,0,.25); }
+  .mod-stat .v { font-size:24px; font-weight:700; line-height:1.15; font-variant-numeric:tabular-nums; }
+  .mod-stat .l { color:#9ca3af; font-size:11.5px; text-transform:uppercase; letter-spacing:.5px; margin-top:4px; font-weight:600; }
+  .mod-stat.major .v { color:#ff8088; }
+  .mod-stat.minor .v { color:#f8a306; }
+  .mod-stat.patch .v { color:#5cdd8b; }
+  .mod-stat.ok .v    { color:#5cdd8b; }
+  .mod-stat.err .v   { color:#ff8088; }
+  .mod-card { background:#1e2230; border-radius:14px; padding:14px 20px; box-shadow:0 2px 8px rgba(0,0,0,.25); margin-bottom:16px; }
+  .mod-card h3 { font-size:14px; font-weight:700; margin:0 0 10px; color:#e9e9e9; }
+  .mod-card .head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; gap:10px; flex-wrap:wrap; }
+  .mod-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .mod-table th { text-align:left; color:#6b7280; font-weight:600; padding:8px 10px 8px 0; border-bottom:1px solid #2a2f40; font-size:11px; text-transform:uppercase; letter-spacing:.5px; cursor:pointer; user-select:none; white-space:nowrap; }
+  .mod-table th:hover { color:#e9e9e9; }
+  .mod-table th.active { color:#5cdd8b; }
+  .mod-table td { padding:9px 10px 9px 0; border-bottom:1px solid #20242f; vertical-align:middle; }
+  .mod-table tr:hover td { background:#20242f; }
+  .mod-table tr.toolrow:hover td { background:transparent; }
+  .sev { display:inline-block; padding:2px 9px; border-radius:999px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; }
+  .sev.major { background:#5a1f25; color:#ff8088; }
+  .sev.minor { background:#5a4e1f; color:#f8a306; }
+  .sev.patch { background:#1f4e34; color:#5cdd8b; }
+  .sev.none  { background:#2a2f40; color:#6b7280; }
+  .mod-pkg  { font-weight:600; color:#e9e9e9; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; }
+  .mod-pkg.dev { color:#9ca3af; }
+  .mod-ver { font-variant-numeric:tabular-nums; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.5px; }
+  .mod-ver .arrow { color:#6b7280; margin:0 4px; }
+  .mod-ver .new   { color:#5cdd8b; }
+  .mod-path { color:#6b7280; font-size:11.5px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; max-width:340px; display:inline-block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle; }
+  .mod-cmd { background:#12141d; color:#cbd5e1; padding:3px 8px; border-radius:5px; font-size:11.5px; font-family:ui-monospace,Menlo,Consolas,monospace; cursor:pointer; border:1px solid #2a2f40; }
+  .mod-cmd:hover { background:#1a1d28; color:#5cdd8b; border-color:#5cdd8b66; }
+  .mod-empty { color:#6b7280; padding:14px 0; font-size:13px; text-align:center; }
+  .mod-progress { color:#f8a306; font-size:12px; padding:8px 0; }
+  /* Shared-only chip + per-user counts */
+  .chip.toggle { background:#1e2230; border:1px solid #2a2f40; color:#9ca3af; }
+  .chip.toggle.active { background:#3a4054; border-color:#5cdd8b; color:#5cdd8b; }
+  .group h2 .pcounts { font-weight:400; font-size:12px; color:#9ca3af; margin-left:8px; }
+  .group h2 .pcounts .up { color:#5cdd8b; }
+  .group h2 .pcounts .down { color:#ff8088; }
   footer { color:#6b7280; font-size:12px; text-align:center; margin-top:8px; }
   @media (max-width:1180px){ .beats .beat:nth-child(-n+25){ display:none; } .hdr .beats-h{ width:247px; } }
   @media (max-width:860px){ .beats, .hdr .beats-h { display:none; } }
@@ -884,6 +1153,7 @@ const PAGE = `<!doctype html>
     <button class="tab" data-tab="db">🐘 PostgreSQL</button>
     <button class="tab" data-tab="updates">🔄 Updates</button>
     <button class="tab" data-tab="sites">🌐 Sites</button>
+    <button class="tab" data-tab="modules">📦 Modules</button>
   </div>
   <div id="banner" class="banner ok" style="display:none"></div>
   <div id="pm2view">
@@ -892,6 +1162,7 @@ const PAGE = `<!doctype html>
     <button class="chip" data-f="all">All</button>
     <button class="chip" data-f="up">Up</button>
     <button class="chip down-chip" data-f="down">Down</button>
+    <button class="chip toggle" id="sharedToggle" title="Show only apps that run on multiple users">🔗 Shared</button>
     <select id="sort" title="Sort">
       <option value="group">Group by user</option>
       <option value="name">Name A→Z</option>
@@ -906,6 +1177,7 @@ const PAGE = `<!doctype html>
   <div id="dbview" style="display:none"></div>
   <div id="updatesview" style="display:none"></div>
   <div id="sitesview" style="display:none"></div>
+  <div id="modulesview" style="display:none"></div>
   <footer>auto-refresh 10s · heartbeat = <span id="ivl">60</span>s samples · 🟩 up · 🟥 down · 🟧 restarted</footer>
 </div>
 <script>
@@ -917,8 +1189,11 @@ function fmtUp(ms){ if(ms==null) return '–'; const s=Math.floor(ms/1000);
 function pctCls(p){ return p==null?'':(p>=99?'good':(p>=90?'mid':'poor')); }
 
 let lastData = null, lastDb = null;
-const state = Object.assign({ q:'', f:'all', sort:'group', tab:'pm2' },
-  JSON.parse(localStorage.getItem('pm2ui') || '{}'));
+const state = Object.assign({
+  q:'', f:'all', sort:'group', tab:'pm2',
+  sharedOnly:false,
+  modSort:'severity', modFilter:'all', modQ:''
+}, JSON.parse(localStorage.getItem('pm2ui') || '{}'));
 function saveState(){ localStorage.setItem('pm2ui', JSON.stringify(state)); }
 
 function matches(p, user){
@@ -949,8 +1224,8 @@ function rowHtml(p, userLabel){
   const memCls = p.memory>=1073741824?'warm':'';
   const rstCls = p.restarts>=1000?'hot':(p.restarts>=50?'warm':'');
   const actions = up
-    ? '<button class="btn small" onclick="pm2Action(\'stop\', \''+userLabel+'\', \''+esc(p.name)+'\')">⏹</button>'
-    : '<button class="btn small" onclick="pm2Action(\'start\', \''+userLabel+'\', \''+esc(p.name)+'\')">▶</button>';
+    ? '<button class="btn small" onclick="pm2Action(\\'stop\\', \\''+userLabel+'\\', \\''+esc(p.name)+'\\')">⏹</button>'
+    : '<button class="btn small" onclick="pm2Action(\\'start\\', \\''+userLabel+'\\', \\''+esc(p.name)+'\\')">▶</button>';
   return '<div class="row">'
     + '<div class="stat"><span class="pill '+(up?'up':'down')+'">'+(up?'Up':'Down')+'</span></div>'
     + '<div class="meta"><div class="name">'+esc(p.name)+'</div>'
@@ -960,7 +1235,7 @@ function rowHtml(p, userLabel){
     + '<div class="col '+memCls+'">'+fmtMem(p.memory)+'</div>'
     + '<div class="col '+rstCls+'">'+p.restarts+'</div>'
     + '<div class="pct '+pctCls(p.uptime24h)+'">'+pct+'</div>'
-    + '<div class="col">'+actions+' <button class="btn small" onclick="pm2Action(\'restart\', \''+userLabel+'\', \''+esc(p.name)+'\')">⟳</button></div>'
+    + '<div class="col">'+actions+' <button class="btn small" onclick="pm2Action(\\'restart\\', \\''+userLabel+'\\', \\''+esc(p.name)+'\\')">⟳</button></div>'
     + '</div>';
 }
 
@@ -982,21 +1257,38 @@ function render(){
     banner.innerHTML = '<span class="ico">🔴</span> ' + d.summary.down + ' service' + (d.summary.down>1?'s':'') + ' down <span style="margin-left:auto;font-size:13px;font-weight:400">'+d.summary.online+'/'+d.summary.total+' up</span>';
   }
   // chip labels with live counts
-  document.querySelectorAll('.chip').forEach(c => {
+  document.querySelectorAll('.chip[data-f]').forEach(c => {
     const f = c.dataset.f;
     const n = f==='all' ? d.summary.total : (f==='up' ? d.summary.online : d.summary.down);
     c.textContent = (f==='all'?'All':(f==='up'?'Up':'Down')) + ' ' + n;
     c.classList.toggle('active', state.f === f);
   });
   document.getElementById('sort').value = state.sort;
+  const stog = document.getElementById('sharedToggle');
+  if (stog) stog.classList.toggle('active', !!state.sharedOnly);
+
+  // Build set of app-names that run on multiple users (for "shared" toggle)
+  const appUsers = {};
+  for (const g of d.groups) for (const p of g.processes) {
+    (appUsers[p.name] = appUsers[p.name] || new Set()).add(g.user);
+  }
+  const isShared = (name) => (appUsers[name] && appUsers[name].size >= 2);
 
   let html = '';
   if (state.sort === 'group') {
     for (const g of d.groups) {
       const procs = g.processes.filter(p => matches(p, g.user))
+        .filter(p => !state.sharedOnly || isShared(p.name))
         .sort((a,b) => (a.status==='online') - (b.status==='online'));   // down first
       if (!procs.length && !g.error) continue;
-      html += '<div class="group"><h2>'+esc(g.user)+'<span class="dim">'+esc(g.pm2_home)+'</span></h2>';
+      const up = g.processes.filter(p => p.status==='online').length;
+      const down = g.processes.length - up;
+      const counts = '<span class="pcounts">'
+        + '<span class="up">'+up+' up</span>'
+        + (down ? ' · <span class="down">'+down+' down</span>' : '')
+        + ' · '+g.processes.length+' service'+(g.processes.length===1?'':'s')
+        + '</span>';
+      html += '<div class="group"><h2>'+esc(g.user)+counts+'<span class="dim">'+esc(g.pm2_home)+'</span></h2>';
       if (g.error) html += '<div class="err">⚠ daemon unreachable: '+esc(g.error)+'</div>';
       if (procs.length) html += HDR;
       for (const p of procs) html += rowHtml(p, null);
@@ -1004,7 +1296,11 @@ function render(){
     }
   } else {
     const all = [];
-    for (const g of d.groups) for (const p of g.processes) if (matches(p, g.user)) all.push({ p, u: g.user });
+    for (const g of d.groups) for (const p of g.processes) {
+      if (!matches(p, g.user)) continue;
+      if (state.sharedOnly && !isShared(p.name)) continue;
+      all.push({ p, u: g.user });
+    }
     const cmp = {
       name:     (a,b) => a.p.name.localeCompare(b.p.name),
       cpu:      (a,b) => b.p.cpu - a.p.cpu,
@@ -1361,6 +1657,178 @@ function renderSites(){
   document.getElementById('sitesview').innerHTML = html;
 }
 
+/* ----------------------------------------------------------------- modules */
+
+let lastModules = null;
+
+function modSeverityRank(s){ return s==='major'?3:s==='minor'?2:s==='patch'?1:0; }
+
+function renderModules(){
+  const view = document.getElementById('modulesview');
+  if (!lastModules) { view.innerHTML = '<div class="mod-empty">Loading…</div>'; return; }
+  const d = lastModules;
+  document.getElementById('host').textContent = 'modules';
+  const ts = d.generated_at ? new Date(d.generated_at).toLocaleString() : 'never';
+  let stamp = 'Last scan: ' + ts + ' · refresh every 6h';
+  if (d.scanInProgress) {
+    const sp = d.scanProgress || {};
+    stamp = 'Scanning… ' + (sp.done||0) + '/' + (sp.total||'?') + (sp.current ? ' · ' + sp.current : '');
+  }
+  document.getElementById('updated').textContent = stamp;
+
+  const banner = document.getElementById('banner');
+  banner.style.display='flex';
+  const s = d.summary || {};
+  const totalOutdated = s.outdatedTotal || 0;
+  if (!d.generated_at) {
+    banner.className='banner ok';
+    banner.innerHTML = '<span class="ico">⏳</span> First module scan running in the background — versions hit the npm registry, this can take a few minutes.';
+  } else if (totalOutdated === 0) {
+    banner.className='banner ok';
+    banner.innerHTML = '<span class="ico">✅</span> All modules up to date <span style="margin-left:auto;font-size:13px;font-weight:400;color:#9fd9b6">'+(s.projects||0)+' projects scanned</span>';
+  } else {
+    banner.className='banner bad';
+    const parts = [];
+    if (s.major) parts.push(s.major + ' major');
+    if (s.minor) parts.push(s.minor + ' minor');
+    if (s.patch) parts.push(s.patch + ' patch');
+    banner.innerHTML = '<span class="ico">📦</span> ' + totalOutdated + ' outdated dependencies <span style="margin-left:auto;font-size:13px;font-weight:400">'+parts.join(' · ')+'</span>';
+  }
+
+  // Summary stats grid (Observe)
+  let html = '<div class="mod-summary">';
+  html += '<div class="mod-stat"><div class="v">'+(s.projects||0)+'</div><div class="l">Projects</div></div>';
+  html += '<div class="mod-stat ok"><div class="v">'+((s.projects||0)-(s.projectsOutdated||0))+'</div><div class="l">Up to date</div></div>';
+  html += '<div class="mod-stat major"><div class="v">'+(s.major||0)+'</div><div class="l">Major bumps</div></div>';
+  html += '<div class="mod-stat minor"><div class="v">'+(s.minor||0)+'</div><div class="l">Minor</div></div>';
+  html += '<div class="mod-stat patch"><div class="v">'+(s.patch||0)+'</div><div class="l">Patch</div></div>';
+  if (s.errors) html += '<div class="mod-stat err"><div class="v">'+s.errors+'</div><div class="l">Scan errors</div></div>';
+  html += '</div>';
+
+  // Toolbar (Orient): filter chips + search + refresh
+  html += '<div class="mod-card"><div class="head">';
+  html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1">';
+  html += '<input id="modQ" type="search" placeholder="Filter package, project, user…" value="'+esc(state.modQ||'')+'" style="background:#12141d;border:1px solid #2a2f40;color:#e9e9e9;border-radius:10px;padding:8px 12px;font-size:13px;outline:none;flex:1 1 220px;min-width:160px">';
+  for (const f of [['all','All'],['major','Major'],['minor','Minor'],['patch','Patch']]) {
+    const cls = (state.modFilter===f[0])?'chip active'+(f[0]==='major'?' down-chip':''):'chip';
+    html += '<button class="'+cls+'" data-modf="'+f[0]+'">'+f[1]+'</button>';
+  }
+  html += '</div>';
+  html += '<button class="btn" id="modRefresh" '+(d.scanInProgress?'disabled':'')+' style="padding:7px 14px;font-size:12px">'+(d.scanInProgress?'⏳ Scanning…':'🔄 Rescan')+'</button>';
+  html += '</div>';
+
+  // Outdated table (Decide)
+  const rows = (d.outdated||[]).slice();
+  const q = (state.modQ||'').toLowerCase();
+  let filtered = rows.filter(r => {
+    if (state.modFilter !== 'all' && r.severity !== state.modFilter) return false;
+    if (q) {
+      const hay = (r.package+' '+r.user+' '+r.relDir+' '+(r.pkgName||'')).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const cmps = {
+    severity: (a,b) => modSeverityRank(b.severity)-modSeverityRank(a.severity)
+                     || a.user.localeCompare(b.user)
+                     || a.package.localeCompare(b.package),
+    user:     (a,b) => a.user.localeCompare(b.user) || a.package.localeCompare(b.package),
+    package:  (a,b) => a.package.localeCompare(b.package),
+    project:  (a,b) => a.relDir.localeCompare(b.relDir) || a.package.localeCompare(b.package),
+  };
+  filtered.sort(cmps[state.modSort] || cmps.severity);
+
+  if (!filtered.length) {
+    html += '<div class="mod-empty">'+(rows.length?'No matches.':'No outdated dependencies in scanned projects.')+'</div>';
+  } else {
+    html += '<div style="overflow-x:auto"><table class="mod-table">';
+    const hdr = (k,l) => '<th data-modsort="'+k+'" class="'+(state.modSort===k?'active':'')+'">'+l+(state.modSort===k?' ▾':'')+'</th>';
+    html += '<tr>'+hdr('severity','Sev')+hdr('package','Package')+'<th>Installed</th><th>Wanted</th><th>Latest</th>'+hdr('user','User')+hdr('project','Project')+'<th></th></tr>';
+    for (const r of filtered) {
+      const sev = r.severity || 'none';
+      const isDev = (r.type||'').includes('dev');
+      const cmd = "sudo -u " + r.user + " sh -c 'cd " + r.dir + " && npm update " + r.package + "'";
+      html += '<tr>'
+        + '<td><span class="sev '+sev+'">'+(r.severity||'—')+'</span></td>'
+        + '<td><span class="mod-pkg'+(isDev?' dev':'')+'">'+esc(r.package)+'</span>'+(isDev?' <span style="color:#6b7280;font-size:10.5px;text-transform:uppercase">dev</span>':'')+'</td>'
+        + '<td class="mod-ver">'+esc(r.current||'—')+'</td>'
+        + '<td class="mod-ver">'+esc(r.wanted||'—')+'</td>'
+        + '<td class="mod-ver new">'+esc(r.latest||'—')+'</td>'
+        + '<td>'+esc(r.user)+'</td>'
+        + '<td><span class="mod-path" title="'+esc(r.dir)+'">'+esc(r.relDir)+'</span></td>'
+        + '<td><button class="mod-cmd" title="Click to copy" data-cmd="'+esc(cmd)+'">📋 cmd</button></td>'
+        + '</tr>';
+    }
+    html += '</table></div>';
+  }
+  html += '</div>';
+
+  // Per-project breakdown (Act): list every scanned project so you know what was looked at
+  const projects = (d.projects||[]).slice().sort((a,b) => {
+    const ao = a.outdated ? Object.keys(a.outdated).length : 0;
+    const bo = b.outdated ? Object.keys(b.outdated).length : 0;
+    return bo - ao || a.user.localeCompare(b.user) || a.relDir.localeCompare(b.relDir);
+  });
+  if (projects.length) {
+    html += '<div class="mod-card"><h3>Scanned Projects <span style="font-weight:400;font-size:12px;color:#6b7280">'+projects.length+' total</span></h3>';
+    html += '<div style="overflow-x:auto"><table class="mod-table">';
+    html += '<tr><th>User</th><th>Project</th><th>Path</th><th>Deps</th><th>Outdated</th><th>Last scan</th></tr>';
+    for (const p of projects) {
+      const od = p.outdated ? Object.keys(p.outdated).length : 0;
+      const odLabel = p.error
+        ? '<span class="sev major" title="'+esc(p.error)+'">err</span>'
+        : (od ? '<span class="sev minor">'+od+'</span>' : '<span class="sev patch">0</span>');
+      html += '<tr>'
+        + '<td>'+esc(p.user)+'</td>'
+        + '<td><span class="mod-pkg">'+esc(p.pkgName||'—')+'</span>'+(p.pkgVersion?' <span style="color:#6b7280;font-size:11px">'+esc(p.pkgVersion)+'</span>':'')+'</td>'
+        + '<td><span class="mod-path" title="'+esc(p.dir)+'">'+esc(p.relDir)+'</span></td>'
+        + '<td>'+(p.depCount||0)+'</td>'
+        + '<td>'+odLabel+'</td>'
+        + '<td><span style="color:#6b7280;font-size:11.5px">'+(p.scannedAt? new Date(p.scannedAt).toLocaleString() : '—')+'</span></td>'
+        + '</tr>';
+    }
+    html += '</table></div></div>';
+  }
+
+  view.innerHTML = html;
+
+  // Wire interactive elements
+  const mq = document.getElementById('modQ');
+  if (mq) mq.addEventListener('input', e => { state.modQ = e.target.value; saveState(); renderModules(); });
+  view.querySelectorAll('[data-modf]').forEach(b => b.addEventListener('click', () => { state.modFilter = b.dataset.modf; saveState(); renderModules(); }));
+  view.querySelectorAll('[data-modsort]').forEach(t => t.addEventListener('click', () => { state.modSort = t.dataset.modsort; saveState(); renderModules(); }));
+  view.querySelectorAll('.mod-cmd').forEach(b => b.addEventListener('click', () => {
+    const txt = b.dataset.cmd;
+    if (navigator.clipboard) navigator.clipboard.writeText(txt).then(() => {
+      const old = b.textContent; b.textContent = '✓ copied'; setTimeout(() => b.textContent = old, 1200);
+    });
+  }));
+  const mr = document.getElementById('modRefresh');
+  if (mr) mr.addEventListener('click', () => triggerModulesRescan());
+}
+
+async function triggerModulesRescan(){
+  try {
+    const r = await fetch('api/modules/check', { method:'POST' });
+    if (!r.ok && r.status !== 202) {
+      const e = await r.json().catch(()=>({}));
+      alert(e.error || 'Rescan failed');
+      return;
+    }
+    if (lastModules) lastModules.scanInProgress = true;
+    if (state.tab === 'modules') renderModules();
+    // Poll every 5s while scan runs
+    const poll = setInterval(async () => {
+      try {
+        const m = await fetch('api/modules').then(r => r.json());
+        lastModules = m;
+        if (state.tab === 'modules') renderModules();
+        if (!m.scanInProgress) clearInterval(poll);
+      } catch(_) {}
+    }, 5000);
+  } catch(e) { alert('Error: '+e.message); }
+}
+
 async function checkUpdates(){
   try {
     const res = await fetch('api/updates/check', { method: 'POST' });
@@ -1461,30 +1929,37 @@ function setTab(tab){
   document.getElementById('dbview').style.display  = tab==='db'  ? '' : 'none';
   document.getElementById('updatesview').style.display = tab==='updates' ? '' : 'none';
   document.getElementById('sitesview').style.display = tab==='sites' ? '' : 'none';
+  document.getElementById('modulesview').style.display = tab==='modules' ? '' : 'none';
   if (tab==='pm2') render();
   else if (tab==='db') renderDb();
   else if (tab==='updates') renderUpdates();
-  else renderSites();
+  else if (tab==='sites') renderSites();
+  else if (tab==='modules') renderModules();
 }
 
 document.getElementById('q').value = state.q;
 document.getElementById('q').addEventListener('input', e => { state.q = e.target.value; saveState(); render(); });
-document.querySelectorAll('.chip').forEach(c =>
+document.querySelectorAll('.chip[data-f]').forEach(c =>
   c.addEventListener('click', () => { state.f = c.dataset.f; saveState(); render(); }));
 document.getElementById('sort').addEventListener('change', e => { state.sort = e.target.value; saveState(); render(); });
+document.getElementById('sharedToggle').addEventListener('click', () => {
+  state.sharedOnly = !state.sharedOnly; saveState(); render();
+});
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));
 
 async function refresh(){
-  try { [lastData, lastDb, lastUpdates, lastSites] = await Promise.all([
+  try { [lastData, lastDb, lastUpdates, lastSites, lastModules] = await Promise.all([
     fetch('api/status').then(r=>r.json()),
     fetch('api/db').then(r=>r.json()),
     fetch('api/updates').then(r=>r.json()),
     fetch('api/sites').then(r=>r.json()),
+    fetch('api/modules').then(r=>r.json()),
   ]); } catch(e){ return; }
   if (state.tab==='pm2') render();
   else if (state.tab==='db') renderDb();
   else if (state.tab==='updates') renderUpdates();
-  else renderSites();
+  else if (state.tab==='sites') renderSites();
+  else if (state.tab==='modules') renderModules();
 }
 async function pm2Action(action, user, app) {
   try {
@@ -1607,18 +2082,37 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
+  if (url === '/api/modules') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(modulesCache
+      ? { ...modulesCache, scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress }
+      : { generated_at: null, summary: {}, projects: [], outdated: [], scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress }));
+  }
+  if (url === '/api/modules/check' && req.method === 'POST') {
+    if (modulesScanInProgress) {
+      res.writeHead(409, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'scan already in progress', progress: modulesScanProgress }));
+    }
+    collectModules().catch((e) => console.error('modules scan failed:', e.message));
+    res.writeHead(202, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: true, started: true }));
+  }
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('not found\n');
 });
 
 loadHistory();
 loadUpdates();
+loadModulesCache();
 sample();                                  // first sample immediately
 setInterval(sample, SAMPLE_MS);
 collectUpdates().then(() => startScheduler());  // initial updates check + scheduler
 setInterval(() => collectUpdates(), CHECK_INTERVAL_MS); // hourly re-check
 collectSites();                            // initial sites data
 setInterval(() => collectSites(), 300_000); // re-check sites every 5 min
+// modules: kick off first scan in background (slow — registry-bound), then refresh every 6h
+setTimeout(() => { collectModules().catch((e) => console.error('initial modules scan failed:', e.message)); }, 8_000);
+setInterval(() => collectModules().catch(() => {}), MODULES_INTERVAL_MS);
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => { saveHistory(true); process.exit(0); });
 }
