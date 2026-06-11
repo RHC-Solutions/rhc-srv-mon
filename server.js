@@ -868,7 +868,7 @@ const PAGE = `<!doctype html>
   .site-card .procs .prow .pstat.up { color:#5cdd8b; }
   .site-card .procs .prow .pstat.down { color:#dc3545; }
   .site-card .procs .prow .pstat .dim { color:#6b7280; }
-  .btn { background:#2a2f40; border:none; color:#e9e9e9; border-radius:8px; padding:6px 14px; font-size:12px; font-weight:600; cursor:pointer; }
+  .btn { background:#2a2f40; border:none; color:#e9e9e9; border-radius:8px; padding:4px 10px; font-size:11px; font-weight:600; cursor:pointer; }
   .btn:hover { background:#3a4054; }
   footer { color:#6b7280; font-size:12px; text-align:center; margin-top:8px; }
   @media (max-width:1180px){ .beats .beat:nth-child(-n+25){ display:none; } .hdr .beats-h{ width:247px; } }
