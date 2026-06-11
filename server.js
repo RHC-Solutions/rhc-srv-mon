@@ -609,16 +609,15 @@ function uidToName(uid) {
 
 function pm2Jlist(user, pm2Home) {
   return new Promise((resolve) => {
-    // sudo -u so a dead daemon never gets respawned as root inside a user dir
-    execFile('sudo', ['-n', '-u', user, 'env', `PM2_HOME=${pm2Home}`, 'pm2', 'jlist'],
+    execFile('sudo', ['-n', '-H', '-u', user, 'sh', '-c',
+      `PM2_HOME='${pm2Home}' pm2 jlist --no-color 2>/dev/null | grep -E '^\\[' | head -1`],
       { timeout: EXEC_TIMEOUT, maxBuffer: 16 * 1024 * 1024 },
       (err, stdout) => {
         if (err && !stdout) return resolve({ error: String(err.code || err.signal || err.message) });
-        const start = stdout.indexOf('[');
-        const end = stdout.lastIndexOf(']');
-        if (start === -1 || end === -1) return resolve({ error: 'no JSON in pm2 jlist output' });
-        try { resolve({ procs: JSON.parse(stdout.slice(start, end + 1)) }); }
-        catch (e) { resolve({ error: 'JSON parse failed' }); }
+        try {
+          const procs = JSON.parse(stdout.trim());
+          resolve({ procs });
+        } catch (e) { resolve({ error: 'JSON parse failed' }); }
       });
   });
 }
@@ -869,6 +868,8 @@ const PAGE = `<!doctype html>
   .site-card .procs .prow .pstat.up { color:#5cdd8b; }
   .site-card .procs .prow .pstat.down { color:#dc3545; }
   .site-card .procs .prow .pstat .dim { color:#6b7280; }
+  .btn { background:#2a2f40; border:none; color:#e9e9e9; border-radius:8px; padding:6px 14px; font-size:12px; font-weight:600; cursor:pointer; }
+  .btn:hover { background:#3a4054; }
   footer { color:#6b7280; font-size:12px; text-align:center; margin-top:8px; }
   @media (max-width:1180px){ .beats .beat:nth-child(-n+25){ display:none; } .hdr .beats-h{ width:247px; } }
   @media (max-width:860px){ .beats, .hdr .beats-h { display:none; } }
@@ -947,6 +948,9 @@ function rowHtml(p, userLabel){
   const cpuCls = p.cpu>=80?'hot':(p.cpu>=40?'warm':'');
   const memCls = p.memory>=1073741824?'warm':'';
   const rstCls = p.restarts>=1000?'hot':(p.restarts>=50?'warm':'');
+  const actions = up
+    ? '<button class="btn small" onclick="pm2Action(\'stop\', \''+userLabel+'\', \''+esc(p.name)+'\')">⏹</button>'
+    : '<button class="btn small" onclick="pm2Action(\'start\', \''+userLabel+'\', \''+esc(p.name)+'\')">▶</button>';
   return '<div class="row">'
     + '<div class="stat"><span class="pill '+(up?'up':'down')+'">'+(up?'Up':'Down')+'</span></div>'
     + '<div class="meta"><div class="name">'+esc(p.name)+'</div>'
@@ -956,6 +960,7 @@ function rowHtml(p, userLabel){
     + '<div class="col '+memCls+'">'+fmtMem(p.memory)+'</div>'
     + '<div class="col '+rstCls+'">'+p.restarts+'</div>'
     + '<div class="pct '+pctCls(p.uptime24h)+'">'+pct+'</div>'
+    + '<div class="col">'+actions+' <button class="btn small" onclick="pm2Action(\'restart\', \''+userLabel+'\', \''+esc(p.name)+'\')">⟳</button></div>'
     + '</div>';
 }
 
@@ -1481,6 +1486,14 @@ async function refresh(){
   else if (state.tab==='updates') renderUpdates();
   else renderSites();
 }
+async function pm2Action(action, user, app) {
+  try {
+    const r = await fetch('api/pm2/' + action + '/' + user + '/' + app, { method: 'POST' });
+    const data = await r.json();
+    alert(data.success ? (action + ' sent') : ('Error: ' + data.output));
+    refresh();
+  } catch(e) { alert('Error: ' + e); }
+}
 setTab(state.tab);
 refresh(); setInterval(refresh, 10000);
 </script>
@@ -1566,6 +1579,23 @@ const server = http.createServer((req, res) => {
   if (url === '/api/sites') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify(sitesCache || { sites: [], generated_at: null }));
+  }
+  if (url.startsWith('/api/pm2/') && req.method === 'POST') {
+    const parts = url.slice('/api/pm2/'.length).split('/');
+    const action = parts[0];
+    const targetUser = parts[1];
+    const appName = parts[2];
+    const pm2Home = `/home/${targetUser}/.pm2`;
+    const cmd = action === 'start' ? 'start' : action === 'stop' ? 'stop' : 'restart';
+    execFile('sudo', ['-n', '-u', targetUser, 'sh', '-c',
+      `PM2_HOME=${pm2Home} pm2 ${cmd} ${appName} 2>&1`],
+      { timeout: 30000 },
+      (err, stdout) => {
+        const result = { action, user: targetUser, app: appName, success: !err, output: stdout.trim() };
+        res.writeHead(err ? 500 : 200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      });
+    return;
   }
   if (url === '/api/sites/check' && req.method === 'POST') {
     collectSites().then((data) => {
