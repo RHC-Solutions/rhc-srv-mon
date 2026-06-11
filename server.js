@@ -1293,6 +1293,23 @@ const PAGE = `<!doctype html>
   .group h2 .pcounts { font-weight:400; font-size:12px; color:#9ca3af; margin-left:8px; }
   .group h2 .pcounts .up { color:#5cdd8b; }
   .group h2 .pcounts .down { color:#ff8088; }
+  /* Toasts (replaces alert()) */
+  #toast-host { position:fixed; bottom:18px; right:18px; display:flex; flex-direction:column; gap:8px; z-index:9999; max-width:min(420px, calc(100vw - 36px)); pointer-events:none; }
+  .toast { background:#1e2230; border:1px solid #2a2f40; border-left:3px solid #6b7280; color:#e9e9e9; border-radius:10px; padding:10px 14px; font-size:13px; box-shadow:0 6px 20px rgba(0,0,0,.4); animation:toast-in .18s ease-out; pointer-events:auto; display:flex; align-items:flex-start; gap:10px; }
+  .toast.fade { animation:toast-out .25s ease-in forwards; }
+  .toast.success { border-left-color:#5cdd8b; }
+  .toast.error   { border-left-color:#dc3545; }
+  .toast.warn    { border-left-color:#f8a306; }
+  .toast .ico { flex:0 0 auto; font-size:14px; line-height:1.4; }
+  .toast .body { flex:1; min-width:0; }
+  .toast .body pre { margin:6px 0 0; padding:6px 8px; background:#12141d; border-radius:6px; max-height:120px; overflow:auto; color:#cbd5e1; font-size:11.5px; white-space:pre-wrap; word-break:break-word; }
+  .toast .x { flex:0 0 auto; cursor:pointer; color:#6b7280; font-size:14px; user-select:none; line-height:1.2; padding:0 2px; }
+  .toast .x:hover { color:#e9e9e9; }
+  @keyframes toast-in  { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes toast-out { to { opacity:0; transform:translateY(8px); } }
+  /* Inline two-step confirm button state */
+  .arm-confirm { background:#5a1f25 !important; color:#ff8088 !important; border-color:#7a2d35 !important; animation:arm-pulse 1.2s ease-in-out infinite; }
+  @keyframes arm-pulse { 0%,100%{ box-shadow:0 0 0 0 rgba(220,53,69,.4); } 50%{ box-shadow:0 0 0 4px rgba(220,53,69,0); } }
   footer { color:#6b7280; font-size:12px; text-align:center; margin-top:8px; }
   @media (max-width:1180px){ .beats .beat:nth-child(-n+25){ display:none; } .hdr .beats-h{ width:247px; } }
   @media (max-width:860px){ .beats, .hdr .beats-h { display:none; } }
@@ -1334,6 +1351,7 @@ const PAGE = `<!doctype html>
   <div id="modulesview" style="display:none"></div>
   <footer>auto-refresh 10s · heartbeat = <span id="ivl">60</span>s samples · 🟩 up · 🟥 down · 🟧 restarted</footer>
 </div>
+<div id="toast-host"></div>
 <script>
 function esc(t){ return String(t).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function fmtMem(b){ if(!b) return '0 MB'; const mb=b/1048576; return mb>=1024 ? (mb/1024).toFixed(1)+' GB' : mb.toFixed(0)+' MB'; }
@@ -1341,6 +1359,50 @@ function fmtUp(ms){ if(ms==null) return '–'; const s=Math.floor(ms/1000);
   if(s<3600) return Math.floor(s/60)+'m'; if(s<86400) return Math.floor(s/3600)+'h';
   return Math.floor(s/86400)+'d '+Math.floor(s%86400/3600)+'h'; }
 function pctCls(p){ return p==null?'':(p>=99?'good':(p>=90?'mid':'poor')); }
+
+// In-page toast (replaces alert/window.alert/Notification — never opens a browser dialog)
+function toast(msg, type, opts){
+  const host = document.getElementById('toast-host'); if (!host) return;
+  type = type || 'info';
+  const o = opts || {};
+  const ms = o.duration != null ? o.duration : (type==='error' ? 8000 : 4000);
+  const ico = type==='success'?'✅':type==='error'?'❌':type==='warn'?'⚠️':'ℹ️';
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  let inner = '<span class="ico">'+ico+'</span><div class="body">'+esc(msg||'');
+  if (o.detail) inner += '<pre>'+esc(o.detail)+'</pre>';
+  inner += '</div><span class="x" title="dismiss">×</span>';
+  el.innerHTML = inner;
+  const close = () => { el.classList.add('fade'); setTimeout(() => el.remove(), 250); };
+  el.querySelector('.x').addEventListener('click', close);
+  host.appendChild(el);
+  if (ms > 0) setTimeout(close, ms);
+  return el;
+}
+
+// Two-step inline confirm (replaces window.confirm — never opens a browser dialog)
+const _armed = new WeakMap();
+function armConfirm(btn, armedLabel, onConfirm){
+  if (!btn) return;
+  if (_armed.has(btn)) {            // Second click → execute
+    const t = _armed.get(btn);
+    clearTimeout(t.timer);
+    btn.textContent = t.original;
+    btn.classList.remove('arm-confirm');
+    _armed.delete(btn);
+    try { onConfirm(); } catch(e) { toast('Error: '+e.message, 'error'); }
+    return;
+  }
+  const original = btn.textContent;
+  btn.textContent = armedLabel;
+  btn.classList.add('arm-confirm');
+  const timer = setTimeout(() => {
+    btn.textContent = original;
+    btn.classList.remove('arm-confirm');
+    _armed.delete(btn);
+  }, 5000);
+  _armed.set(btn, { original, timer });
+}
 
 let lastData = null, lastDb = null;
 const state = Object.assign({
@@ -2007,18 +2069,18 @@ function renderModules(){
   }));
   view.querySelectorAll('[data-update-all]').forEach(b => b.addEventListener('click', () => {
     const n = b.dataset.updateCount;
-    if (!confirm('Update all '+n+' outdated packages to @latest in this project?\\n\\nThis runs the package manager and modifies package.json + lockfile. Make sure the working tree is committed.')) return;
-    triggerModuleUpdate(b.dataset.updateAll, b.dataset.updateUser, []);
+    armConfirm(b, '⚠ Click again to confirm · ' + n + ' pkg' + (n==='1'?'':'s'),
+      () => triggerModuleUpdate(b.dataset.updateAll, b.dataset.updateUser, []));
   }));
   const mr = document.getElementById('modRefresh');
   if (mr) mr.addEventListener('click', () => triggerModulesRescan());
   const cl = document.getElementById('modClearLog');
-  if (cl) cl.addEventListener('click', async () => {
-    if (!confirm('Clear update log?')) return;
+  if (cl) cl.addEventListener('click', () => armConfirm(cl, '⚠ Click again to clear', async () => {
     await fetch('api/modules/log', { method: 'DELETE' });
     if (lastModules) lastModules.updateLog = [];
     renderModules();
-  });
+    toast('Update log cleared', 'info');
+  }));
 }
 
 let modulesPollTimer = null;
@@ -2041,13 +2103,14 @@ async function triggerModulesRescan(){
     const r = await fetch('api/modules/check', { method:'POST' });
     if (!r.ok && r.status !== 202) {
       const e = await r.json().catch(()=>({}));
-      alert(e.error || 'Rescan failed');
+      toast(e.error || 'Rescan failed', 'error');
       return;
     }
     if (lastModules) lastModules.scanInProgress = true;
     if (state.tab === 'modules') renderModules();
     ensureModulesPoll(true);
-  } catch(e) { alert('Error: '+e.message); }
+    toast('Rescan started', 'info');
+  } catch(e) { toast('Error: '+e.message, 'error'); }
 }
 
 async function triggerModuleUpdate(dir, user, packages){
@@ -2071,12 +2134,15 @@ async function triggerModuleUpdate(dir, user, packages){
       lastModules = m;
     } catch(_) {}
     if (state.tab === 'modules') renderModules();
-    if (!result.success) {
+    if (result.success) {
+      const pkgs = (result.packages||[]).join(', ');
+      toast('Update succeeded' + (pkgs ? ' · ' + pkgs : ''), 'success');
+    } else {
       const out = (result.output || '').split('\\n').slice(-6).join('\\n');
-      alert('❌ Update failed: ' + (result.error || 'unknown') + (out ? '\\n\\n' + out : ''));
+      toast('Update failed: ' + (result.error || 'unknown'), 'error', { detail: out, duration: 12000 });
     }
   } catch(e) {
-    alert('Error: '+e.message);
+    toast('Error: '+e.message, 'error');
     // Clear the optimistic state
     if (lastModules && lastModules.activeUpdates) delete lastModules.activeUpdates[dir];
     if (state.tab === 'modules') renderModules();
@@ -2164,16 +2230,16 @@ async function clearUpdateLog(){
 async function testTelegram(){
   if (!lastUpdates || !lastUpdates.telegram) return;
   const tel = lastUpdates.telegram;
-  if (!tel.botToken || !tel.chatId) { alert('Save bot token and chat ID first'); return; }
+  if (!tel.botToken || !tel.chatId) { toast('Save bot token and chat ID first', 'warn'); return; }
   try {
     const res = await fetch('https://api.telegram.org/bot' + tel.botToken + '/sendMessage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: tel.chatId, text: '🔔 *PM2 Status* — Telegram notification is working!', parse_mode: 'Markdown' }),
     });
-    if (res.ok) alert('✅ Test message sent! Check your Telegram.');
-    else { const j = await res.json(); alert('❌ Error: ' + (j.description || res.status)); }
-  } catch(e){ alert('❌ Failed: ' + e.message); }
+    if (res.ok) toast('Test message sent — check your Telegram.', 'success');
+    else { const j = await res.json(); toast('Telegram error: ' + (j.description || res.status), 'error'); }
+  } catch(e){ toast('Telegram failed: ' + e.message, 'error'); }
 }
 
 function setTab(tab){
@@ -2219,9 +2285,10 @@ async function pm2Action(action, user, app) {
   try {
     const r = await fetch('api/pm2/' + action + '/' + user + '/' + app, { method: 'POST' });
     const data = await r.json();
-    alert(data.success ? (action + ' sent') : ('Error: ' + data.output));
+    if (data.success) toast(action + ' sent · ' + app, 'success');
+    else toast('Error', 'error', { detail: data.output || 'unknown', duration: 10000 });
     refresh();
-  } catch(e) { alert('Error: ' + e); }
+  } catch(e) { toast('Error: ' + e, 'error'); }
 }
 setTab(state.tab);
 refresh(); setInterval(refresh, 10000);
