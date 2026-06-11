@@ -590,6 +590,8 @@ let modulesScanInProgress = false;
 let modulesScanProgress = { total: 0, done: 0, current: null, startedAt: null };
 const moduleUpdatesActive = {};   // key: realpath dir -> { user, packages, startedAt }
 let moduleUpdateLog = [];          // recent results, newest last
+let moduleUpdateAllRunning = false;   // a global "update all projects" pass is in flight
+let moduleUpdateAllProgress = null;   // { total, done, current, succeeded, failed, startedAt, finishedAt }
 
 function loadModulesCache() {
   try {
@@ -1223,6 +1225,49 @@ async function runModuleUpdate(dir, user, packagesIn) {
   }
 }
 
+// Manual "update everything" — sequentially update ALL outdated packages in every
+// scanned project (all severities, no exclusions). Each project is run through the
+// normal runModuleUpdate path, so every project lands its own entry in the Recent
+// Updates log and gets a post-update rescan. Distinct from auto-update, which
+// applies severity filters/exclusions and logs to the auto-update log.
+async function runUpdateAllPass() {
+  if (moduleUpdateAllRunning) return { skipped: true, reason: 'already running' };
+  if (!modulesCache || !modulesCache.projects || !modulesCache.projects.length) {
+    return { skipped: true, reason: 'no scan cache; rescan first' };
+  }
+  if (modulesScanInProgress) return { skipped: true, reason: 'scan in progress' };
+
+  const targets = modulesCache.projects.filter(
+    (p) => !p.error && p.outdated && Object.keys(p.outdated).length
+  );
+
+  moduleUpdateAllRunning = true;
+  moduleUpdateAllProgress = {
+    total: targets.length, done: 0, current: null,
+    succeeded: 0, failed: 0, startedAt: new Date().toISOString(), finishedAt: null,
+  };
+
+  try {
+    for (const t of targets) {
+      moduleUpdateAllProgress.current = t.relDir;
+      if (moduleUpdatesActive[t.dir]) { moduleUpdateAllProgress.done++; continue; }
+      let r;
+      try { r = await runModuleUpdate(t.dir, t.user, []); }  // [] => all outdated, re-read fresh
+      catch (e) { r = { success: false, error: e.message }; }
+      if (r && r.success) moduleUpdateAllProgress.succeeded++;
+      else moduleUpdateAllProgress.failed++;
+      moduleUpdateAllProgress.done++;
+    }
+    return { ok: true, progress: { ...moduleUpdateAllProgress } };
+  } finally {
+    moduleUpdateAllRunning = false;
+    if (moduleUpdateAllProgress) {
+      moduleUpdateAllProgress.current = null;
+      moduleUpdateAllProgress.finishedAt = new Date().toISOString();
+    }
+  }
+}
+
 /* ---------------------------------------------------------------- auto-update */
 const AUTO_UPDATE_LOG_MAX = 50;
 const DEFAULT_AUTO_UPDATE = {
@@ -1685,6 +1730,14 @@ const PAGE = `<!doctype html>
   .upd-log-entry .time { color:#6b7280; flex-shrink:0; font-family:monospace; font-size:11px; }
   .upd-log-entry .comp { font-weight:600; flex-shrink:0; min-width:60px; }
   .upd-log-entry .result { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .upd-log-detail { padding:8px 12px; background:#161823; border-radius:6px; margin-top:8px; font-size:12px; }
+  .upd-log-detail.fail { border-left:2px solid #dc3545; }
+  .upd-log-detail.ok   { border-left:2px solid #5cdd8b; }
+  .upd-log-detail .top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .upd-log-detail .top .when { color:#6b7280; font-size:11.5px; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .upd-log-detail .top .ic { font-size:14px; }
+  .upd-log-detail .att { color:#9ca3af; font-size:11.5px; margin-top:4px; font-family:ui-monospace,Menlo,Consolas,monospace; word-break:break-word; }
+  .upd-log-detail pre { margin:6px 0 0; padding:8px 10px; background:#0c0e16; border-radius:6px; max-height:260px; overflow:auto; color:#cbd5e1; font-size:11.5px; white-space:pre-wrap; word-break:break-word; }
   .upd-test-btn { background:#2a2f40; border:none; color:#e9e9e9; border-radius:8px; padding:6px 14px; font-size:12px; cursor:pointer; }
   .upd-test-btn:hover { background:#3a4054; }
   .site-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:14px; }
@@ -1893,7 +1946,7 @@ let lastData = null, lastDb = null;
 const state = Object.assign({
   q:'', f:'all', sort:'group', tab:'pm2',
   sharedOnly:false,
-  modSort:'severity', modFilter:'all', modQ:''
+  modSort:'severity', modFilter:'all', modQ:'', modShowDetailLog:false
 }, JSON.parse(localStorage.getItem('pm2ui') || '{}'));
 function saveState(){ localStorage.setItem('pm2ui', JSON.stringify(state)); }
 
@@ -2380,6 +2433,10 @@ function renderModules(){
   }
   const activeCount = Object.keys(active).length;
   if (activeCount) stamp += ' · ' + activeCount + ' update' + (activeCount>1?'s':'') + ' running…';
+  if (d.updateAllRunning && d.updateAllProgress) {
+    const up = d.updateAllProgress;
+    stamp += ' · Update-all ' + (up.done||0) + '/' + (up.total||'?') + (up.current ? ' · ' + up.current : '');
+  }
   document.getElementById('updated').textContent = stamp;
 
   const banner = document.getElementById('banner');
@@ -2482,6 +2539,17 @@ function renderModules(){
     html += '<button class="'+cls+'" data-modf="'+f[0]+'">'+f[1]+'</button>';
   }
   html += '</div>';
+  const upAllRunning = !!d.updateAllRunning;
+  const upAllBusy = upAllRunning || d.scanInProgress || activeCount > 0;
+  let upAllLabel;
+  if (upAllRunning) {
+    const up = d.updateAllProgress || {};
+    upAllLabel = '⏳ Updating ' + (up.done||0) + '/' + (up.total||'?') + '…';
+  } else {
+    upAllLabel = '⬆ Update all' + (totalOutdated ? ' (' + totalOutdated + ')' : '');
+  }
+  const upAllDisabled = upAllBusy || totalOutdated === 0;
+  html += '<button class="btn" id="modUpdateAll" '+(upAllDisabled?'disabled':'')+' title="Update every outdated package in every scanned project to @latest" style="padding:7px 14px;font-size:12px;background:#3a2d10;color:#f8a306;border-color:#5a4e1f">'+upAllLabel+'</button>';
   html += '<button class="btn" id="modRefresh" '+(d.scanInProgress?'disabled':'')+' style="padding:7px 14px;font-size:12px">'+(d.scanInProgress?'⏳ Scanning…':'🔄 Rescan')+'</button>';
   html += '</div>';
 
@@ -2576,11 +2644,40 @@ function renderModules(){
 
   // Recent updates log
   const log = (d.updateLog || []).slice().reverse();
+  const detail = !!state.modShowDetailLog;
   html += '<div class="mod-card"><div class="head"><h3 style="margin:0">Recent Updates <span style="font-weight:400;font-size:12px;color:#6b7280">'+log.length+' entries</span></h3>';
+  html += '<div style="display:flex;gap:8px;align-items:center">';
+  if (log.length) html += '<button class="btn" id="modDetailToggle" title="Show full command output for each update" style="font-size:11px;padding:4px 10px;'+(detail?'background:#1f3a4e;color:#7cc7ff;border-color:#2e5a6e':'')+'">'+(detail?'▾ Detailed log':'▸ Show detailed log')+'</button>';
   if (log.length) html += '<button class="btn" id="modClearLog" style="font-size:11px;padding:4px 10px;background:#3a2020;color:#ff8088">🗑 Clear</button>';
+  html += '</div>';
   html += '</div>';
   if (!log.length) {
     html += '<div class="mod-empty">No updates have been run yet.</div>';
+  } else if (detail) {
+    // Detailed view: full package list, attempt chain, auto-fix note, and raw command output.
+    for (const e of log) {
+      const icon = e.success ? '✅' : '❌';
+      const cls = e.success ? 'ok' : 'fail';
+      const dur = e.duration_ms ? Math.round(e.duration_ms/1000)+'s' : '';
+      const allPkgs = (e.packages||[]).join(', ');
+      html += '<div class="upd-log-detail '+cls+'">';
+      html += '<div class="top"><span class="ic">'+icon+'</span>'
+        + '<span class="when">'+new Date(e.timestamp).toLocaleString()+'</span>'
+        + '<strong>'+esc(e.user)+'</strong> · <span style="color:#9ca3af;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px">'+esc(e.relDir)+'</span>'
+        + (e.pm?' <span style="color:#6b7280;font-size:11px;text-transform:uppercase">'+esc(e.pm)+'</span>':'')
+        + (dur?'<span class="auto-stat" style="margin-left:auto">⏱ <span class="v">'+dur+'</span></span>':'')
+        + '</div>';
+      if (allPkgs) html += '<div class="att">📦 '+esc(allPkgs)+'</div>';
+      if (e.attempts && e.attempts.length) {
+        html += '<div class="att">🔁 '+e.attempts.map(a => esc(a.strategy)+(a.success?'✓':'✗')+(a.error?'('+esc(a.error)+')':'')).join(' → ')+'</div>';
+      }
+      if (e.autoFix) html += '<div class="att">🔧 auto-fix: '+esc(e.autoFix)+'</div>';
+      if (e.error) html += '<div class="att" style="color:#ff8088">⚠ '+esc(e.error)+'</div>';
+      const out = (e.output||'').trim();
+      if (out) html += '<pre>'+esc(out)+'</pre>';
+      else if (!e.error) html += '<div class="att" style="color:#6b7280">(no command output captured)</div>';
+      html += '</div>';
+    }
   } else {
     html += '<div class="upd-log">';
     for (const e of log) {
@@ -2678,6 +2775,14 @@ function renderModules(){
   }));
   const mr = document.getElementById('modRefresh');
   if (mr) mr.addEventListener('click', () => triggerModulesRescan());
+  const mua = document.getElementById('modUpdateAll');
+  if (mua) mua.addEventListener('click', () => {
+    const n = totalOutdated;
+    armConfirm(mua, '⚠ Click again · update '+n+' pkg'+(n===1?'':'s')+' across all projects',
+      () => triggerUpdateAllModules());
+  });
+  const mdt = document.getElementById('modDetailToggle');
+  if (mdt) mdt.addEventListener('click', () => { state.modShowDetailLog = !state.modShowDetailLog; saveState(); renderModules(); });
   const cl = document.getElementById('modClearLog');
   if (cl) cl.addEventListener('click', () => armConfirm(cl, '⚠ Click again to clear', async () => {
     await fetch('api/modules/log', { method: 'DELETE' });
@@ -2773,7 +2878,7 @@ function ensureModulesPoll(active) {
         const m = await fetch('api/modules').then(r => r.json());
         lastModules = m;
         if (state.tab === 'modules') renderModules();
-        const stillActive = m.scanInProgress || m.autoUpdateRunning || (m.activeUpdates && Object.keys(m.activeUpdates).length);
+        const stillActive = m.scanInProgress || m.autoUpdateRunning || m.updateAllRunning || (m.activeUpdates && Object.keys(m.activeUpdates).length);
         if (!stillActive) { clearInterval(modulesPollTimer); modulesPollTimer = null; }
       } catch(_) {}
     }, 3000);
@@ -2829,6 +2934,21 @@ async function triggerModuleUpdate(dir, user, packages){
     if (lastModules && lastModules.activeUpdates) delete lastModules.activeUpdates[dir];
     if (state.tab === 'modules') renderModules();
   }
+}
+
+async function triggerUpdateAllModules(){
+  try {
+    const r = await fetch('api/modules/update-all', { method:'POST' });
+    if (!r.ok && r.status !== 202) {
+      const e = await r.json().catch(()=>({}));
+      toast(e.error || 'Update all failed to start', 'error');
+      return;
+    }
+    if (lastModules) lastModules.updateAllRunning = true;
+    if (state.tab === 'modules') renderModules();
+    ensureModulesPoll(true);
+    toast('Updating all outdated packages…', 'info');
+  } catch(e) { toast('Error: '+e.message, 'error'); }
 }
 
 async function checkUpdates(){
@@ -3088,8 +3208,8 @@ const server = http.createServer((req, res) => {
   if (url === '/api/modules') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify(modulesCache
-      ? { ...modulesCache, scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress, activeUpdates: moduleUpdatesActive, updateLog: moduleUpdateLog, autoUpdate: getAutoUpdateConfig(), autoUpdateLog, autoUpdateRunning }
-      : { generated_at: null, summary: {}, projects: [], outdated: [], scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress, activeUpdates: moduleUpdatesActive, updateLog: moduleUpdateLog, autoUpdate: getAutoUpdateConfig(), autoUpdateLog, autoUpdateRunning }));
+      ? { ...modulesCache, scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress, activeUpdates: moduleUpdatesActive, updateLog: moduleUpdateLog, updateAllRunning: moduleUpdateAllRunning, updateAllProgress: moduleUpdateAllProgress, autoUpdate: getAutoUpdateConfig(), autoUpdateLog, autoUpdateRunning }
+      : { generated_at: null, summary: {}, projects: [], outdated: [], scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress, activeUpdates: moduleUpdatesActive, updateLog: moduleUpdateLog, updateAllRunning: moduleUpdateAllRunning, updateAllProgress: moduleUpdateAllProgress, autoUpdate: getAutoUpdateConfig(), autoUpdateLog, autoUpdateRunning }));
   }
   if (url === '/api/modules/check' && req.method === 'POST') {
     if (modulesScanInProgress) {
@@ -3121,6 +3241,20 @@ const server = http.createServer((req, res) => {
       });
     });
     return;
+  }
+  if (url === '/api/modules/update-all' && req.method === 'POST') {
+    if (moduleUpdateAllRunning) {
+      res.writeHead(409, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'update-all already running', progress: moduleUpdateAllProgress }));
+    }
+    if (modulesScanInProgress) {
+      res.writeHead(409, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'scan in progress' }));
+    }
+    // Kick off in the background; the UI polls /api/modules for progress + per-dir activeUpdates.
+    runUpdateAllPass().catch((e) => console.error('update-all failed:', e.message));
+    res.writeHead(202, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: true, started: true }));
   }
   if (url === '/api/modules/log' && req.method === 'DELETE') {
     moduleUpdateLog = [];
