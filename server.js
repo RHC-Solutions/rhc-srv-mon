@@ -579,6 +579,7 @@ const MODULES_INTERVAL_MS = 6 * 3600_000; // refresh every 6h
 const MOD_UPDATE_TIMEOUT = 5 * 60_000;   // per-update timeout
 const MOD_UPDATE_LOG_MAX = 50;
 const PKG_NAME_RE = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
+const USER_NAME_RE = /^[a-z_][a-z0-9_-]{0,31}$/;
 const MOD_SKIP_DIRS = new Set([
   'node_modules', 'dist', 'build', '.next', '.nuxt', '.cache', 'cache',
   'coverage', '.git', 'tmp', '.turbo', '.vite', '.parcel-cache', '.svelte-kit',
@@ -613,9 +614,50 @@ function saveModulesCache() {
 }
 
 function detectPM(dir) {
+  try { if (fs.existsSync(path.join(dir, 'bun.lockb')) || fs.existsSync(path.join(dir, 'bun.lock'))) return 'bun'; } catch {}
   try { if (fs.existsSync(path.join(dir, 'pnpm-lock.yaml'))) return 'pnpm'; } catch {}
   try { if (fs.existsSync(path.join(dir, 'yarn.lock'))) return 'yarn'; } catch {}
   return 'npm';
+}
+
+// Find bun in standard locations. Returns absolute path or null.
+// If found only in a per-user dir (e.g. /home/rh-x/.bun/bin/bun) that other
+// project users can't traverse, copy it to /usr/local/bin/bun once so every
+// project user can execute it.
+let _bunPathCache = undefined;
+function findBun() {
+  if (_bunPathCache !== undefined) return _bunPathCache;
+  // Prefer system-wide locations
+  for (const c of ['/usr/local/bin/bun', '/usr/bin/bun']) {
+    try {
+      const st = fs.statSync(c);
+      if (st.isFile() && (st.mode & 0o111)) { _bunPathCache = c; return c; }
+    } catch (_) {}
+  }
+  // Otherwise search user homes
+  let userBun = null;
+  try {
+    for (const u of fs.readdirSync('/home')) {
+      const cand = `/home/${u}/.bun/bin/bun`;
+      try {
+        const st = fs.statSync(cand);
+        if (st.isFile() && (st.mode & 0o111)) { userBun = cand; break; }
+      } catch (_) {}
+    }
+  } catch (_) {}
+  if (!userBun) { _bunPathCache = null; return null; }
+  // Try to copy to /usr/local/bin/bun so every project user can reach it.
+  // We run as root, so this should succeed; fall back to the per-user path if not.
+  try {
+    fs.copyFileSync(userBun, '/usr/local/bin/bun');
+    fs.chmodSync('/usr/local/bin/bun', 0o755);
+    console.log('rhc-srv-mon: installed bun from', userBun, '-> /usr/local/bin/bun');
+    _bunPathCache = '/usr/local/bin/bun';
+  } catch (e) {
+    console.error('rhc-srv-mon: could not copy bun to /usr/local/bin (' + e.message + '), falling back to ' + userBun);
+    _bunPathCache = userBun;
+  }
+  return _bunPathCache;
 }
 
 // Walk a tree looking for installed projects (dirs with both package.json AND node_modules).
@@ -899,13 +941,24 @@ function buildInstallCmd(dir, pm, packages, extraFlags) {
   if (pm === 'yarn') {
     return `cd '${dirEsc}' && yarn ${packages.length ? 'add' : 'install'} ${flags} ${pkgsAtLatest} 2>&1`;
   }
+  if (pm === 'bun') {
+    const bun = findBun();
+    if (!bun) return null;
+    const bunEsc = bun.replace(/'/g, `'\\''`);
+    return `cd '${dirEsc}' && '${bunEsc}' ${packages.length ? 'add' : 'install'} ${flags} ${pkgsAtLatest} 2>&1`;
+  }
   return null;
 }
 
 // Raw exec — NO validation; callers must validate inputs before calling.
 function _runInstall(dir, user, pm, packages, extraFlags) {
   const shCmd = buildInstallCmd(dir, pm, packages, extraFlags);
-  if (!shCmd) return Promise.resolve({ success: false, error: 'unsupported PM: ' + pm, output: '', duration_ms: 0 });
+  if (!shCmd) {
+    const reason = pm === 'bun'
+      ? 'bun binary not found in /usr/bin, /usr/local/bin, or /home/*/.bun/bin/bun'
+      : 'unsupported PM: ' + pm;
+    return Promise.resolve({ success: false, error: reason, output: '', duration_ms: 0 });
+  }
   const startedAt = Date.now();
   return new Promise((resolve) => {
     const isRoot = user === 'root';
@@ -924,55 +977,197 @@ function _runInstall(dir, user, pm, packages, extraFlags) {
   });
 }
 
-// Detect a fix strategy from npm output. Returns a strategy id or null.
+// Detect a fix strategy from npm output. Returns { strategy, ...metadata } or null.
 function detectAutoFix(output, error) {
   const out = (output || '') + ' ' + (error || '');
-  // Peer-dep conflicts → --force usually resolves
-  if (/ERESOLVE|Conflicting peer dependency/.test(out)) return 'force';
-  // package.json overrides clash with direct deps → --force
-  if (/EOVERRIDE|Override for [^\s]+ conflicts/.test(out)) return 'force';
-  // Lockfile out of sync → resync first then retry
-  if (/lockfile.*out of sync|EUSAGE|Missing.*from lock file|npm error EUSAGE/i.test(out)) return 'sync-lockfile';
-  // npm internal "null.matches" — typical when installing a single pkg into a tree
-  // with no lockfile or with corrupt cache. Resync (full install) first usually fixes it.
-  if (/Cannot read propert(?:y|ies) of null.*matches/i.test(out)) return 'sync-lockfile';
-  // Network errors → one retry
-  if (/ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|FETCH_ERROR|registry .* unreachable|socket hang up/i.test(out)) return 'retry';
+  // Permission errors — chown back to project owner (most decisive: fixes the root cause)
+  // Covers npm/pnpm/yarn ("EACCES"/"EPERM"/"operation was rejected") + bun ("error ACCES" / "GlobError")
+  if (/operation was rejected by your operating system|EACCES|EPERM|do not have the permissions|permission denied|\berror ACCES\b|GlobError/i.test(out)) {
+    return { strategy: 'fix-perms' };
+  }
+  // EOVERRIDE — extract conflicting package so we can drop it from the install list
+  // npm 11+ throws this when a package is in both `dependencies` and `overrides`.
+  // --force does NOT bypass it; the only programmatic recovery is to skip the package.
+  const eo = out.match(/Override for ((?:@[^@\s/]+\/)?[^@\s]+?)(?:@\S+)? conflicts/i);
+  if (eo) return { strategy: 'eoverride-skip', package: eo[1] };
+  if (/\bEOVERRIDE\b/.test(out)) return { strategy: 'eoverride-skip' };
+  // "Cannot read properties of null (reading 'matches')" — corrupt node_modules tree
+  // or stale npm cache. Reliable fix: rm -rf node_modules && npm install.
+  if (/Cannot read propert(?:y|ies) of null.*matches/i.test(out)) return { strategy: 'clean-reinstall' };
+  // Lockfile out of sync (EUSAGE) — same recovery path
+  if (/lockfile.*out of sync|EUSAGE|Missing.*from lock file|npm error EUSAGE/i.test(out)) return { strategy: 'clean-reinstall' };
+  // Peer-dep conflicts — try --force
+  if (/ERESOLVE|Conflicting peer dependency/.test(out)) return { strategy: 'force' };
+  // Network — single retry
+  if (/ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|FETCH_ERROR|socket hang up|registry .* unreachable/i.test(out)) return { strategy: 'retry' };
   return null;
 }
 
-// Run an update for one project with auto-fix retry chain. Returns { success, attempts, finalOutput, autoFix, packages }.
-// Caller is responsible for: lock acquisition (moduleUpdatesActive[dir]) and post-rescan.
+// Generic shell command runner for non-install helpers (chown, rm, etc.)
+function _runShell(asUser, shCmd, timeoutMs) {
+  const startedAt = Date.now();
+  return new Promise((resolve) => {
+    const isRoot = asUser === 'root';
+    const bin = isRoot ? 'sh' : 'sudo';
+    const args = isRoot ? ['-c', shCmd] : ['-n', '-H', '-u', asUser, 'sh', '-c', shCmd];
+    execFile(bin, args, { timeout: timeoutMs || 60_000, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout) => {
+        const output = (stdout || '').toString();
+        resolve({
+          success: !err,
+          error: err ? String(err.code || err.signal || err.message) : null,
+          output,
+          duration_ms: Date.now() - startedAt,
+        });
+      });
+  });
+}
+
+// Strategy: clean-reinstall — destroy node_modules and reinstall from package.json.
+// Safe because node_modules is always regenerable; lockfile is preserved.
+async function _runCleanReinstall(project) {
+  if (!USER_NAME_RE.test(project.user)) return { success: false, error: 'invalid user: ' + project.user, output: '', duration_ms: 0 };
+  const dirEsc = project.dir.replace(/'/g, `'\\''`);
+  let shCmd;
+  if (project.pm === 'npm') {
+    shCmd = `cd '${dirEsc}' && rm -rf node_modules && npm cache verify >/dev/null 2>&1; npm install --legacy-peer-deps --no-fund --no-audit --no-progress 2>&1`;
+  } else if (project.pm === 'pnpm') {
+    shCmd = `cd '${dirEsc}' && rm -rf node_modules && pnpm install 2>&1`;
+  } else if (project.pm === 'yarn') {
+    shCmd = `cd '${dirEsc}' && rm -rf node_modules && yarn install 2>&1`;
+  } else if (project.pm === 'bun') {
+    const bun = findBun();
+    if (!bun) return { success: false, error: 'bun not available', output: '', duration_ms: 0 };
+    const bunEsc = bun.replace(/'/g, `'\\''`);
+    shCmd = `cd '${dirEsc}' && rm -rf node_modules && '${bunEsc}' install 2>&1`;
+  } else {
+    return { success: false, error: 'unsupported pm: ' + project.pm, output: '', duration_ms: 0 };
+  }
+  return _runShell(project.user, shCmd, MOD_UPDATE_TIMEOUT);
+}
+
+// Strategy: fix-perms — chown the project tree + ~/.npm cache back to project owner.
+// Runs as root (the page runs as root anyway). Username validated.
+// We chown the whole project tree (not just node_modules) because CloudPanel
+// dual-user setups often have mixed ownership in subdirectories that breaks
+// install / bun-workspace traversal.
+async function _runFixPerms(project) {
+  if (!USER_NAME_RE.test(project.user)) return { success: false, error: 'invalid user: ' + project.user, output: '', duration_ms: 0 };
+  const dirEsc = project.dir.replace(/'/g, `'\\''`);
+  const homeEsc = `/home/${project.user}`.replace(/'/g, `'\\''`);
+  const u = project.user;
+  const shCmd = `set +e
+GID="$(id -gn '${u}' 2>/dev/null)"
+if [ -z "$GID" ]; then echo "user ${u} not found"; exit 1; fi
+echo "fixing perms: ${u}:$GID for ${dirEsc}"
+if [ -d '${dirEsc}' ]; then
+  # Count files not owned by the project user before chown
+  BEFORE=$(find '${dirEsc}' -not -user '${u}' 2>/dev/null | wc -l)
+  chown -R '${u}':"$GID" '${dirEsc}' 2>/dev/null
+  AFTER=$(find '${dirEsc}' -not -user '${u}' 2>/dev/null | wc -l)
+  echo "project tree: $BEFORE files were misowned, $AFTER remain after chown"
+fi
+if [ -d '${homeEsc}/.npm' ]; then
+  chown -R '${u}':"$GID" '${homeEsc}/.npm' 2>/dev/null && echo "chowned ~/.npm"
+fi
+echo "done"
+exit 0`;
+  return _runShell('root', shCmd, 300_000);
+}
+
+// Run an update for one project with auto-fix retry chain.
+// Returns { success, attempts, finalOutput, autoFix, finalPackages }.
 async function runProjectUpdateWithFix(project, packages, withAutoFix) {
   const attempts = [];
+  let finalPackages = packages.slice();
+
   // Attempt 1: default flags
   let r = await _runInstall(project.dir, project.user, project.pm, packages, '');
   attempts.push({ strategy: 'normal', success: r.success, error: r.error, duration_ms: r.duration_ms });
-  if (r.success || !withAutoFix) return { success: r.success, attempts, finalOutput: r.output, autoFix: null };
+  if (r.success || !withAutoFix) {
+    return { success: r.success, attempts, finalOutput: r.output, finalPackages, autoFix: null };
+  }
 
   const fix = detectAutoFix(r.output, r.error);
-  if (!fix) return { success: false, attempts, finalOutput: r.output, autoFix: null };
+  if (!fix) return { success: false, attempts, finalOutput: r.output, finalPackages, autoFix: null };
 
-  if (fix === 'force') {
+  // Strategy: --force
+  if (fix.strategy === 'force') {
     const r2 = await _runInstall(project.dir, project.user, project.pm, packages, '--force');
     attempts.push({ strategy: 'force', success: r2.success, error: r2.error, duration_ms: r2.duration_ms });
-    return { success: r2.success, attempts, finalOutput: r2.output, autoFix: 'force' };
+    return { success: r2.success, attempts, finalOutput: r2.output, finalPackages, autoFix: 'force' };
   }
-  if (fix === 'sync-lockfile') {
-    // Run a plain install (no specific packages) to bring lockfile back in sync
-    const r0 = await _runInstall(project.dir, project.user, project.pm, [], '');
-    attempts.push({ strategy: 'sync-lockfile', success: r0.success, error: r0.error, duration_ms: r0.duration_ms });
-    if (!r0.success) return { success: false, attempts, finalOutput: r0.output, autoFix: 'sync-lockfile' };
+
+  // Strategy: EOVERRIDE — iteratively drop conflicting packages and retry.
+  // npm reports one conflict at a time; loop up to 10 times accumulating skips.
+  if (fix.strategy === 'eoverride-skip') {
+    let current = packages.slice();
+    const skippedAccum = [];
+
+    if (!fix.package || !current.includes(fix.package)) {
+      // Pre-existing project config bug (override conflicts with a package not in our update list)
+      return { success: false, attempts, finalOutput: r.output, finalPackages: current, autoFix: 'eoverride-skip:needs-manual-fix' };
+    }
+    current = current.filter((p) => p !== fix.package);
+    skippedAccum.push(fix.package);
+
+    let lastOutput = '';
+    for (let iter = 0; iter < 10 && current.length > 0; iter++) {
+      const r2 = await _runInstall(project.dir, project.user, project.pm, current, '');
+      attempts.push({ strategy: 'skip-' + skippedAccum[skippedAccum.length - 1], success: r2.success, error: r2.error, duration_ms: r2.duration_ms });
+      lastOutput = r2.output;
+      if (r2.success) {
+        finalPackages = current;
+        return { success: true, attempts, finalOutput: r2.output, finalPackages, autoFix: 'eoverride-skip:' + skippedAccum.join(',') };
+      }
+      const next = detectAutoFix(r2.output, r2.error);
+      if (!next || next.strategy !== 'eoverride-skip' || !next.package || !current.includes(next.package)) {
+        // Different error or unrecognizable conflict — stop
+        return { success: false, attempts, finalOutput: r2.output, finalPackages: current, autoFix: 'eoverride-skip:' + skippedAccum.join(',') };
+      }
+      current = current.filter((p) => p !== next.package);
+      skippedAccum.push(next.package);
+    }
+    return { success: false, attempts, finalOutput: lastOutput, finalPackages: current, autoFix: 'eoverride-skip:' + skippedAccum.join(',') + ':exhausted' };
+  }
+
+  // Strategy: clean-reinstall — rm -rf node_modules, full install, then retry our targeted install
+  if (fix.strategy === 'clean-reinstall') {
+    let r0 = await _runCleanReinstall(project);
+    attempts.push({ strategy: 'clean-reinstall', success: r0.success, error: r0.error, duration_ms: r0.duration_ms });
+    // If clean reinstall failed due to permissions, chown and retry the clean reinstall once
+    if (!r0.success && /EACCES|EPERM|permission denied|operation was rejected/i.test(r0.output || '')) {
+      const rp = await _runFixPerms(project);
+      attempts.push({ strategy: 'fix-perms-fallback', success: rp.success, error: rp.error, duration_ms: rp.duration_ms });
+      if (rp.success) {
+        r0 = await _runCleanReinstall(project);
+        attempts.push({ strategy: 'clean-reinstall-retry', success: r0.success, error: r0.error, duration_ms: r0.duration_ms });
+      }
+    }
+    if (!r0.success) return { success: false, attempts, finalOutput: r0.output, finalPackages, autoFix: 'clean-reinstall' };
     const r2 = await _runInstall(project.dir, project.user, project.pm, packages, '');
-    attempts.push({ strategy: 'retry-after-sync', success: r2.success, error: r2.error, duration_ms: r2.duration_ms });
-    return { success: r2.success, attempts, finalOutput: r2.output, autoFix: 'sync-lockfile' };
+    attempts.push({ strategy: 'retry-after-clean', success: r2.success, error: r2.error, duration_ms: r2.duration_ms });
+    return { success: r2.success, attempts, finalOutput: r2.output, finalPackages, autoFix: 'clean-reinstall' };
   }
-  if (fix === 'retry') {
+
+  // Strategy: fix-perms — chown back to project owner, retry targeted install
+  if (fix.strategy === 'fix-perms') {
+    const rp = await _runFixPerms(project);
+    attempts.push({ strategy: 'fix-perms', success: rp.success, error: rp.error, duration_ms: rp.duration_ms });
+    if (!rp.success) return { success: false, attempts, finalOutput: rp.output, finalPackages, autoFix: 'fix-perms' };
+    const r2 = await _runInstall(project.dir, project.user, project.pm, packages, '');
+    attempts.push({ strategy: 'retry-after-perms', success: r2.success, error: r2.error, duration_ms: r2.duration_ms });
+    return { success: r2.success, attempts, finalOutput: r2.output, finalPackages, autoFix: 'fix-perms' };
+  }
+
+  // Strategy: network retry
+  if (fix.strategy === 'retry') {
     const r2 = await _runInstall(project.dir, project.user, project.pm, packages, '');
     attempts.push({ strategy: 'network-retry', success: r2.success, error: r2.error, duration_ms: r2.duration_ms });
-    return { success: r2.success, attempts, finalOutput: r2.output, autoFix: 'retry' };
+    return { success: r2.success, attempts, finalOutput: r2.output, finalPackages, autoFix: 'retry' };
   }
-  return { success: false, attempts, finalOutput: r.output, autoFix: null };
+
+  return { success: false, attempts, finalOutput: r.output, finalPackages, autoFix: null };
 }
 
 // Validate inputs and run an update for one project. packages is array of npm names; if empty, update all outdated in the project.
