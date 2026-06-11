@@ -596,13 +596,17 @@ function loadModulesCache() {
     if (data && typeof data === 'object') {
       modulesCache = data;
       moduleUpdateLog = Array.isArray(data.updateLog) ? data.updateLog : [];
+      autoUpdateLog = Array.isArray(data.autoUpdateLog) ? data.autoUpdateLog : [];
     }
   } catch (_) { /* first run */ }
 }
 
 function saveModulesCache() {
   try {
-    if (modulesCache) modulesCache.updateLog = moduleUpdateLog;
+    if (modulesCache) {
+      modulesCache.updateLog = moduleUpdateLog;
+      modulesCache.autoUpdateLog = autoUpdateLog;
+    }
     fs.writeFileSync(MODULES_FILE + '.tmp', JSON.stringify(modulesCache));
     fs.renameSync(MODULES_FILE + '.tmp', MODULES_FILE);
   } catch (e) { console.error('modules save failed:', e.message); }
@@ -794,6 +798,7 @@ async function collectModules() {
       }
     }
 
+    const prevAutoUpdate = modulesCache && modulesCache.autoUpdate;
     modulesCache = {
       generated_at: new Date().toISOString(),
       summary: {
@@ -806,6 +811,8 @@ async function collectModules() {
       projects: enriched,
       outdated: rows,
       updateLog: moduleUpdateLog,
+      autoUpdateLog,
+      autoUpdate: prevAutoUpdate || undefined,
     };
     saveModulesCache();
   } catch (e) {
@@ -878,6 +885,96 @@ function appendUpdateLog(entry) {
   saveModulesCache();
 }
 
+function buildInstallCmd(dir, pm, packages, extraFlags) {
+  const dirEsc = dir.replace(/'/g, `'\\''`);
+  const pkgsAtLatest = packages.length ? packages.map((p) => `'${p}@latest'`).join(' ') : '';
+  const flags = (extraFlags || '').trim();
+  if (pm === 'npm') {
+    // Always carry --legacy-peer-deps + --no-fund --no-audit --no-progress; extraFlags adds e.g. --force.
+    return `cd '${dirEsc}' && npm install --legacy-peer-deps --no-fund --no-audit --no-progress ${flags} ${pkgsAtLatest} 2>&1`;
+  }
+  if (pm === 'pnpm') {
+    return `cd '${dirEsc}' && pnpm ${packages.length ? 'add' : 'install'} ${flags} ${pkgsAtLatest} 2>&1`;
+  }
+  if (pm === 'yarn') {
+    return `cd '${dirEsc}' && yarn ${packages.length ? 'add' : 'install'} ${flags} ${pkgsAtLatest} 2>&1`;
+  }
+  return null;
+}
+
+// Raw exec — NO validation; callers must validate inputs before calling.
+function _runInstall(dir, user, pm, packages, extraFlags) {
+  const shCmd = buildInstallCmd(dir, pm, packages, extraFlags);
+  if (!shCmd) return Promise.resolve({ success: false, error: 'unsupported PM: ' + pm, output: '', duration_ms: 0 });
+  const startedAt = Date.now();
+  return new Promise((resolve) => {
+    const isRoot = user === 'root';
+    const bin = isRoot ? 'sh' : 'sudo';
+    const args = isRoot ? ['-c', shCmd] : ['-n', '-H', '-u', user, 'sh', '-c', shCmd];
+    execFile(bin, args, { timeout: MOD_UPDATE_TIMEOUT, maxBuffer: 16 * 1024 * 1024 },
+      (err, stdout) => {
+        const output = (stdout || '').toString();
+        resolve({
+          success: !err,
+          error: err ? String(err.code || err.signal || err.message) : null,
+          output,
+          duration_ms: Date.now() - startedAt,
+        });
+      });
+  });
+}
+
+// Detect a fix strategy from npm output. Returns a strategy id or null.
+function detectAutoFix(output, error) {
+  const out = (output || '') + ' ' + (error || '');
+  // Peer-dep conflicts → --force usually resolves
+  if (/ERESOLVE|Conflicting peer dependency/.test(out)) return 'force';
+  // package.json overrides clash with direct deps → --force
+  if (/EOVERRIDE|Override for [^\s]+ conflicts/.test(out)) return 'force';
+  // Lockfile out of sync → resync first then retry
+  if (/lockfile.*out of sync|EUSAGE|Missing.*from lock file|npm error EUSAGE/i.test(out)) return 'sync-lockfile';
+  // npm internal "null.matches" — typical when installing a single pkg into a tree
+  // with no lockfile or with corrupt cache. Resync (full install) first usually fixes it.
+  if (/Cannot read propert(?:y|ies) of null.*matches/i.test(out)) return 'sync-lockfile';
+  // Network errors → one retry
+  if (/ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|FETCH_ERROR|registry .* unreachable|socket hang up/i.test(out)) return 'retry';
+  return null;
+}
+
+// Run an update for one project with auto-fix retry chain. Returns { success, attempts, finalOutput, autoFix, packages }.
+// Caller is responsible for: lock acquisition (moduleUpdatesActive[dir]) and post-rescan.
+async function runProjectUpdateWithFix(project, packages, withAutoFix) {
+  const attempts = [];
+  // Attempt 1: default flags
+  let r = await _runInstall(project.dir, project.user, project.pm, packages, '');
+  attempts.push({ strategy: 'normal', success: r.success, error: r.error, duration_ms: r.duration_ms });
+  if (r.success || !withAutoFix) return { success: r.success, attempts, finalOutput: r.output, autoFix: null };
+
+  const fix = detectAutoFix(r.output, r.error);
+  if (!fix) return { success: false, attempts, finalOutput: r.output, autoFix: null };
+
+  if (fix === 'force') {
+    const r2 = await _runInstall(project.dir, project.user, project.pm, packages, '--force');
+    attempts.push({ strategy: 'force', success: r2.success, error: r2.error, duration_ms: r2.duration_ms });
+    return { success: r2.success, attempts, finalOutput: r2.output, autoFix: 'force' };
+  }
+  if (fix === 'sync-lockfile') {
+    // Run a plain install (no specific packages) to bring lockfile back in sync
+    const r0 = await _runInstall(project.dir, project.user, project.pm, [], '');
+    attempts.push({ strategy: 'sync-lockfile', success: r0.success, error: r0.error, duration_ms: r0.duration_ms });
+    if (!r0.success) return { success: false, attempts, finalOutput: r0.output, autoFix: 'sync-lockfile' };
+    const r2 = await _runInstall(project.dir, project.user, project.pm, packages, '');
+    attempts.push({ strategy: 'retry-after-sync', success: r2.success, error: r2.error, duration_ms: r2.duration_ms });
+    return { success: r2.success, attempts, finalOutput: r2.output, autoFix: 'sync-lockfile' };
+  }
+  if (fix === 'retry') {
+    const r2 = await _runInstall(project.dir, project.user, project.pm, packages, '');
+    attempts.push({ strategy: 'network-retry', success: r2.success, error: r2.error, duration_ms: r2.duration_ms });
+    return { success: r2.success, attempts, finalOutput: r2.output, autoFix: 'retry' };
+  }
+  return { success: false, attempts, finalOutput: r.output, autoFix: null };
+}
+
 // Validate inputs and run an update for one project. packages is array of npm names; if empty, update all outdated in the project.
 async function runModuleUpdate(dir, user, packagesIn) {
   if (!modulesCache) return { success: false, error: 'no scan cache; rescan first' };
@@ -905,52 +1002,217 @@ async function runModuleUpdate(dir, user, packagesIn) {
     }
   }
 
-  const pm = project.pm || 'npm';
-  const dirEsc = dir.replace(/'/g, `'\\''`);
-  const pkgsAtLatest = packages.map((p) => `'${p}@latest'`).join(' ');
-  let shCmd;
-  if (pm === 'npm') {
-    // --legacy-peer-deps: matches how most non-trivial Next/React/eslint-heavy projects
-    // are installed; without it, modern npm refuses to install on any peer-dep mismatch.
-    shCmd = `cd '${dirEsc}' && npm install --legacy-peer-deps --no-fund --no-audit --no-progress ${pkgsAtLatest} 2>&1`;
-  } else if (pm === 'pnpm') {
-    shCmd = `cd '${dirEsc}' && pnpm add ${pkgsAtLatest} 2>&1`;
-  } else if (pm === 'yarn') {
-    shCmd = `cd '${dirEsc}' && yarn add ${pkgsAtLatest} 2>&1`;
-  } else {
-    return { success: false, error: 'unsupported package manager: ' + pm };
-  }
-
   if (moduleUpdatesActive[dir]) {
     return { success: false, error: 'an update is already running for this project' };
   }
   moduleUpdatesActive[dir] = { user, packages, startedAt: new Date().toISOString() };
-  const startedAt = Date.now();
 
-  return await new Promise((resolve) => {
-    const isRoot = user === 'root';
-    const bin = isRoot ? 'sh' : 'sudo';
-    const args = isRoot ? ['-c', shCmd] : ['-n', '-H', '-u', user, 'sh', '-c', shCmd];
-    execFile(bin, args, { timeout: MOD_UPDATE_TIMEOUT, maxBuffer: 16 * 1024 * 1024 },
-      async (err, stdout) => {
-        const output = (stdout || '').toString();
-        const success = !err;
-        const result = {
-          timestamp: new Date().toISOString(),
-          dir, relDir: project.relDir, user,
-          packages, pm,
-          success,
-          error: err ? String(err.code || err.signal || err.message) : null,
-          output: output.slice(-4000),
-          duration_ms: Date.now() - startedAt,
-        };
-        appendUpdateLog(result);
-        delete moduleUpdatesActive[dir];
-        // Rescan the project so the UI immediately reflects the new state
-        try { await rescanProject(dir, user); } catch (e) { console.error('post-update rescan failed:', e.message); }
-        resolve(result);
+  try {
+    const r = await runProjectUpdateWithFix(project, packages, false);  // manual: no auto-fix retry
+    const result = {
+      timestamp: new Date().toISOString(),
+      dir, relDir: project.relDir, user,
+      packages, pm: project.pm,
+      success: r.success,
+      error: r.success ? null : (r.attempts[r.attempts.length - 1].error || 'failed'),
+      output: (r.finalOutput || '').slice(-4000),
+      duration_ms: r.attempts.reduce((s, a) => s + (a.duration_ms || 0), 0),
+      attempts: r.attempts,
+      autoFix: r.autoFix,
+    };
+    appendUpdateLog(result);
+    return result;
+  } finally {
+    delete moduleUpdatesActive[dir];
+    try { await rescanProject(dir, user); } catch (e) { console.error('post-update rescan failed:', e.message); }
+  }
+}
+
+/* ---------------------------------------------------------------- auto-update */
+const AUTO_UPDATE_LOG_MAX = 50;
+const DEFAULT_AUTO_UPDATE = {
+  enabled: false,
+  hour: 3,
+  min: 0,
+  severities: ['patch'],          // any of: 'patch','minor','major'
+  autoFix: true,
+  excludedDirs: [],
+  excludedPackages: [],
+  notifyTelegram: false,
+  notifyOnFailureOnly: true,
+};
+
+let autoUpdateRunning = false;
+let autoUpdateLog = [];
+let lastAutoTickKey = null;        // suppress double-fire within the same minute
+
+function getAutoUpdateConfig() {
+  return { ...DEFAULT_AUTO_UPDATE, ...((modulesCache && modulesCache.autoUpdate) || {}) };
+}
+
+function setAutoUpdateConfig(patch) {
+  if (!modulesCache) modulesCache = { generated_at: null, summary: {}, projects: [], outdated: [] };
+  const cur = getAutoUpdateConfig();
+  // Sanitize
+  const next = { ...cur, ...patch };
+  next.hour = Math.max(0, Math.min(23, parseInt(next.hour, 10) || 0));
+  next.min  = Math.max(0, Math.min(59, parseInt(next.min, 10) || 0));
+  if (!Array.isArray(next.severities)) next.severities = ['patch'];
+  next.severities = next.severities.filter((s) => ['patch','minor','major'].includes(s));
+  if (!next.severities.length) next.severities = ['patch'];
+  if (!Array.isArray(next.excludedDirs)) next.excludedDirs = [];
+  if (!Array.isArray(next.excludedPackages)) next.excludedPackages = [];
+  next.excludedPackages = next.excludedPackages
+    .map((p) => String(p).trim())
+    .filter((p) => p && PKG_NAME_RE.test(p));
+  modulesCache.autoUpdate = next;
+  saveModulesCache();
+  return next;
+}
+
+function pickAutoUpdatablePackages(project, config) {
+  if (!project.outdated) return [];
+  if (project.error) return [];
+  if (config.excludedDirs.includes(project.dir)) return [];
+  const out = [];
+  for (const [name, info] of Object.entries(project.outdated)) {
+    if (config.excludedPackages.includes(name)) continue;
+    const sev = severityOf(info.current, info.latest);
+    if (sev && config.severities.includes(sev)) out.push(name);
+  }
+  return out;
+}
+
+function appendAutoUpdateLog(entry) {
+  autoUpdateLog.push(entry);
+  if (autoUpdateLog.length > AUTO_UPDATE_LOG_MAX) {
+    autoUpdateLog.splice(0, autoUpdateLog.length - AUTO_UPDATE_LOG_MAX);
+  }
+  if (modulesCache) modulesCache.autoUpdateLog = autoUpdateLog;
+  saveModulesCache();
+}
+
+async function runAutoUpdatePass(triggeredBy) {
+  if (autoUpdateRunning) return { skipped: true, reason: 'already running' };
+  if (!modulesCache || !modulesCache.projects || !modulesCache.projects.length) {
+    return { skipped: true, reason: 'no scan cache' };
+  }
+  if (modulesScanInProgress) return { skipped: true, reason: 'scan in progress' };
+
+  const config = getAutoUpdateConfig();
+  if (triggeredBy === 'schedule' && !config.enabled) return { skipped: true, reason: 'disabled' };
+
+  autoUpdateRunning = true;
+  const startedAt = Date.now();
+  const results = [];
+
+  try {
+    for (const project of modulesCache.projects) {
+      if (moduleUpdatesActive[project.dir]) {
+        results.push({ dir: project.dir, relDir: project.relDir, user: project.user, skipped: true, reason: 'manual update active', packages: [] });
+        continue;
+      }
+      const packages = pickAutoUpdatablePackages(project, config);
+      if (!packages.length) continue;
+
+      // Validate package names defensively (already filtered by detection but be safe)
+      const validPackages = packages.filter((p) => PKG_NAME_RE.test(p));
+      if (!validPackages.length) continue;
+
+      // Verify dir owner still matches
+      let actualUser;
+      try { actualUser = uidToName(fs.statSync(project.dir).uid); }
+      catch { actualUser = null; }
+      if (actualUser !== project.user) {
+        results.push({ dir: project.dir, relDir: project.relDir, user: project.user, skipped: true, reason: 'owner mismatch', packages: [] });
+        continue;
+      }
+
+      moduleUpdatesActive[project.dir] = { user: project.user, packages: validPackages, startedAt: new Date().toISOString(), auto: true };
+      let r;
+      try {
+        r = await runProjectUpdateWithFix(project, validPackages, config.autoFix);
+      } catch (e) {
+        r = { success: false, attempts: [{ strategy: 'crashed', success: false, error: e.message, duration_ms: 0 }], finalOutput: '', autoFix: null };
+      }
+      delete moduleUpdatesActive[project.dir];
+
+      try { await rescanProject(project.dir, project.user); } catch (e) { /* ignore */ }
+
+      results.push({
+        dir: project.dir, relDir: project.relDir, user: project.user,
+        packages: validPackages, pm: project.pm,
+        success: r.success,
+        autoFix: r.autoFix,
+        attempts: r.attempts.map((a) => ({ strategy: a.strategy, success: a.success, error: a.error, duration_ms: a.duration_ms })),
+        finalError: r.success ? null : (r.attempts[r.attempts.length - 1].error || 'failed'),
+        outputTail: (r.finalOutput || '').slice(-2000),
+        duration_ms: r.attempts.reduce((s, a) => s + (a.duration_ms || 0), 0),
       });
-  });
+    }
+
+    const summary = {
+      timestamp: new Date().toISOString(),
+      triggeredBy,
+      duration_ms: Date.now() - startedAt,
+      projectsConsidered: modulesCache.projects.length,
+      projectsAttempted: results.filter((r) => !r.skipped).length,
+      projectsSucceeded: results.filter((r) => r.success).length,
+      projectsFailed: results.filter((r) => !r.success && !r.skipped).length,
+      packagesUpdated: results.filter((r) => r.success).reduce((s, r) => s + r.packages.length, 0),
+      autoFixesApplied: results.filter((r) => r.autoFix).length,
+      results,
+    };
+    // Log every manual run; only log scheduled runs that actually attempted something
+    if (summary.projectsAttempted > 0 || triggeredBy !== 'schedule') {
+      appendAutoUpdateLog(summary);
+    }
+
+    // Telegram notification (reuses Updates-tab Telegram config)
+    if (config.notifyTelegram && summary.projectsAttempted > 0) {
+      const shouldNotify = !config.notifyOnFailureOnly || summary.projectsFailed > 0;
+      if (shouldNotify) {
+        const tel = (updatesCache && updatesCache.telegram) || {};
+        if (tel.enabled && tel.botToken && tel.chatId) {
+          const lines = [];
+          lines.push('*📦 Auto-update on ' + os.hostname() + '*');
+          lines.push('✅ ' + summary.projectsSucceeded + ' succeeded · ❌ ' + summary.projectsFailed + ' failed · 📦 ' + summary.packagesUpdated + ' pkgs · ⏱ ' + Math.round(summary.duration_ms / 1000) + 's');
+          if (summary.autoFixesApplied) lines.push('🔧 ' + summary.autoFixesApplied + ' auto-fixes applied');
+          lines.push('');
+          for (const r of results) {
+            if (r.skipped) continue;
+            const icon = r.success ? '✅' : '❌';
+            lines.push(icon + ' `' + r.user + '` · ' + r.relDir + ' (' + r.packages.length + ' pkg' + (r.packages.length === 1 ? '' : 's') + ')');
+            if (!r.success && r.attempts.length) {
+              lines.push('   tried: ' + r.attempts.map((a) => a.strategy + (a.success ? '✓' : '✗')).join(', '));
+            }
+          }
+          try { await sendTelegram(lines.join('\n')); } catch (_) { /* ignore */ }
+        }
+      }
+    }
+
+    return { skipped: false, summary };
+  } finally {
+    autoUpdateRunning = false;
+  }
+}
+
+function autoUpdateTick() {
+  const config = getAutoUpdateConfig();
+  if (!config.enabled) return;
+  const now = new Date();
+  const hh = now.getHours();
+  const mm = now.getMinutes();
+  const targetMin = config.hour * 60 + config.min;
+  const nowMin = hh * 60 + mm;
+  // Match within a 2-minute window starting at the configured time
+  const diff = (nowMin - targetMin + 1440) % 1440;
+  if (diff > 2) return;
+  const key = `${now.toISOString().slice(0, 10)}-${config.hour}-${config.min}`;
+  if (lastAutoTickKey === key) return;
+  lastAutoTickKey = key;
+  runAutoUpdatePass('schedule').catch((e) => console.error('auto-update pass failed:', e.message));
 }
 
 /* ---------------------------------------------------------------- collect */
@@ -1310,6 +1572,34 @@ const PAGE = `<!doctype html>
   /* Inline two-step confirm button state */
   .arm-confirm { background:#5a1f25 !important; color:#ff8088 !important; border-color:#7a2d35 !important; animation:arm-pulse 1.2s ease-in-out infinite; }
   @keyframes arm-pulse { 0%,100%{ box-shadow:0 0 0 0 rgba(220,53,69,.4); } 50%{ box-shadow:0 0 0 4px rgba(220,53,69,0); } }
+  /* Auto Update card */
+  .auto-card { background:#1e2230; border-radius:14px; padding:16px 20px; margin-bottom:16px; box-shadow:0 2px 8px rgba(0,0,0,.25); border-left:3px solid #5cdd8b; }
+  .auto-card.disabled { border-left-color:#6b7280; }
+  .auto-row { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:14px; }
+  .auto-row:last-child { margin-bottom:0; }
+  .auto-row label { font-size:13px; font-weight:600; color:#cbd5e1; }
+  .auto-row .hint { font-size:11.5px; color:#6b7280; font-weight:400; }
+  .auto-row input[type=number] { background:#12141d; border:1px solid #2a2f40; color:#e9e9e9; border-radius:6px; padding:6px 10px; font-size:13px; width:64px; outline:none; font-variant-numeric:tabular-nums; text-align:center; }
+  .auto-row input[type=text]   { background:#12141d; border:1px solid #2a2f40; color:#e9e9e9; border-radius:8px; padding:8px 12px; font-size:13px; outline:none; flex:1 1 320px; min-width:200px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  .auto-row input:focus { border-color:#5cdd8b66; }
+  .auto-stat { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; background:#12141d; border-radius:6px; font-size:12px; color:#9ca3af; }
+  .auto-stat .v { color:#e9e9e9; font-weight:600; }
+  .auto-projlist { max-height:180px; overflow-y:auto; background:#12141d; border:1px solid #2a2f40; border-radius:8px; padding:8px 10px; font-size:12.5px; }
+  .auto-projlist label { display:flex; align-items:center; gap:8px; padding:3px 0; cursor:pointer; }
+  .auto-projlist input { accent-color:#5cdd8b; }
+  /* Auto-update log */
+  .au-log-entry { padding:10px 0; border-bottom:1px solid #20242f; font-size:13px; }
+  .au-log-entry:last-child { border-bottom:none; }
+  .au-log-entry .top { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .au-log-entry .top .when { color:#6b7280; font-size:11.5px; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .au-log-entry .top .ic { font-size:14px; }
+  .au-log-entry .summary-pills { display:flex; gap:6px; margin-left:auto; flex-wrap:wrap; }
+  .au-log-entry details summary { cursor:pointer; color:#5cdd8b; font-size:12px; padding:4px 0; user-select:none; }
+  .au-log-entry .child { padding:6px 12px; background:#161823; border-radius:6px; margin-top:6px; font-size:12px; }
+  .au-log-entry .child.fail { border-left:2px solid #dc3545; }
+  .au-log-entry .child.ok   { border-left:2px solid #5cdd8b; }
+  .au-log-entry .child .att { color:#9ca3af; font-size:11.5px; margin-top:3px; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .au-log-entry pre { margin:6px 0 0; padding:8px 10px; background:#0c0e16; border-radius:6px; max-height:160px; overflow:auto; color:#cbd5e1; font-size:11.5px; white-space:pre-wrap; word-break:break-word; }
   footer { color:#6b7280; font-size:12px; text-align:center; margin-top:8px; }
   @media (max-width:1180px){ .beats .beat:nth-child(-n+25){ display:none; } .hdr .beats-h{ width:247px; } }
   @media (max-width:860px){ .beats, .hdr .beats-h { display:none; } }
@@ -1926,6 +2216,68 @@ function renderModules(){
   if (s.errors) html += '<div class="mod-stat err"><div class="v">'+s.errors+'</div><div class="l">Scan errors</div></div>';
   html += '</div>';
 
+  // Auto-update card (settings + last-pass status)
+  const au = d.autoUpdate || { enabled:false, hour:3, min:0, severities:['patch'], autoFix:true, excludedDirs:[], excludedPackages:[], notifyTelegram:false, notifyOnFailureOnly:true };
+  const auLog = (d.autoUpdateLog || []).slice();
+  const lastAu = auLog.length ? auLog[auLog.length-1] : null;
+  const auRunning = !!d.autoUpdateRunning;
+  const tel = (d.telegramAvailable !== undefined) ? d.telegramAvailable : true; // hint
+  html += '<div class="auto-card '+(au.enabled?'':'disabled')+'">';
+  html += '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px">';
+  html += '<h3 style="margin:0;font-size:15px;font-weight:700">🤖 Auto Update</h3>';
+  html += '<label class="switch" title="Master switch"><input type="checkbox" id="auEnabled" '+(au.enabled?'checked':'')+'><span class="slider"></span></label>';
+  html += '<span class="hint" style="font-size:12px">'+(au.enabled?'Enabled — runs at '+String(au.hour).padStart(2,'0')+':'+String(au.min).padStart(2,'0')+' server time':'Disabled')+'</span>';
+  if (lastAu) {
+    const fail = lastAu.projectsFailed || 0;
+    const ok = lastAu.projectsSucceeded || 0;
+    const upd = lastAu.packagesUpdated || 0;
+    html += '<span class="auto-stat" style="margin-left:auto" title="Last pass">last pass <span class="v">'+new Date(lastAu.timestamp).toLocaleString()+'</span> · ✅ <span class="v">'+ok+'</span> · ❌ <span class="v">'+fail+'</span> · 📦 <span class="v">'+upd+'</span></span>';
+  } else {
+    html += '<span class="auto-stat" style="margin-left:auto">no auto-update has run yet</span>';
+  }
+  html += '</div>';
+
+  html += '<div class="auto-row"><label>Run at</label>';
+  html += '<input type="number" id="auHour" min="0" max="23" value="'+au.hour+'">:';
+  html += '<input type="number" id="auMin" min="0" max="59" value="'+au.min+'">';
+  html += '<span class="hint">server time, ±2 min window</span></div>';
+
+  html += '<div class="auto-row"><label>Severities</label>';
+  for (const sev of ['patch','minor','major']) {
+    const ch = au.severities.includes(sev)?'checked':'';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-weight:500"><input type="checkbox" class="auSev" data-sev="'+sev+'" '+ch+'> <span class="sev '+sev+'">'+sev+'</span></label>';
+  }
+  html += '<span class="hint" style="margin-left:auto">patch is safest (semver guarantees backwards compat)</span></div>';
+
+  html += '<div class="auto-row"><label class="switch"><input type="checkbox" id="auAutoFix" '+(au.autoFix?'checked':'')+'><span class="slider"></span></label>';
+  html += '<label for="auAutoFix">Auto-fix common npm errors</label>';
+  html += '<span class="hint">retry with <code style="background:#12141d;padding:1px 6px;border-radius:4px">--force</code> on ERESOLVE; resync lockfile on EUSAGE; one retry on network errors</span></div>';
+
+  html += '<div class="auto-row"><label class="switch"><input type="checkbox" id="auNotify" '+(au.notifyTelegram?'checked':'')+'><span class="slider"></span></label>';
+  html += '<label for="auNotify">Telegram notify</label>';
+  html += '<label style="display:flex;align-items:center;gap:6px;font-weight:500"><input type="checkbox" id="auFailOnly" '+(au.notifyOnFailureOnly?'checked':'')+'> failures only</label>';
+  html += '<span class="hint">uses bot config from the Updates tab</span></div>';
+
+  html += '<div class="auto-row" style="flex-direction:column;align-items:stretch"><label style="margin-bottom:6px">Excluded packages <span class="hint">never auto-update these (comma-separated, e.g. <code style="background:#12141d;padding:1px 6px;border-radius:4px">next, react, react-dom</code>)</span></label>';
+  html += '<input type="text" id="auExclPkgs" value="'+esc((au.excludedPackages||[]).join(', '))+'" placeholder="next, react, react-dom"></div>';
+
+  // Excluded projects
+  const auProjects = (d.projects||[]).slice().sort((a,b) => a.user.localeCompare(b.user) || a.relDir.localeCompare(b.relDir));
+  if (auProjects.length) {
+    html += '<div class="auto-row" style="flex-direction:column;align-items:stretch"><label style="margin-bottom:6px">Excluded projects <span class="hint">tick to skip a project from auto-update</span></label>';
+    html += '<div class="auto-projlist">';
+    for (const p of auProjects) {
+      const ch = (au.excludedDirs||[]).includes(p.dir)?'checked':'';
+      html += '<label><input type="checkbox" class="auExclDir" data-dir="'+esc(p.dir)+'" '+ch+'><span style="color:#6b7280;font-size:11.5px;font-family:ui-monospace,Menlo,Consolas,monospace">'+esc(p.relDir)+'</span></label>';
+    }
+    html += '</div></div>';
+  }
+
+  html += '<div class="auto-row" style="margin-top:6px"><button class="btn" id="auSave" style="background:#5cdd8b;color:#0b2818;padding:8px 16px;font-size:12px">💾 Save settings</button>';
+  html += '<button class="btn" id="auRunNow" '+(auRunning?'disabled':'')+' style="padding:8px 16px;font-size:12px">'+(auRunning?'⏳ running…':'⏱ Run now (one pass)')+'</button>';
+  html += '<span class="hint" id="auRunHint" style="margin-left:auto"></span></div>';
+  html += '</div>';
+
   // Toolbar (Orient): filter chips + search + refresh
   html += '<div class="mod-card"><div class="head">';
   html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1">';
@@ -2051,6 +2403,63 @@ function renderModules(){
   }
   html += '</div>';
 
+  // Auto-update log (newest first)
+  const auReversed = auLog.slice().reverse();
+  html += '<div class="mod-card"><div class="head"><h3 style="margin:0">🤖 Auto-Update Log <span style="font-weight:400;font-size:12px;color:#6b7280">'+auReversed.length+' pass'+(auReversed.length===1?'':'es')+'</span></h3>';
+  if (auReversed.length) html += '<button class="btn" id="auClearLog" style="font-size:11px;padding:4px 10px;background:#3a2020;color:#ff8088">🗑 Clear</button>';
+  html += '</div>';
+  if (!auReversed.length) {
+    html += '<div class="mod-empty">No auto-update passes have run yet. Use <strong>Run now</strong> above to test.</div>';
+  } else {
+    for (const pass of auReversed) {
+      const ok = pass.projectsSucceeded || 0;
+      const fail = pass.projectsFailed || 0;
+      const att = pass.projectsAttempted || 0;
+      const upd = pass.packagesUpdated || 0;
+      const fixes = pass.autoFixesApplied || 0;
+      const dur = pass.duration_ms ? Math.round(pass.duration_ms/1000)+'s' : '';
+      const triggeredIcon = pass.triggeredBy === 'manual' ? '👆 manual' : '⏰ scheduled';
+      const overallIcon = fail === 0 ? '✅' : (ok === 0 ? '❌' : '⚠️');
+      html += '<div class="au-log-entry"><div class="top">';
+      html += '<span class="ic">'+overallIcon+'</span>';
+      html += '<span class="when">'+new Date(pass.timestamp).toLocaleString()+'</span>';
+      html += '<span class="hint">'+triggeredIcon+'</span>';
+      html += '<span class="summary-pills">';
+      html += '<span class="auto-stat">attempted <span class="v">'+att+'</span></span>';
+      if (ok)    html += '<span class="auto-stat" style="color:#5cdd8b">✅ <span class="v">'+ok+'</span></span>';
+      if (fail)  html += '<span class="auto-stat" style="color:#ff8088">❌ <span class="v">'+fail+'</span></span>';
+      if (upd)   html += '<span class="auto-stat">📦 <span class="v">'+upd+'</span> pkgs</span>';
+      if (fixes) html += '<span class="auto-stat">🔧 <span class="v">'+fixes+'</span> fixes</span>';
+      if (dur)   html += '<span class="auto-stat">⏱ <span class="v">'+dur+'</span></span>';
+      html += '</span></div>';
+      const visibleResults = (pass.results||[]).filter(r => !r.skipped || (state.modShowSkipped));
+      if (visibleResults.length) {
+        html += '<details><summary>'+visibleResults.length+' project result'+(visibleResults.length===1?'':'s')+'</summary>';
+        for (const r of visibleResults) {
+          const cls = r.skipped ? '' : (r.success ? 'ok' : 'fail');
+          const ic = r.skipped ? '⏭' : (r.success ? '✅' : '❌');
+          html += '<div class="child '+cls+'">';
+          html += '<div>'+ic+' <strong>'+esc(r.user)+'</strong> · <span style="color:#9ca3af;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px">'+esc(r.relDir)+'</span>';
+          if (r.skipped) html += ' — <em style="color:#6b7280">skipped: '+esc(r.reason||'')+'</em>';
+          html += '</div>';
+          if (!r.skipped) {
+            const pkgList = (r.packages||[]).slice(0,8).join(', ') + ((r.packages||[]).length>8 ? ' +'+((r.packages||[]).length-8)+' more' : '');
+            html += '<div class="att">📦 '+esc(pkgList)+(r.duration_ms?' · '+Math.round(r.duration_ms/1000)+'s':'')+'</div>';
+            if (r.attempts && r.attempts.length) {
+              html += '<div class="att">🔁 '+r.attempts.map(a => esc(a.strategy) + (a.success?'✓':'✗')+(a.error?'('+esc(a.error)+')':'')).join(' → ')+'</div>';
+            }
+            if (r.autoFix) html += '<div class="att">🔧 auto-fix: '+esc(r.autoFix)+'</div>';
+            if (!r.success && r.outputTail) html += '<pre>'+esc(r.outputTail)+'</pre>';
+          }
+          html += '</div>';
+        }
+        html += '</details>';
+      }
+      html += '</div>';
+    }
+  }
+  html += '</div>';
+
   view.innerHTML = html;
 
   // Wire interactive elements
@@ -2081,6 +2490,84 @@ function renderModules(){
     renderModules();
     toast('Update log cleared', 'info');
   }));
+
+  // Auto-update wiring
+  const auSaveBtn = document.getElementById('auSave');
+  if (auSaveBtn) auSaveBtn.addEventListener('click', () => saveAutoUpdateConfig());
+  const auRunNow = document.getElementById('auRunNow');
+  if (auRunNow) auRunNow.addEventListener('click', () => armConfirm(auRunNow, '⚠ Click again to run', () => runAutoUpdateNow()));
+  const auClearLog = document.getElementById('auClearLog');
+  if (auClearLog) auClearLog.addEventListener('click', () => armConfirm(auClearLog, '⚠ Click again to clear', async () => {
+    await fetch('api/modules/auto/log', { method: 'DELETE' });
+    if (lastModules) lastModules.autoUpdateLog = [];
+    renderModules();
+    toast('Auto-update log cleared', 'info');
+  }));
+}
+
+function readAutoUpdateForm() {
+  const view = document.getElementById('modulesview');
+  const get = (id) => view.querySelector('#'+id);
+  const en = get('auEnabled');
+  const hr = get('auHour');
+  const mn = get('auMin');
+  const af = get('auAutoFix');
+  const nt = get('auNotify');
+  const fo = get('auFailOnly');
+  const ep = get('auExclPkgs');
+  const sevs = Array.from(view.querySelectorAll('.auSev')).filter(c => c.checked).map(c => c.dataset.sev);
+  const exDirs = Array.from(view.querySelectorAll('.auExclDir')).filter(c => c.checked).map(c => c.dataset.dir);
+  const exPkgs = (ep ? ep.value : '').split(/[\\s,]+/).map(s => s.trim()).filter(Boolean);
+  return {
+    enabled: en ? en.checked : false,
+    hour: hr ? parseInt(hr.value, 10) : 3,
+    min:  mn ? parseInt(mn.value, 10) : 0,
+    severities: sevs.length ? sevs : ['patch'],
+    autoFix: af ? af.checked : true,
+    notifyTelegram: nt ? nt.checked : false,
+    notifyOnFailureOnly: fo ? fo.checked : true,
+    excludedPackages: exPkgs,
+    excludedDirs: exDirs,
+  };
+}
+
+async function saveAutoUpdateConfig() {
+  try {
+    const cfg = readAutoUpdateForm();
+    const res = await fetch('api/modules/auto/config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg),
+    });
+    const j = await res.json();
+    if (!res.ok) { toast('Save failed: ' + (j.error || res.status), 'error'); return; }
+    if (lastModules) lastModules.autoUpdate = j.autoUpdate;
+    renderModules();
+    toast('Auto-update settings saved', 'success');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function runAutoUpdateNow() {
+  // Persist current form state first so the pass uses the latest config
+  await saveAutoUpdateConfig();
+  toast('Auto-update pass started…', 'info');
+  if (lastModules) lastModules.autoUpdateRunning = true;
+  if (state.tab === 'modules') renderModules();
+  ensureModulesPoll(true);
+  try {
+    const r = await fetch('api/modules/auto/run-now', { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) { toast('Run failed: ' + (j.error || r.status), 'error'); return; }
+    if (j.skipped) { toast('Skipped: ' + (j.reason || 'unknown'), 'warn'); return; }
+    const s = j.summary || {};
+    const msg = '✅ ' + (s.projectsSucceeded||0) + ' / ❌ ' + (s.projectsFailed||0) + ' · 📦 ' + (s.packagesUpdated||0) + ' pkgs · ⏱ ' + Math.round((s.duration_ms||0)/1000) + 's';
+    toast('Auto-update pass complete · ' + msg, (s.projectsFailed > 0 ? 'warn' : 'success'));
+    // Refresh state
+    try {
+      const m = await fetch('api/modules').then(r => r.json());
+      lastModules = m;
+    } catch(_) {}
+    if (state.tab === 'modules') renderModules();
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
 
 let modulesPollTimer = null;
@@ -2091,7 +2578,7 @@ function ensureModulesPoll(active) {
         const m = await fetch('api/modules').then(r => r.json());
         lastModules = m;
         if (state.tab === 'modules') renderModules();
-        const stillActive = m.scanInProgress || (m.activeUpdates && Object.keys(m.activeUpdates).length);
+        const stillActive = m.scanInProgress || m.autoUpdateRunning || (m.activeUpdates && Object.keys(m.activeUpdates).length);
         if (!stillActive) { clearInterval(modulesPollTimer); modulesPollTimer = null; }
       } catch(_) {}
     }, 3000);
@@ -2406,8 +2893,8 @@ const server = http.createServer((req, res) => {
   if (url === '/api/modules') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify(modulesCache
-      ? { ...modulesCache, scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress, activeUpdates: moduleUpdatesActive, updateLog: moduleUpdateLog }
-      : { generated_at: null, summary: {}, projects: [], outdated: [], scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress, activeUpdates: moduleUpdatesActive, updateLog: moduleUpdateLog }));
+      ? { ...modulesCache, scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress, activeUpdates: moduleUpdatesActive, updateLog: moduleUpdateLog, autoUpdate: getAutoUpdateConfig(), autoUpdateLog, autoUpdateRunning }
+      : { generated_at: null, summary: {}, projects: [], outdated: [], scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress, activeUpdates: moduleUpdatesActive, updateLog: moduleUpdateLog, autoUpdate: getAutoUpdateConfig(), autoUpdateLog, autoUpdateRunning }));
   }
   if (url === '/api/modules/check' && req.method === 'POST') {
     if (modulesScanInProgress) {
@@ -2447,6 +2934,43 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true }));
   }
+  if (url === '/api/modules/auto/config' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 64 * 1024) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const cfg = JSON.parse(body);
+        const next = setAutoUpdateConfig(cfg || {});
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, autoUpdate: next }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'invalid JSON: ' + e.message }));
+      }
+    });
+    return;
+  }
+  if (url === '/api/modules/auto/run-now' && req.method === 'POST') {
+    if (autoUpdateRunning) {
+      res.writeHead(409, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'auto-update already running' }));
+    }
+    runAutoUpdatePass('manual').then((r) => {
+      res.writeHead(r.skipped ? 409 : 200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(r));
+    }).catch((e) => {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    });
+    return;
+  }
+  if (url === '/api/modules/auto/log' && req.method === 'DELETE') {
+    autoUpdateLog = [];
+    if (modulesCache) modulesCache.autoUpdateLog = [];
+    saveModulesCache();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: true }));
+  }
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('not found\n');
 });
@@ -2463,6 +2987,8 @@ setInterval(() => collectSites(), 300_000); // re-check sites every 5 min
 // modules: kick off first scan in background (slow — registry-bound), then refresh every 6h
 setTimeout(() => { collectModules().catch((e) => console.error('initial modules scan failed:', e.message)); }, 8_000);
 setInterval(() => collectModules().catch(() => {}), MODULES_INTERVAL_MS);
+// auto-update: tick every minute, fires if config matches the configured HH:MM
+setInterval(autoUpdateTick, 60_000);
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => { saveHistory(true); process.exit(0); });
 }
