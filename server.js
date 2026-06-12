@@ -39,7 +39,7 @@ const COMPONENTS = [
   { key: 'opencode', label: 'OpenCode',    bin: 'opencode', pkg: 'opencode-ai',                verFlag: '--version' },
   { key: 'codex',    label: 'Codex CLI',   bin: 'codex',    pkg: 'codex',                      verFlag: '--version' },
   { key: 'gemini',   label: 'Gemini CLI',  bin: 'gemini',   pkg: '@google/gemini-cli',         verFlag: '--version' },
-  { key: 'claude',   label: 'Claude Code', bin: 'claude',   pkg: '@anthropic-ai/claude-code',  verFlag: '--version' },
+  { key: 'claude',   label: 'Claude Code', bin: 'claude',   pkg: '@anthropic-ai/claude-code',  verFlag: '--version', updateCmd: ['claude', 'update'] },
 ];
 
 /* -------------------------------------------------------------- postgres */
@@ -347,32 +347,36 @@ async function runUpdate(compKey) {
   let success = false, output = '';
 
   try {
+    const cmd = comp.updateCmd || ['npm', 'update', '-g', comp.pkg];
     const result = await new Promise((resolve) => {
-      execFile('npm', ['update', '-g', comp.pkg], { timeout: 120000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      execFile(cmd[0], cmd.slice(1), { timeout: 120000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
         resolve({ err, stdout: stdout || '', stderr: stderr || '' });
       });
     });
     output = (result.stdout + '\n' + result.stderr).trim();
     success = !result.err;
-
-    // Update the cached latest version after update
-    const newVersion = await getCurrentVersion(comp);
-    if (newVersion && updatesCache) {
-      const c = updatesCache.components.find(x => x.key === compKey);
-      if (c) {
-        c.currentVersion = newVersion;
-        // Re-check latest
-        const latest = await getLatestVersion(comp);
-        c.latestVersion = latest;
-        c.updateAvailable = !!(newVersion && latest && newVersion !== latest);
-        c.updating = false;
-      }
-    }
   } catch (e) {
     output = e.message;
     success = false;
   } finally {
     updatesRunning.delete(compKey);
+    // Always refresh cached version + clear the updating flag — even on failure or if the
+    // post-update version read momentarily races — so the tile never gets stuck on "updating…".
+    try {
+      const newVersion = await getCurrentVersion(comp);
+      if (updatesCache) {
+        const c = updatesCache.components.find(x => x.key === compKey);
+        if (c) {
+          if (newVersion) {
+            c.currentVersion = newVersion;
+            const latest = await getLatestVersion(comp);
+            if (latest) c.latestVersion = latest;
+            c.updateAvailable = !!(newVersion && c.latestVersion && newVersion !== c.latestVersion);
+          }
+          c.updating = false;
+        }
+      }
+    } catch (_) { /* ignore refresh errors */ }
   }
 
   const entry = {
@@ -415,6 +419,7 @@ async function sendTelegram(text) {
 /* ------------------------------------------------------- update scheduler */
 
 let schedulerTimer = null;
+let lastSchedKey = null;
 function startScheduler() {
   if (schedulerTimer) clearInterval(schedulerTimer);
   schedulerTimer = setInterval(() => {
@@ -425,11 +430,13 @@ function startScheduler() {
     const schedTarget = cfg.schedule.hour * 60 + cfg.schedule.minute;
     // Run within a 5-minute window
     if (Math.abs(schedMin - schedTarget) > 2) return;
-    // Only run if we haven't already run in the last 24h for these components
-    const lastRun = updateLog.filter(e => e.success).pop();
-    if (lastRun && (Date.now() - new Date(lastRun.timestamp).getTime()) < 82800000) return; // 23h
-    for (const key of cfg.schedule.components || []) {
-      runUpdate(key);
+    // Fire at most once per scheduled time per day — independent of manual runs, so a manual
+    // update earlier in the day no longer suppresses the scheduled batch.
+    const key = `${now.toISOString().slice(0, 10)}-${cfg.schedule.hour}-${cfg.schedule.minute}`;
+    if (lastSchedKey === key) return;
+    lastSchedKey = key;
+    for (const compKey of cfg.schedule.components || []) {
+      runUpdate(compKey);
     }
   }, 60000); // check every minute
 }
@@ -552,7 +559,9 @@ async function checkSiteHealth(site) {
   if (site.type === 'static') {
     result.status = result.httpUp ? 'online' : 'down';
   } else if (site.nodePort) {
-    if (pm2Online && result.httpUp) { result.status = 'online'; }
+    // The app is serving if the port is listening AND HTTP responds — that's ground truth,
+    // whether or not it's supervised by PM2 (e.g. sites run under bun/systemd show no PM2 match).
+    if (result.httpUp && result.portUp) { result.status = 'online'; }
     else if (!result.portUp && !result.httpUp) { result.status = 'down'; }
     else { result.status = 'degraded'; }
   } else if (site.poolPort) {
@@ -1657,10 +1666,11 @@ const PAGE = `<!doctype html>
   .col.warm { color:#f8a306; } .col.hot { color:#dc3545; font-weight:700; }
   .pct { flex:0 0 60px; text-align:right; font-size:13.5px; font-weight:600; }
   .pct.good { color:#5cdd8b; } .pct.mid { color:#f8a306; } .pct.poor { color:#dc3545; }
+  .act { flex:0 0 92px; display:flex; gap:4px; justify-content:flex-end; }
   .hdr { display:flex; align-items:center; gap:14px; padding:8px 0 2px; color:#6b7280; font-size:11px;
          text-transform:uppercase; letter-spacing:.5px; }
   .hdr .stat { flex:0 0 64px; } .hdr .meta { flex:1 1 180px; min-width:140px; } .hdr .beats-h { flex:0 0 auto; width:497px; }
-  .hdr .col, .hdr .pct { font-weight:600; }
+  .hdr .col, .hdr .pct { font-weight:600; } .hdr .act { flex:0 0 92px; }
   .err { color:#ff8088; font-size:13px; padding:10px 0; }
   .toolbar { display:flex; align-items:center; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
   .toolbar input { flex:1 1 220px; min-width:160px; background:#1e2230; border:1px solid #2a2f40; color:#e9e9e9;
@@ -1961,7 +1971,7 @@ function matches(p, user){
 }
 
 const HDR = '<div class="hdr"><div class="stat">Status</div><div class="meta">Service</div>'
-  + '<div class="beats-h"></div><div class="col">CPU</div><div class="col">Mem</div><div class="col">↺</div><div class="pct" style="color:#6b7280">24h</div></div>';
+  + '<div class="beats-h"></div><div class="col">CPU</div><div class="col">Mem</div><div class="col">↺</div><div class="pct" style="color:#6b7280">24h</div><div class="act"></div></div>';
 
 function rowHtml(p, userLabel){
   const up = p.status === 'online';
@@ -1989,7 +1999,7 @@ function rowHtml(p, userLabel){
     + '<div class="col '+memCls+'">'+fmtMem(p.memory)+'</div>'
     + '<div class="col '+rstCls+'">'+p.restarts+'</div>'
     + '<div class="pct '+pctCls(p.uptime24h)+'">'+pct+'</div>'
-    + '<div class="col">'+actions+' <button class="btn small" onclick="pm2Action(\\'restart\\', \\''+userLabel+'\\', \\''+esc(p.name)+'\\')">⟳</button></div>'
+    + '<div class="act">'+actions+'<button class="btn small" onclick="pm2Action(\\'restart\\', \\''+userLabel+'\\', \\''+esc(p.name)+'\\')">⟳</button></div>'
     + '</div>';
 }
 
@@ -2234,8 +2244,22 @@ function renderUpdates(){
   const userKeys = Object.keys(d.users || {});
   if (userKeys.length) {
     const allCompKeys = d.components.map(c => c.key);
+    let userOutdatedCount = 0;
+    for (const u of userKeys) {
+      const uv = d.users[u] || {};
+      for (const c of d.components) {
+        if (c.key === 'node') continue;
+        const userV = uv[c.key] || null;
+        if (userV && c.latestVersion && userV !== c.latestVersion) userOutdatedCount++;
+      }
+    }
     html += '<div class="upd-card" style="grid-column:1/-1">';
-    html += '<h3>By User <span style="font-weight:400;font-size:12px;color:#6b7280">' + userKeys.length + ' users</span></h3>';
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
+    html += '<h3 style="margin:0">By User <span style="font-weight:400;font-size:12px;color:#6b7280">' + userKeys.length + ' users</span></h3>';
+    if (userOutdatedCount) {
+      html += '<button class="btn update" onclick="triggerUpdateAllUsers()" style="font-size:12px;padding:4px 14px">⬆ Update All Users (' + userOutdatedCount + ')</button>';
+    }
+    html += '</div>';
     html += '<div style="overflow-x:auto"><table class="upd-table">';
     html += '<tr><th>User</th>';
     for (const c of d.components) {
@@ -2996,6 +3020,16 @@ async function triggerUpdateAll(){
   } catch(_){}
 }
 
+async function triggerUpdateAllUsers(){
+  if (!confirm('Update every outdated tool for all users? Runs npm updates sequentially and may take a few minutes.')) return;
+  try {
+    await fetch('api/updates/run-all-users', { method: 'POST' });
+    const res = await fetch('api/updates');
+    lastUpdates = await res.json();
+    if (state.tab === 'updates') renderUpdates();
+  } catch(_){}
+}
+
 function saveUpdatesConfig(){
   if (!lastUpdates) return;
   const sched = {
@@ -3133,6 +3167,29 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(results));
     });
+    return;
+  }
+  if (url === '/api/updates/run-all-users' && req.method === 'POST') {
+    const users = (updatesCache && updatesCache.users) ? updatesCache.users : {};
+    const comps = updatesCache ? updatesCache.components : [];
+    const jobs = [];
+    for (const [user, uv] of Object.entries(users)) {
+      for (const c of comps) {
+        if (c.key === 'node') continue;
+        const userV = (uv && uv[c.key]) || null;
+        if (userV && c.latestVersion && userV !== c.latestVersion) jobs.push([user, c.key]);
+      }
+    }
+    // Run sequentially — avoids spawning dozens of concurrent npm installs on a memory-tight box
+    (async () => {
+      const results = [];
+      for (const [user, key] of jobs) {
+        try { results.push(await runUserUpdate(user, key)); }
+        catch (e) { results.push({ user, component: key, success: false, output: e.message }); }
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ count: results.length, results }));
+    })();
     return;
   }
   if (url.startsWith('/api/updates/run/') && req.method === 'POST') {
