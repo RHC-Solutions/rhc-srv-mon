@@ -1839,6 +1839,7 @@ const PAGE = `<!doctype html>
   .auto-row .hint { font-size:11.5px; color:#6b7280; font-weight:400; }
   .auto-row input[type=number] { background:#12141d; border:1px solid #2a2f40; color:#e9e9e9; border-radius:6px; padding:6px 10px; font-size:13px; width:64px; outline:none; font-variant-numeric:tabular-nums; text-align:center; }
   .auto-row input[type=text]   { background:#12141d; border:1px solid #2a2f40; color:#e9e9e9; border-radius:8px; padding:8px 12px; font-size:13px; outline:none; flex:1 1 320px; min-width:200px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  .auto-row[style*="column"] input[type=text] { flex:0 0 auto; width:100%; box-sizing:border-box; }
   .auto-row input:focus { border-color:#5cdd8b66; }
   .auto-stat { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; background:#12141d; border-radius:6px; font-size:12px; color:#9ca3af; }
   .auto-stat .v { color:#e9e9e9; font-weight:600; }
