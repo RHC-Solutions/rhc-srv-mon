@@ -1669,8 +1669,11 @@ const PAGE = `<!doctype html>
   .act { flex:0 0 92px; display:flex; gap:4px; justify-content:flex-end; }
   .hdr { display:flex; align-items:center; gap:14px; padding:8px 0 2px; color:#6b7280; font-size:11px;
          text-transform:uppercase; letter-spacing:.5px; }
-  .hdr .stat { flex:0 0 64px; } .hdr .meta { flex:1 1 180px; min-width:140px; } .hdr .beats-h { flex:0 0 auto; width:497px; }
-  .hdr .col, .hdr .pct { font-weight:600; } .hdr .act { flex:0 0 92px; }
+  /* stat/meta/act inherit widths from the base .stat/.meta/.act rules so the header
+     tracks the rows at every breakpoint (a header-specific width here would out-specify
+     the responsive @media overrides and drift the columns). Only beats-h is header-only. */
+  .hdr .beats-h { flex:0 0 auto; width:497px; }
+  .hdr .col, .hdr .pct { font-weight:600; }
   .err { color:#ff8088; font-size:13px; padding:10px 0; }
   .toolbar { display:flex; align-items:center; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
   .toolbar input { flex:1 1 220px; min-width:160px; background:#1e2230; border:1px solid #2a2f40; color:#e9e9e9;
