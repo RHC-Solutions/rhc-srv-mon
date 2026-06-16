@@ -258,10 +258,15 @@ async function collectUpdates() {
     });
   }
 
-  // Get per-user versions for CloudPanel site users + root
+  // Get per-user versions for CloudPanel site users + every /home user + root.
+  // The dev/SSH accounts (e.g. *_ssh, *_com) that actually run the agent CLIs
+  // aren't CloudPanel site owners, so scan /home too — otherwise their
+  // Claude Code / Pi installs never show up.
   const userCompKeys = COMPONENTS.map(c => c.key);
   const siteUsers = querySitesDb().map(s => s.user);
-  const uniqueUsers = [...new Set(siteUsers), 'root'].filter(u => u && u !== 'clp');
+  let homeUsers = [];
+  try { homeUsers = fs.readdirSync('/home'); } catch (_) {}
+  const uniqueUsers = [...new Set([...siteUsers, ...homeUsers, 'root'])].filter(u => u && u !== 'clp');
   const userVersions = {};
   for (const user of uniqueUsers) {
     userVersions[user] = {};
