@@ -1633,6 +1633,210 @@ function buildPayload() {
   };
 }
 
+/* ---------------------------------------------------------------- backups */
+// Backs up Postgres DBs, CloudPanel site files, and key configs to Wasabi
+// (S3-compatible) via the already-configured rclone remote. Dependency-free:
+// shells out to pg_dump / tar+zstd / rclone. Stages on /var/tmp (NOT /tmp,
+// which is tmpfs/RAM on this box), uploads, prunes, then deletes the stage.
+
+const BACKUP_FILE   = path.join(__dirname, 'backups.json');
+const RCLONE_CONF   = '/root/.config/rclone/rclone.conf';
+const RCLONE_REMOTE = 'remote:';
+const BACKUP_BUCKET = 'rhcsolutions';
+const BACKUP_PREFIX = 'web01-backups';          // remote:rhcsolutions/web01-backups/<stamp>/...
+const BACKUP_STAGE  = '/var/tmp/rhc-backups';   // local staging (root fs, NOT tmpfs)
+const PG_HOST       = '/var/run/postgresql';
+const BACKUP_LOG_MAX = 100;
+// regenerable / heavy dirs excluded from site tarballs
+const SITE_TAR_EXCLUDES = ['node_modules', '.next', '.turbo', '.cache', 'cache', 'vendor', '.git', 'logs', 'tmp'];
+
+let backupsCache = {
+  schedule: { enabled: true, hour: 3, minute: 30 },
+  retentionDays: 14,
+  scope: { postgres: true, sites: true, configs: true },
+  running: false,
+  lastRun: null,     // { startedAt, finishedAt, success, bytes, itemCount, items, errors, duration_ms, stamp }
+  log: [],           // recent runs (newest last)
+};
+let backupRunning = false;
+
+function loadBackups() {
+  try {
+    const data = JSON.parse(fs.readFileSync(BACKUP_FILE, 'utf8'));
+    backupsCache = Object.assign(backupsCache, data);
+    backupsCache.running = false;        // never resurrect a stuck "running" flag
+  } catch (_) { /* keep defaults */ }
+}
+function saveBackups() {
+  try {
+    fs.writeFileSync(BACKUP_FILE + '.tmp', JSON.stringify(backupsCache, null, 2));
+    fs.renameSync(BACKUP_FILE + '.tmp', BACKUP_FILE);
+  } catch (e) { console.error('saveBackups failed:', e.message); }
+}
+
+function fmtBytes(n) {
+  if (!n) return '0 B';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; n = Number(n);
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toFixed(i ? 1 : 0) + ' ' + u[i];
+}
+function rcloneArgs(extra) {
+  return ['--config', RCLONE_CONF, '--s3-no-check-bucket', ...extra];
+}
+const RCLONE_ENV = () => Object.assign({}, process.env, { HOME: '/root' });
+function execP(cmd, args, opts) {
+  return new Promise((resolve) => {
+    execFile(cmd, args, Object.assign({ maxBuffer: 16 * 1024 * 1024 }, opts), (err, stdout, stderr) => {
+      resolve({ err, stdout: stdout || '', stderr: stderr || '' });
+    });
+  });
+}
+function backupStamp() {
+  return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19); // 2026-06-16T22-34-10
+}
+function listPgDatabases() {
+  try {
+    const out = execFileSync('psql', ['-U', 'postgres', '-h', PG_HOST, '-d', 'postgres', '-tAc',
+      "SELECT datname FROM pg_database WHERE datistemplate=false AND datallowconn ORDER BY 1"],
+      { timeout: 15000, encoding: 'utf8' });
+    return out.trim().split('\n').map(s => s.trim()).filter(Boolean);
+  } catch (_) { return []; }
+}
+function dirSize(p) {
+  let total = 0;
+  try {
+    for (const e of fs.readdirSync(p, { withFileTypes: true })) {
+      const fp = path.join(p, e.name);
+      if (e.isDirectory()) total += dirSize(fp);
+      else { try { total += fs.statSync(fp).size; } catch (_) {} }
+    }
+  } catch (_) {}
+  return total;
+}
+
+async function dumpPostgres(stageDir, result) {
+  const dir = path.join(stageDir, 'postgres');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const db of listPgDatabases()) {
+    const file = path.join(dir, db + '.dump');
+    // -Fc = custom format: compressed and restorable with `pg_restore`
+    const r = await execP('pg_dump', ['-U', 'postgres', '-h', PG_HOST, '-Fc', '-f', file, db], { timeout: 30 * 60_000 });
+    if (r.err) result.errors.push('pg_dump ' + db + ': ' + (r.stderr || r.err.message || '').split('\n')[0]);
+    else result.items.push('postgres/' + db + '.dump');
+  }
+}
+async function tarSites(stageDir, result) {
+  const dir = path.join(stageDir, 'sites');
+  fs.mkdirSync(dir, { recursive: true });
+  const excl = SITE_TAR_EXCLUDES.map(d => "--exclude='" + d + "'").join(' ');
+  for (const s of querySitesDb()) {
+    if (!s.user || !s.domain) continue;
+    const src = (s.root && fs.existsSync(s.root)) ? s.root : ('/home/' + s.user + '/htdocs/' + s.domain);
+    if (!fs.existsSync(src)) continue;
+    const file = path.join(dir, s.domain + '.tar.zst');
+    const parent = path.dirname(src), base = path.basename(src);
+    const r = await execP('bash', ['-c',
+      "tar " + excl + " --warning=no-file-changed --ignore-failed-read -C '" + parent + "' -cf - '" + base
+      + "' | zstd -q -T2 -o '" + file + "' -f"], { timeout: 60 * 60_000 });
+    if (r.err && !fs.existsSync(file)) result.errors.push('tar ' + s.domain + ': ' + (r.stderr || '').split('\n')[0]);
+    else result.items.push('sites/' + s.domain + '.tar.zst');
+  }
+}
+async function tarConfigs(stageDir, result) {
+  const dir = path.join(stageDir, 'configs');
+  fs.mkdirSync(dir, { recursive: true });
+  const targets = ['/etc/nginx', '/etc/systemd/system', '/root/.config/rclone/rclone.conf', __dirname]
+    .filter(p => fs.existsSync(p)).map(t => "'" + t + "'").join(' ');
+  const file = path.join(dir, 'configs.tar.zst');
+  const r = await execP('bash', ['-c',
+    "tar --warning=no-file-changed --ignore-failed-read -cf - " + targets + " | zstd -q -o '" + file + "' -f"],
+    { timeout: 10 * 60_000 });
+  if (r.err && !fs.existsSync(file)) result.errors.push('tar configs: ' + (r.stderr || '').split('\n')[0]);
+  else result.items.push('configs/configs.tar.zst');
+}
+
+async function pruneBackups(result) {
+  const days = backupsCache.retentionDays || 14;
+  const base = RCLONE_REMOTE + BACKUP_BUCKET + '/' + BACKUP_PREFIX;
+  const del = await execP('rclone', rcloneArgs(['delete', base, '--min-age', days + 'd']),
+    { timeout: 30 * 60_000, env: RCLONE_ENV() });
+  if (del.err) { result.errors.push('prune: ' + (del.stderr || '').split('\n').slice(-2).join(' ').trim()); return; }
+  await execP('rclone', rcloneArgs(['rmdirs', base, '--leave-root']), { timeout: 10 * 60_000, env: RCLONE_ENV() });
+}
+
+async function runBackup(trigger) {
+  if (backupRunning) return { error: 'A backup is already running' };
+  backupRunning = true; backupsCache.running = true;
+  const startedAt = new Date().toISOString();
+  const start = Date.now();
+  const stamp = backupStamp();
+  const stageDir = path.join(BACKUP_STAGE, stamp);
+  const result = { items: [], errors: [] };
+  let bytes = 0;
+  try {
+    fs.mkdirSync(stageDir, { recursive: true });
+    const scope = backupsCache.scope || {};
+    if (scope.postgres) await dumpPostgres(stageDir, result);
+    if (scope.sites)    await tarSites(stageDir, result);
+    if (scope.configs)  await tarConfigs(stageDir, result);
+    bytes = dirSize(stageDir);
+    if (result.items.length) {
+      const dest = RCLONE_REMOTE + BACKUP_BUCKET + '/' + BACKUP_PREFIX + '/' + stamp;
+      const up = await execP('rclone', rcloneArgs(['copy', stageDir, dest, '--transfers', '4']),
+        { timeout: 6 * 60 * 60_000, env: RCLONE_ENV() });
+      if (up.err) result.errors.push('rclone upload: ' + (up.stderr || up.err.message || '').split('\n').slice(-2).join(' ').trim());
+    } else {
+      result.errors.push('nothing was produced to upload');
+    }
+    await pruneBackups(result);
+  } catch (e) {
+    result.errors.push('runBackup: ' + e.message);
+  } finally {
+    try { fs.rmSync(stageDir, { recursive: true, force: true }); } catch (_) {}
+    backupRunning = false; backupsCache.running = false;
+  }
+  const success = result.errors.length === 0 && result.items.length > 0;
+  const entry = {
+    startedAt, finishedAt: new Date().toISOString(), trigger, success, bytes,
+    itemCount: result.items.length, items: result.items, errors: result.errors,
+    duration_ms: Date.now() - start, stamp,
+  };
+  backupsCache.lastRun = entry;
+  backupsCache.log.push(entry);
+  if (backupsCache.log.length > BACKUP_LOG_MAX) backupsCache.log = backupsCache.log.slice(-BACKUP_LOG_MAX);
+  saveBackups();
+  // optional notify, reusing the Updates-tab Telegram config
+  const tel = updatesCache && updatesCache.telegram;
+  if (tel && tel.enabled && tel.botToken && tel.chatId && (!success || tel.notifyOnComplete)) {
+    const msg = (success ? '✅' : '⚠️') + ' web01 backup (' + trigger + ') — '
+      + result.items.length + ' items, ' + fmtBytes(bytes) + ', ' + Math.round(entry.duration_ms / 1000) + 's'
+      + (result.errors.length ? '\nErrors:\n• ' + result.errors.join('\n• ') : '');
+    try { await sendTelegram(msg); } catch (_) {}
+  }
+  return entry;
+}
+
+async function listRemoteBackups() {
+  const base = RCLONE_REMOTE + BACKUP_BUCKET + '/' + BACKUP_PREFIX;
+  const r = await execP('rclone', rcloneArgs(['lsjson', base, '--dirs-only']), { timeout: 60_000, env: RCLONE_ENV() });
+  if (r.err) return [];
+  try { return JSON.parse(r.stdout).map(d => d.Name).sort().reverse(); } catch (_) { return []; }
+}
+
+let lastBackupSchedKey = null;
+function backupTick() {
+  const cfg = backupsCache.schedule;
+  if (!cfg || !cfg.enabled || backupRunning) return;
+  const now = new Date();
+  const cur = now.getHours() * 60 + now.getMinutes();
+  const tgt = (cfg.hour || 3) * 60 + (cfg.minute || 0);
+  if (Math.abs(cur - tgt) > 2) return;
+  const key = now.toISOString().slice(0, 10) + '-' + cfg.hour + '-' + cfg.minute;
+  if (lastBackupSchedKey === key) return;
+  lastBackupSchedKey = key;
+  runBackup('scheduled');
+}
+
 /* ------------------------------------------------------------------- html */
 
 const PAGE = `<!doctype html>
@@ -1891,6 +2095,7 @@ const PAGE = `<!doctype html>
     <button class="tab" data-tab="updates">🔄 Updates</button>
     <button class="tab" data-tab="sites">🌐 Sites</button>
     <button class="tab" data-tab="modules">📦 Modules</button>
+    <button class="tab" data-tab="backup">💾 Backups</button>
   </div>
   <div id="banner" class="banner ok" style="display:none"></div>
   <div id="pm2view">
@@ -1915,6 +2120,7 @@ const PAGE = `<!doctype html>
   <div id="updatesview" style="display:none"></div>
   <div id="sitesview" style="display:none"></div>
   <div id="modulesview" style="display:none"></div>
+  <div id="backupview" style="display:none"></div>
   <footer>auto-refresh 10s · heartbeat = <span id="ivl">60</span>s samples · 🟩 up · 🟥 down · 🟧 restarted</footer>
 </div>
 <div id="toast-host"></div>
@@ -2456,6 +2662,7 @@ function renderSites(){
 /* ----------------------------------------------------------------- modules */
 
 let lastModules = null;
+let lastBackup = null;
 
 function modSeverityRank(s){ return s==='major'?3:s==='minor'?2:s==='patch'?1:0; }
 
@@ -3096,6 +3303,94 @@ async function testTelegram(){
   } catch(e){ toast('Telegram failed: ' + e.message, 'error'); }
 }
 
+function bkBytes(n){ if(!n) return '0 B'; const u=['B','KB','MB','GB','TB']; let i=0; n=Number(n); while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(i?1:0)+' '+u[i]; }
+function scopeChk(id,label,on){ return '<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="'+id+'" '+(on?'checked':'')+'> '+label+'</label>'; }
+
+function renderBackup(){
+  const view = document.getElementById('backupview');
+  if (!lastBackup){ view.innerHTML = '<div class="upd-card">Loading…</div>'; return; }
+  // don't clobber a field the user is mid-edit on during the 10s auto-refresh
+  if (view.contains(document.activeElement) && ['INPUT','SELECT'].includes((document.activeElement.tagName||''))) return;
+  const d = lastBackup, sc = d.scope||{}, sch = d.schedule||{}, lr = d.lastRun;
+  let html = '';
+
+  html += '<div class="upd-card" style="grid-column:1/-1">';
+  html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">';
+  html += '<h3 style="margin:0">💾 Backup to Wasabi</h3>';
+  html += '<span style="font-size:12px;color:#6b7280">remote:rhcsolutions/web01-backups · s3.eu-central-1.wasabisys.com</span>';
+  html += '<div style="margin-left:auto;display:flex;gap:8px">';
+  if (d.running) html += '<button class="btn running" disabled>⏳ backing up…</button>';
+  else html += '<button class="btn update" id="bkRun">▶ Back up now</button>';
+  html += '<button class="btn" id="bkList">↻ List remote</button>';
+  html += '</div></div>';
+  if (lr){
+    html += '<div style="margin-top:10px;font-size:13px">';
+    html += '<span class="upd-badge '+(lr.success?'ok':'na')+'">'+(lr.success?'✓ last backup ok':'⚠ last backup had errors')+'</span> ';
+    html += '<span style="color:#9ca3af"> '+new Date(lr.finishedAt||lr.startedAt).toLocaleString()+' · '+lr.itemCount+' items · '+bkBytes(lr.bytes)+' · '+Math.round((lr.duration_ms||0)/1000)+'s · '+esc(lr.trigger)+'</span>';
+    if (lr.errors && lr.errors.length) html += '<ul style="margin:6px 0 0;color:#f87171">'+lr.errors.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>';
+    html += '</div>';
+  } else { html += '<div style="margin-top:10px;color:#9ca3af;font-size:13px">No backups run yet.</div>'; }
+  html += '</div>';
+
+  html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px">';
+  html += '<h3 style="margin:0 0 10px">Schedule &amp; scope</h3>';
+  html += '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:12px">';
+  html += scopeChk('bkScopePg','Postgres databases',sc.postgres);
+  html += scopeChk('bkScopeSites','CloudPanel site files',sc.sites);
+  html += scopeChk('bkScopeCfg','App + system configs',sc.configs);
+  html += '</div>';
+  html += '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">';
+  html += '<label class="switch"><input type="checkbox" id="bkSchedEnable" '+(sch.enabled?'checked':'')+'><span class="slider"></span></label><span>Daily at</span>';
+  html += '<input id="bkSchedHour" type="number" min="0" max="23" value="'+(sch.hour!=null?sch.hour:3)+'" style="width:56px">:';
+  html += '<input id="bkSchedMin" type="number" min="0" max="59" value="'+(sch.minute!=null?sch.minute:30)+'" style="width:56px">';
+  html += '<span style="margin-left:14px">Keep</span> <input id="bkRetention" type="number" min="1" max="365" value="'+(d.retentionDays!=null?d.retentionDays:14)+'" style="width:64px"> <span>days</span>';
+  html += '<button class="btn update" id="bkSave" style="margin-left:auto">Save</button>';
+  html += '</div></div>';
+
+  if (window._bkRemote){
+    html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><h3 style="margin:0 0 8px">In Wasabi ('+window._bkRemote.length+')</h3>';
+    html += '<div style="font-size:12.5px;color:#cbd5e1;max-height:220px;overflow:auto">'+(window._bkRemote.length?window._bkRemote.map(n=>'<div>📁 '+esc(n)+'</div>').join(''):'<span style="color:#6b7280">none yet</span>')+'</div></div>';
+  }
+  if (d.log && d.log.length){
+    html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><h3 style="margin:0 0 8px">Recent runs</h3><table class="upd-table"><tr><th>When</th><th>Trigger</th><th>Items</th><th>Size</th><th>Duration</th><th>Status</th></tr>';
+    for (const e of d.log.slice().reverse().slice(0,20)){
+      html += '<tr><td>'+new Date(e.finishedAt||e.startedAt).toLocaleString()+'</td><td>'+esc(e.trigger)+'</td><td>'+e.itemCount+'</td><td>'+bkBytes(e.bytes)+'</td><td>'+Math.round((e.duration_ms||0)/1000)+'s</td><td>'+(e.success?'<span class="upd-badge ok">✓</span>':'<span class="upd-badge na" title="'+esc((e.errors||[]).join('; '))+'">⚠</span>')+'</td></tr>';
+    }
+    html += '</table></div>';
+  }
+
+  view.innerHTML = html;
+  const run = document.getElementById('bkRun');
+  if (run) run.addEventListener('click', () => armConfirm(run, '⚠ Click again to start', runBackupNow));
+  const save = document.getElementById('bkSave');
+  if (save) save.addEventListener('click', saveBackupConfig);
+  const list = document.getElementById('bkList');
+  if (list) list.addEventListener('click', loadRemoteList);
+}
+async function runBackupNow(){
+  try { const r = await fetch('api/backup/run',{method:'POST'}); const j = await r.json();
+    if (j.error) toast(j.error,'error'); else toast('Backup started','success');
+    setTimeout(refresh, 1500);
+  } catch(e){ toast('Error: '+e,'error'); }
+}
+function saveBackupConfig(){
+  const body = {
+    schedule: { enabled: document.getElementById('bkSchedEnable').checked,
+      hour: parseInt(document.getElementById('bkSchedHour').value)||0,
+      minute: parseInt(document.getElementById('bkSchedMin').value)||0 },
+    retentionDays: parseInt(document.getElementById('bkRetention').value)||14,
+    scope: { postgres: document.getElementById('bkScopePg').checked,
+      sites: document.getElementById('bkScopeSites').checked,
+      configs: document.getElementById('bkScopeCfg').checked },
+  };
+  fetch('api/backup/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(()=>toast('Saved','success'));
+  if (lastBackup){ lastBackup.schedule=Object.assign({},lastBackup.schedule,body.schedule); lastBackup.retentionDays=body.retentionDays; lastBackup.scope=body.scope; }
+}
+async function loadRemoteList(){
+  toast('Listing Wasabi…');
+  try { const r = await fetch('api/backup/remote'); window._bkRemote = await r.json(); renderBackup(); } catch(e){ toast('Error: '+e,'error'); }
+}
+
 function setTab(tab){
   state.tab = tab; saveState();
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===tab));
@@ -3104,11 +3399,13 @@ function setTab(tab){
   document.getElementById('updatesview').style.display = tab==='updates' ? '' : 'none';
   document.getElementById('sitesview').style.display = tab==='sites' ? '' : 'none';
   document.getElementById('modulesview').style.display = tab==='modules' ? '' : 'none';
+  document.getElementById('backupview').style.display = tab==='backup' ? '' : 'none';
   if (tab==='pm2') render();
   else if (tab==='db') renderDb();
   else if (tab==='updates') renderUpdates();
   else if (tab==='sites') renderSites();
   else if (tab==='modules') renderModules();
+  else if (tab==='backup') renderBackup();
 }
 
 document.getElementById('q').value = state.q;
@@ -3122,18 +3419,20 @@ document.getElementById('sharedToggle').addEventListener('click', () => {
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));
 
 async function refresh(){
-  try { [lastData, lastDb, lastUpdates, lastSites, lastModules] = await Promise.all([
+  try { [lastData, lastDb, lastUpdates, lastSites, lastModules, lastBackup] = await Promise.all([
     fetch('api/status').then(r=>r.json()),
     fetch('api/db').then(r=>r.json()),
     fetch('api/updates').then(r=>r.json()),
     fetch('api/sites').then(r=>r.json()),
     fetch('api/modules').then(r=>r.json()),
+    fetch('api/backup').then(r=>r.json()),
   ]); } catch(e){ return; }
   if (state.tab==='pm2') render();
   else if (state.tab==='db') renderDb();
   else if (state.tab==='updates') renderUpdates();
   else if (state.tab==='sites') renderSites();
   else if (state.tab==='modules') renderModules();
+  else if (state.tab==='backup') renderBackup();
 }
 async function pm2Action(action, user, app) {
   try {
@@ -3375,6 +3674,48 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true }));
   }
+  if (url === '/api/backup') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(backupsCache));
+  }
+  if (url === '/api/backup/run' && req.method === 'POST') {
+    if (backupRunning) { res.writeHead(409, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'A backup is already running' })); }
+    runBackup('manual').catch((e) => console.error('backup run failed:', e.message));  // async; UI polls /api/backup
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ started: true }));
+  }
+  if (url === '/api/backup/remote') {
+    listRemoteBackups().then((list) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(list));
+    }).catch(() => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('[]'); });
+    return;
+  }
+  if (url === '/api/backup/config' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 64 * 1024) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const cfg = JSON.parse(body);
+        if (cfg.schedule) backupsCache.schedule = Object.assign({}, backupsCache.schedule, cfg.schedule);
+        if (cfg.scope) backupsCache.scope = Object.assign({}, backupsCache.scope, cfg.scope);
+        if (cfg.retentionDays != null) backupsCache.retentionDays = Math.max(1, Math.min(365, parseInt(cfg.retentionDays) || 14));
+        saveBackups();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    });
+    return;
+  }
+  if (url === '/api/backup/log' && req.method === 'DELETE') {
+    backupsCache.log = [];
+    saveBackups();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: true }));
+  }
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('not found\n');
 });
@@ -3393,6 +3734,9 @@ setTimeout(() => { collectModules().catch((e) => console.error('initial modules 
 setInterval(() => collectModules().catch(() => {}), MODULES_INTERVAL_MS);
 // auto-update: tick every minute, fires if config matches the configured HH:MM
 setInterval(autoUpdateTick, 60_000);
+// backups: load persisted config, tick every minute for the daily scheduled run
+loadBackups();
+setInterval(backupTick, 60_000);
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => { saveHistory(true); process.exit(0); });
 }
