@@ -229,12 +229,19 @@ async function getUserVersion(user, comp) {
   return new Promise((resolve) => {
     // Search the common per-user install locations: npm global prefix, the
     // native-installer dir (~/.local/bin, used by Claude Code etc.) and bun.
+    // Capture stderr too — some CLIs (e.g. pi) print --version to stderr.
     execFile('sudo', ['-n', '-u', user, 'sh', '-c',
-      `P="$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.bun/bin:$PATH"; PATH="$P" command -v ${comp.bin} 2>/dev/null && PATH="$P" ${comp.bin} ${comp.verFlag} 2>/dev/null || echo '__NOT_FOUND__'`
+      `P="$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.bun/bin:$PATH"; PATH="$P" command -v ${comp.bin} >/dev/null 2>&1 && PATH="$P" ${comp.bin} ${comp.verFlag} 2>&1 || echo '__NOT_FOUND__'`
     ], { timeout: 8000 }, (err, stdout) => {
       if (err) return resolve(null);
-      const v = stdout.trim().split('\n').pop().replace(/^v/, '').replace(/\s*\(.*\)\s*$/, '').trim();
-      return resolve(v === '__NOT_FOUND__' ? null : v || null);
+      const out = (stdout || '').trim();
+      if (!out || out.includes('__NOT_FOUND__')) return resolve(null);
+      // Pull the first version-like token (e.g. "2.1.179 (Claude Code)" -> 2.1.179).
+      for (const line of out.split('\n')) {
+        const m = line.replace(/^v/, '').match(/\d+\.\d+[\w.\-]*/);
+        if (m) return resolve(m[0]);
+      }
+      return resolve(null);
     });
   });
 }
