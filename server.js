@@ -227,8 +227,10 @@ async function getLatestVersion(comp) {
 
 async function getUserVersion(user, comp) {
   return new Promise((resolve) => {
+    // Search the common per-user install locations: npm global prefix, the
+    // native-installer dir (~/.local/bin, used by Claude Code etc.) and bun.
     execFile('sudo', ['-n', '-u', user, 'sh', '-c',
-      `PATH="$HOME/.npm-global/bin:$PATH" command -v ${comp.bin} 2>/dev/null && PATH="$HOME/.npm-global/bin:$PATH" ${comp.bin} ${comp.verFlag} 2>/dev/null || echo '__NOT_FOUND__'`
+      `P="$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.bun/bin:$PATH"; PATH="$P" command -v ${comp.bin} 2>/dev/null && PATH="$P" ${comp.bin} ${comp.verFlag} 2>/dev/null || echo '__NOT_FOUND__'`
     ], { timeout: 8000 }, (err, stdout) => {
       if (err) return resolve(null);
       const v = stdout.trim().split('\n').pop().replace(/^v/, '').replace(/\s*\(.*\)\s*$/, '').trim();
