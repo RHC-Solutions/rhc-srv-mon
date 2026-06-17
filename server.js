@@ -1871,7 +1871,7 @@ const PAGE = `<!doctype html>
   .meta { flex:1 1 180px; min-width:140px; }
   .name { font-weight:600; font-size:14.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .info { color:#9ca3af; font-size:12px; margin-top:1px; }
-  .beats { display:flex; align-items:center; gap:3px; flex:0 0 auto; }
+  .beats { display:flex; align-items:center; gap:3px; flex:0 1 497px; min-width:0; overflow:hidden; justify-content:flex-end; }
   .beat { width:7px; height:26px; border-radius:4px; background:#3a4054; transition: transform .12s; position:relative; }
   .beat.up { background:#5cdd8b; }
   .beat.down { background:#dc3545; }
@@ -1890,7 +1890,7 @@ const PAGE = `<!doctype html>
   /* stat/meta/act inherit widths from the base .stat/.meta/.act rules so the header
      tracks the rows at every breakpoint (a header-specific width here would out-specify
      the responsive @media overrides and drift the columns). Only beats-h is header-only. */
-  .hdr .beats-h { flex:0 0 auto; width:497px; }
+  .hdr .beats-h { flex:0 1 497px; min-width:0; }
   .hdr .col, .hdr .pct { font-weight:600; }
   .err { color:#ff8088; font-size:13px; padding:10px 0; }
   .toolbar { display:flex; align-items:center; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
@@ -2081,7 +2081,9 @@ const PAGE = `<!doctype html>
   .au-log-entry .child .att { color:#9ca3af; font-size:11.5px; margin-top:3px; font-family:ui-monospace,Menlo,Consolas,monospace; }
   .au-log-entry pre { margin:6px 0 0; padding:8px 10px; background:#0c0e16; border-radius:6px; max-height:160px; overflow:auto; color:#cbd5e1; font-size:11.5px; white-space:pre-wrap; word-break:break-word; }
   footer { color:#6b7280; font-size:12px; text-align:center; margin-top:8px; }
-  @media (max-width:1180px){ .beats .beat:nth-child(-n+25){ display:none; } .hdr .beats-h{ width:247px; } }
+  /* bars + header spacer share flex:0 1 497px, so they shrink identically and the
+     numeric columns stay aligned at every width — no per-breakpoint width hacks needed.
+     Below 860px the bars are hidden entirely (next rule). */
   @media (max-width:860px){ .beats, .hdr .beats-h { display:none; } }
   @media (max-width:560px){ .col { flex:0 0 48px; } .info{ display:none; } .stat { flex:0 0 54px; } }
 </style></head>
