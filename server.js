@@ -87,6 +87,64 @@ function loadDbCreds() {
   catch (_) { return []; }
 }
 
+// Recover plaintext Postgres passwords for the "show password" reveal. PG stores
+// only SCRAM hashes, so the plaintext is harvested from where the apps keep it:
+// systemd Environment= lines and .env files, parsed as postgres://role:pass@host/db.
+// Computed live + cached (never written to disk). Page is behind basic-auth + CF Access.
+const PG_DSN_RE = /postgres(?:ql)?:\/\/([^:/\s"']+):([^@/\s"']+)@([^:/\s"']+)(?::(\d+))?\/([A-Za-z0-9_.-]+)/g;
+const ENV_SKIP_DIRS = new Set(['node_modules', '.next', '.git', 'vendor', '.turbo', 'cache', '.cache', 'dist', 'tmp', 'logs']);
+let _dbCredsCache = null, _dbCredsAt = 0;
+const DB_CREDS_TTL = 5 * 60_000;
+
+function collectEnvFiles(base, out, depth) {
+  let entries;
+  try { entries = fs.readdirSync(base, { withFileTypes: true }); } catch (_) { return; }
+  for (const e of entries) {
+    if (e.isSymbolicLink()) continue;
+    if (e.isDirectory()) {
+      if (depth <= 0 || ENV_SKIP_DIRS.has(e.name)) continue;
+      collectEnvFiles(path.join(base, e.name), out, depth - 1);
+    } else if (e.name.startsWith('.env') && out.length < 2000) {
+      out.push(path.join(base, e.name));
+    }
+  }
+}
+function recoverDbCredentials() {
+  const files = [];
+  try { for (const f of fs.readdirSync('/etc/systemd/system')) if (f.endsWith('.service')) files.push('/etc/systemd/system/' + f); } catch (_) {}
+  let homes = [];
+  try { homes = fs.readdirSync('/home'); } catch (_) {}
+  for (const u of homes) {
+    const ud = '/home/' + u + '/.config/systemd/user';
+    try { for (const f of fs.readdirSync(ud)) if (f.endsWith('.service')) files.push(path.join(ud, f)); } catch (_) {}
+    collectEnvFiles('/home/' + u + '/htdocs', files, 4);
+  }
+  const dec = (s) => { try { return decodeURIComponent(s); } catch (_) { return s; } };
+  const found = new Map();
+  for (const fp of files) {
+    let txt;
+    try { txt = fs.readFileSync(fp, 'utf8'); } catch (_) { continue; }
+    PG_DSN_RE.lastIndex = 0;
+    let m;
+    while ((m = PG_DSN_RE.exec(txt))) {
+      const role = dec(m[1]), password = dec(m[2]), host = m[3], port = m[4] || '5432', database = m[5];
+      const key = role + '|' + database + '|' + password;
+      if (!found.has(key)) found.set(key, { role, database, password, host, port, source: fp });
+    }
+  }
+  return [...found.values()].sort((a, b) => a.role.localeCompare(b.role) || a.database.localeCompare(b.database));
+}
+function getDbCredentials() {
+  const now = Date.now();
+  if (_dbCredsCache && (now - _dbCredsAt) < DB_CREDS_TTL) return _dbCredsCache;
+  const merged = new Map();
+  for (const c of loadDbCreds()) merged.set((c.role || '') + '|' + (c.database || '') + '|' + (c.password || ''), c);
+  for (const c of recoverDbCredentials()) { const k = c.role + '|' + c.database + '|' + c.password; if (!merged.has(k)) merged.set(k, c); }
+  _dbCredsCache = [...merged.values()];
+  _dbCredsAt = now;
+  return _dbCredsCache;
+}
+
 let latestDb = null, latestDbAt = 0;
 async function dbSample() {
   const res = await pgQuery();
@@ -163,7 +221,7 @@ function buildDbPayload() {
       total_conns: r.data ? r.data.total_conns : 0,
     },
     databases: dbs,
-    credentials: loadDbCreds(),
+    credentials: getDbCredentials(),
     sqlite,
     mariadb,
   };
@@ -2359,13 +2417,14 @@ function renderDb(){
     html += '<details class="creds"><summary>🔑 Connection credentials ('+d.credentials.length+' roles) — click to reveal</summary>'
       + '<div class="warnbox">⚠ Plaintext app passwords, recovered from each app\\'s live config. PostgreSQL itself stores only irreversible SCRAM-SHA-256 hashes. This page is behind basic-auth + Cloudflare Access.</div>'
       + '<table><tr><th>Role</th><th>Database</th><th>Password</th><th>Source</th></tr>';
-    for (const c of d.credentials) {
-      const pid = 'pw'+Math.abs(hashStr(c.role));
+    d.credentials.forEach((c, ci) => {
+      const pid = 'pw'+ci+'_'+Math.abs(hashStr(c.role+'|'+c.database));
+      const pw = c.password || '';
       html += '<tr><td><code>'+esc(c.role)+'</code></td><td>'+esc(c.database)+'</td>'
         + '<td><div class="pwwrap"><span class="reveal" data-pw="'+pid+'">👁</span>'
-        + '<code id="'+pid+'" data-real="'+esc(c.password)+'">'+'•'.repeat(Math.min(16,c.password.length))+'</code></div></td>'
+        + '<code id="'+pid+'" data-real="'+esc(pw)+'">'+'•'.repeat(Math.min(16,pw.length))+'</code></div></td>'
         + '<td class="src">'+esc(c.source)+'</td></tr>';
-    }
+    });
     html += '</table></details>';
   }
 
