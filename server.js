@@ -104,12 +104,41 @@ function collectEnvFiles(base, out, depth) {
     if (e.isDirectory()) {
       if (depth <= 0 || ENV_SKIP_DIRS.has(e.name)) continue;
       collectEnvFiles(path.join(base, e.name), out, depth - 1);
-    } else if (e.name.startsWith('.env') && out.length < 2000) {
-      out.push(path.join(base, e.name));
+    } else if (e.name.startsWith('.env') && !/\.(example|sample|template|dist|tmpl)$/i.test(e.name) && out.length < 2000) {
+      out.push(path.join(base, e.name));  // skip .env.example / .env.*.sample templates (placeholder creds)
     }
   }
 }
+// Pull postgres creds from a blob (file contents or NUL-joined process env): both
+// postgres:// DSNs and split KEY=VALUE groups. Mislabeled/garbage matches are dropped
+// later by the live-PG-role filter in getDbCredentials().
+function extractCreds(text, source, found, dec) {
+  PG_DSN_RE.lastIndex = 0;
+  let m;
+  while ((m = PG_DSN_RE.exec(text))) {
+    const role = dec(m[1]), password = dec(m[2]), host = m[3], port = m[4] || '5432', database = m[5];
+    const key = role + '|' + database + '|' + password;
+    if (!found.has(key)) found.set(key, { role, database, password, host, port, source });
+  }
+  const env = {};
+  for (const line of text.split(/[\n\0]/)) {
+    const mm = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (mm) env[mm[1].toUpperCase()] = mm[2].trim().replace(/^["']|["']$/g, '');
+  }
+  const pick = (...ks) => { for (const k of ks) if (env[k]) return env[k]; return null; };
+  const sPw = pick('PGPASSWORD', 'POSTGRES_PASSWORD', 'DB_PASSWORD', 'DATABASE_PASSWORD', 'DB_PASS');
+  const sUser = pick('PGUSER', 'POSTGRES_USER', 'DB_USER', 'DB_USERNAME', 'DATABASE_USER');
+  if (sPw && sUser) {
+    const sDb = pick('PGDATABASE', 'POSTGRES_DB', 'DB_NAME', 'DB_DATABASE', 'DATABASE_NAME') || '(unknown)';
+    const sHost = pick('PGHOST', 'POSTGRES_HOST', 'DB_HOST', 'DATABASE_HOST') || '?';
+    const key = sUser + '|' + sDb + '|' + sPw;
+    if (!found.has(key)) found.set(key, { role: sUser, database: sDb, password: sPw, host: sHost, port: pick('PGPORT', 'DB_PORT') || '5432', source });
+  }
+}
 function recoverDbCredentials() {
+  const dec = (s) => { try { return decodeURIComponent(s); } catch (_) { return s; } };
+  const found = new Map();
+  // 1) systemd units + .env files on disk
   const files = [];
   try { for (const f of fs.readdirSync('/etc/systemd/system')) if (f.endsWith('.service')) files.push('/etc/systemd/system/' + f); } catch (_) {}
   let homes = [];
@@ -119,20 +148,16 @@ function recoverDbCredentials() {
     try { for (const f of fs.readdirSync(ud)) if (f.endsWith('.service')) files.push(path.join(ud, f)); } catch (_) {}
     collectEnvFiles('/home/' + u + '/htdocs', files, 4);
   }
-  const dec = (s) => { try { return decodeURIComponent(s); } catch (_) { return s; } };
-  const found = new Map();
-  for (const fp of files) {
-    let txt;
-    try { txt = fs.readFileSync(fp, 'utf8'); } catch (_) { continue; }
-    PG_DSN_RE.lastIndex = 0;
-    let m;
-    while ((m = PG_DSN_RE.exec(txt))) {
-      const role = dec(m[1]), password = dec(m[2]), host = m[3], port = m[4] || '5432', database = m[5];
-      const key = role + '|' + database + '|' + password;
-      if (!found.has(key)) found.set(key, { role, database, password, host, port, source: fp });
-    }
-  }
+  for (const fp of files) { try { extractCreds(fs.readFileSync(fp, 'utf8'), fp, found, dec); } catch (_) {} }
   return [...found.values()].sort((a, b) => a.role.localeCompare(b.role) || a.database.localeCompare(b.database));
+}
+function listPgLoginRoles() {
+  try {
+    const out = execFileSync('psql', ['-U', 'postgres', '-h', PG_HOST, '-d', 'postgres', '-tAc',
+      "SELECT rolname FROM pg_roles WHERE rolcanlogin AND rolname NOT LIKE 'pg_%'"],
+      { timeout: 10000, encoding: 'utf8' });
+    return new Set(out.trim().split('\n').map(s => s.trim()).filter(Boolean));
+  } catch (_) { return null; }
 }
 function getDbCredentials() {
   const now = Date.now();
@@ -140,7 +165,11 @@ function getDbCredentials() {
   const merged = new Map();
   for (const c of loadDbCreds()) merged.set((c.role || '') + '|' + (c.database || '') + '|' + (c.password || ''), c);
   for (const c of recoverDbCredentials()) { const k = c.role + '|' + c.database + '|' + c.password; if (!merged.has(k)) merged.set(k, c); }
-  _dbCredsCache = [...merged.values()];
+  let list = [...merged.values()];
+  // keep only creds whose role is a real PG login role — drops placeholder/MySQL/garbage matches
+  const roles = listPgLoginRoles();
+  if (roles && roles.size) list = list.filter(c => roles.has(c.role));
+  _dbCredsCache = list;
   _dbCredsAt = now;
   return _dbCredsCache;
 }
