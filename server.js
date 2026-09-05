@@ -4409,7 +4409,7 @@ async function sshInstallGo(id){
   const g = (i) => document.getElementById(i);
   const opts = { appDir: g('shi-dir').value.trim(), port: parseInt(g('shi-port').value) || 8899, appName: g('shi-name').value.trim(),
     installNode: g('shi-node').checked, installPm2: g('shi-pm2').checked, overwrite: g('shi-over').checked,
-    copy: { modules: g('shi-c-modules').checked, updates: g('shi-c-updates').checked, telegram: g('shi-c-telegram').checked, backups: g('shi-c-backups').checked, sshHosts: g('shi-c-ssh').checked } };
+    copy: { modules: g('shi-c-modules').checked, updates: g('shi-c-updates').checked, telegram: g('shi-c-telegram').checked, backups: g('shi-c-backups').checked, sshHosts: g('shi-c-ssh').checked, auth: !!(g('shi-c-auth') && g('shi-c-auth').checked) } };
   try {
     const r = await fetch('api/ssh/install', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ hostId: id, opts }) });
     const d = await r.json();
@@ -4959,6 +4959,10 @@ function sshBuildSettingsBundle(copy) {
   if (copy.sshHosts !== false) {
     files['ssh-hosts.json'] = { hosts: sshCache.hosts.map((h) => Object.assign({}, h)), installLog: [] };
   }
+  if (copy.auth === true && authCache.users.length) {
+    // login users only (opt-in): no sessions, no audit log, no half-finished authenticator resets
+    files['auth.json'] = { users: authCache.users.map((u) => ({ username: u.username, salt: u.salt, hash: u.hash, totpSecret: u.totpSecret, totpLast: null, created: u.created || new Date().toISOString() })), sessions: {}, log: [] };
+  }
   return files;
 }
 
@@ -5007,7 +5011,7 @@ log "pm2 $(pm2 -v 2>/dev/null | tail -1)"
 cd "$APP_DIR" || { log "app dir $APP_DIR missing"; exit 4; }
 chmod 700 "$APP_DIR"
 chmod 600 "$APP_DIR"/*.json 2>/dev/null || true
-[ -f .gitignore ] || printf 'db-credentials.json\\nhistory.json\\nupdates.json\\nbackups.json\\nssh-hosts.json\\n.helpers/\\n' > .gitignore
+[ -f .gitignore ] || printf 'db-credentials.json\\nhistory.json\\nupdates.json\\nbackups.json\\nssh-hosts.json\\nauth.json\\n.helpers/\\n' > .gitignore
 if [ ! -d .git ] && have git; then git init -q . 2>/dev/null && git add -A >/dev/null 2>&1 && git -c user.name=rhc-srv-mon -c user.email=rhc-srv-mon@localhost commit -q -m "rhc-srv-mon installed from $SOURCE_HOST ($SOURCE_GIT)" >/dev/null 2>&1 || true; fi
 # --- start / restart under pm2
 if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
@@ -5116,7 +5120,7 @@ function sshStartInstall(hostId, optsIn) {
     appName: (typeof o.appName === 'string' && /^[\w.\-]{1,40}$/.test(o.appName.trim())) ? o.appName.trim() : 'rhc-srv-mon',
     overwrite: !!o.overwrite, installNode: o.installNode !== false, installPm2: o.installPm2 !== false,
     copy: { modules: !(o.copy && o.copy.modules === false), updates: !(o.copy && o.copy.updates === false), telegram: !(o.copy && o.copy.telegram === false),
-            backups: !(o.copy && o.copy.backups === false), sshHosts: !(o.copy && o.copy.sshHosts === false) },
+            backups: !(o.copy && o.copy.backups === false), sshHosts: !(o.copy && o.copy.sshHosts === false), auth: !!(o.copy && o.copy.auth) },
   };
   const job = { id: crypto.randomBytes(6).toString('hex'), hostId, hostName: h.name, target: sshTarget(h), status: 'running', step: 'queued', startedAt: new Date().toISOString(), finishedAt: null, opts, log: [], error: null };
   sshInstallJobs.set(job.id, job);
