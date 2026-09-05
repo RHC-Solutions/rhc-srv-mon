@@ -4399,6 +4399,7 @@ function sshInstallDialog(id){
     + chk('shi-c-telegram', 'Telegram bot token + chat id', true, 'so the target notifies the same chat')
     + chk('shi-c-backups', 'Backups schedule + scope + retention', true, 'per-DB / per-site selections are reset to "all"; needs rclone remote configured on the target')
     + chk('shi-c-ssh', 'SSH host list (this tab, incl. stored passwords)', true)
+    + chk('shi-c-auth', 'Login users + authenticator (MFA)', !h.monitor, 'same username / password / authenticator entry works on the target; active sessions are not copied')
     + '<div style="font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin:10px 0 2px">Options</div>'
     + chk('shi-node', 'Install Node.js ' + esc((src.node||'v22').split('.')[0]) + '.x via NodeSource if missing/too old', true)
     + chk('shi-pm2', 'Install pm2 globally if missing', true)
