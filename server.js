@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * pm2-status — consolidated, Uptime-Kuma-style status page for all per-user
+ * rhc-srv-mon (RHC SRV Manager) — consolidated, Uptime-Kuma-style status page for all per-user
  * PM2 daemons on this host. Zero dependencies.
  *
  *   GET /            -> HTML dashboard (auto-refreshes)
  *   GET /api/status  -> JSON (current state + heartbeat history)
  *
- * Binds to 127.0.0.1 only; exposed via nginx at /pm2status/ with basic auth.
+ * Binds to 127.0.0.1 only; exposed via nginx at /rhc-srv-mon/ (in-app login + TOTP).
  * History is sampled every SAMPLE_MS and persisted to history.json so
  * heartbeat bars survive restarts of this service.
  */
@@ -2360,7 +2360,7 @@ const PAGE = `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PM2 Status</title>
+<title>RHC SRV Manager</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -2681,7 +2681,7 @@ const PAGE = `<!doctype html>
 </style></head>
 <body>
 <div class="wrap">
-  <div class="hdr-row"><h1>📊 PM2 Status <span id="host" class="sub" style="margin:0"></span></h1><div class="userbar" id="userbar"></div></div>
+  <div class="hdr-row"><h1>📊 RHC SRV Manager <span id="host" class="sub" style="margin:0"></span></h1><div class="userbar" id="userbar"></div></div>
   <div class="sub" id="updated">loading…</div>
   <div class="tabs">
     <button class="tab active" data-tab="pm2">⚙️ PM2 Services</button>
@@ -2844,7 +2844,7 @@ function render(){
   const d = lastData;
   document.getElementById('host').textContent = d.hostname;
   document.getElementById('ivl').textContent = d.sample_interval_s;
-  document.title = (d.summary.down ? '🔴 ' : '🟢 ') + d.summary.online + '/' + d.summary.total + ' · PM2 Status · ' + d.hostname;
+  document.title = (d.summary.down ? '🔴 ' : '🟢 ') + d.summary.online + '/' + d.summary.total + ' · RHC SRV Manager · ' + d.hostname;
   document.getElementById('updated').textContent = 'Last updated: ' + new Date(d.generated_at).toLocaleString();
   if (state.tab !== 'pm2') return;
   const banner = document.getElementById('banner');
@@ -4003,7 +4003,7 @@ async function testTelegram(){
     const res = await fetch('https://api.telegram.org/bot' + tel.botToken + '/sendMessage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: tel.chatId, text: '🔔 *PM2 Status* — Telegram notification is working!', parse_mode: 'Markdown' }),
+      body: JSON.stringify({ chat_id: tel.chatId, text: '🔔 *RHC SRV Manager* — Telegram notification is working!', parse_mode: 'Markdown' }),
     });
     if (res.ok) toast('Test message sent — check your Telegram.', 'success');
     else { const j = await res.json(); toast('Telegram error: ' + (j.description || res.status), 'error'); }
@@ -5411,7 +5411,7 @@ function handleAuthRoute(req, res, url) {
 
 const LOGIN_PAGE = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sign in · RHC Server Monitor</title>
+<title>Sign in · RHC SRV Manager</title>
 <style>
   :root { color-scheme: dark; } * { box-sizing:border-box; }
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background:#161823; color:#e9e9e9; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; padding:20px; }
@@ -5431,7 +5431,7 @@ const LOGIN_PAGE = `<!doctype html>
   footer { text-align:center; color:#4b5563; font-size:11px; margin-top:18px; }
 </style></head><body>
 <div class="card">
-  <h1>📊 RHC Server Monitor</h1>
+  <h1>📊 RHC SRV Manager</h1>
   <div class="sub" id="sub">Sign in</div>
 
   <form class="step" id="s-login" autocomplete="on">
@@ -5952,5 +5952,5 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 }
 
 server.listen(PORT, HOST, () => {
-  console.log(`pm2-status listening on http://${HOST}:${PORT}`);
+  console.log(`rhc-srv-mon (RHC SRV Manager) listening on http://${HOST}:${PORT}`);
 });
