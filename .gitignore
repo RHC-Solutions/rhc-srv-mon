@@ -4,3 +4,4 @@ updates.json
 backups.json
 ssh-hosts.json
 .helpers/
+auth.json

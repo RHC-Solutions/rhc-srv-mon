@@ -2675,10 +2675,13 @@ const PAGE = `<!doctype html>
   .ssh-modal .box b { color:#e9e9e9; }
   @media (max-width:820px){ .ssh-layout { flex-direction:column; height:auto; } .ssh-side { flex:0 0 auto; max-height:240px; } .ssh-main { height:60vh; } }
   body.tab-ssh .wrap { max-width:1640px; }
+  .hdr-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .userbar { display:flex; gap:6px; align-items:center; font-size:12.5px; color:#9ca3af; margin-top:8px; }
+  .userbar .who { margin-right:6px; } .userbar .who small { color:#6b7280; }
 </style></head>
 <body>
 <div class="wrap">
-  <h1>📊 PM2 Status <span id="host" class="sub" style="margin:0"></span></h1>
+  <div class="hdr-row"><h1>📊 PM2 Status <span id="host" class="sub" style="margin:0"></span></h1><div class="userbar" id="userbar"></div></div>
   <div class="sub" id="updated">loading…</div>
   <div class="tabs">
     <button class="tab active" data-tab="pm2">⚙️ PM2 Services</button>
@@ -4436,6 +4439,59 @@ async function sshRenderInstalls(){
   for (const pre of box.querySelectorAll('pre')) pre.scrollTop = pre.scrollHeight;
 }
 
+/* ---- auth (session UI) ---- */
+(function(){ const f = window.fetch; window.fetch = function(u, o){ return f(u, o).then(r => { if (r.status === 401 && typeof u === 'string' && u.indexOf('api/') === 0 && u.indexOf('api/auth/') !== 0) { location.replace('login'); throw new Error('unauthenticated'); } return r; }); }; })();
+async function authInit(){
+  try {
+    const d = await fetch('api/auth/me').then(r => r.json());
+    const bar = document.getElementById('userbar'); if (!bar) return;
+    if (!d.user) { bar.innerHTML = ''; return; }
+    bar.innerHTML = '<span class="who">👤 ' + esc(d.user) + (d.local ? ' <small>local access · no login</small>' : (d.sessions > 1 ? ' <small>' + d.sessions + ' sessions</small>' : '')) + '</span>'
+      + (d.local ? '' : '<button class="upd-test-btn" onclick="authAccount()">🔐 Account</button><button class="upd-test-btn" onclick="authLogout()">Logout</button>');
+  } catch(e){}
+}
+async function authLogout(){ try { await fetch('api/auth/logout', { method:'POST' }); } catch(e){} location.replace('login'); }
+function authQrLib(){ return window.qrcode ? Promise.resolve() : new Promise((ok, bad) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js'; s.onload = ok; s.onerror = bad; document.head.appendChild(s); }); }
+function authAccount(){
+  sshModal('<h3>🔐 Account</h3>'
+    + '<div class="box"><b>Change password</b> — requires your current password and a fresh authenticator code.</div>'
+    + '<div class="row2">' + sshField('Current password', '<input id="ac-cur" type="password" autocomplete="current-password">') + sshField('Authenticator code', '<input id="ac-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code">') + '</div>'
+    + '<div class="row2">' + sshField('New password', '<input id="ac-new" type="password" autocomplete="new-password">') + sshField('Repeat new password', '<input id="ac-new2" type="password" autocomplete="new-password">') + '</div>'
+    + '<div class="foot" style="margin-bottom:18px"><button class="btn pri" onclick="authChangePw()">Change password</button></div>'
+    + '<div class="box"><b>Reset authenticator</b> — enrol a new phone/app. The old one keeps working until the new code is confirmed.</div>'
+    + '<div class="row2">' + sshField('Password', '<input id="am-pw" type="password" autocomplete="current-password">') + sshField('Current authenticator code', '<input id="am-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code">') + '</div>'
+    + '<div id="am-enrol"></div>'
+    + '<div class="foot" style="margin-bottom:18px"><button class="btn" onclick="authMfaReset()">Generate new authenticator</button></div>'
+    + '<div class="box"><b>Sessions</b> — sign out every other browser/device that is logged in as you.</div>'
+    + '<div class="foot"><div class="left"><button class="btn danger" onclick="authKillOthers()">Sign out other sessions</button></div><button class="btn" onclick="sshModalClose()">Close</button></div>');
+}
+async function authPost(url, body){ const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{}) }); const d = await r.json().catch(() => ({})); if (!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status)); return d; }
+async function authChangePw(){
+  const v = (i) => document.getElementById(i).value;
+  if (v('ac-new') !== v('ac-new2')) return toast('New passwords do not match', 'error');
+  try { await authPost('api/auth/password', { current: v('ac-cur'), next: v('ac-new'), code: v('ac-code').trim() }); toast('Password changed', 'success'); ['ac-cur','ac-code','ac-new','ac-new2'].forEach(i => document.getElementById(i).value=''); }
+  catch(e){ toast(e.message, 'error'); }
+}
+async function authMfaReset(){
+  const v = (i) => document.getElementById(i).value;
+  try {
+    const d = await authPost('api/auth/mfa/reset', { password: v('am-pw'), code: v('am-code').trim() });
+    let qr = '';
+    try { await authQrLib(); const q = qrcode(0, 'M'); q.addData(d.uri); q.make(); qr = q.createImgTag(4, 6); } catch(e){}
+    document.getElementById('am-enrol').innerHTML = '<div style="display:flex;gap:14px;align-items:center;margin-bottom:10px"><div style="background:#fff;padding:6px;border-radius:8px;line-height:0">' + qr + '</div><div style="flex:1;min-width:0"><div class="hint" style="font-size:12px;color:#9ca3af">Scan with the new authenticator, or enter the secret:</div><div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break:break-all;background:#12141d;border-radius:6px;padding:6px 8px;margin:6px 0">' + esc(d.secret.replace(/(.{4})/g, '$1 ').trim()) + '</div>'
+      + sshField('Code from the NEW app', '<input id="am-new" inputmode="numeric" maxlength="6" autocomplete="one-time-code">') + '<button class="btn pri" onclick="authMfaConfirm()">Confirm new authenticator</button></div></div>';
+    document.getElementById('am-new').focus();
+  } catch(e){ toast(e.message, 'error'); }
+}
+async function authMfaConfirm(){
+  try { await authPost('api/auth/mfa/confirm', { code: document.getElementById('am-new').value.trim() }); toast('Authenticator replaced', 'success'); document.getElementById('am-enrol').innerHTML = '<div class="test-out ok">✅ New authenticator active. The old one no longer works.</div>'; }
+  catch(e){ toast(e.message, 'error'); }
+}
+async function authKillOthers(){
+  try { const r = await fetch('api/auth/sessions/others', { method:'DELETE' }); const d = await r.json(); if (d.error) throw new Error(d.error); toast('Other sessions signed out', 'success'); authInit(); } catch(e){ toast(e.message, 'error'); }
+}
+authInit();
+
 function setTab(tab){
   state.tab = tab; saveState();
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===tab));
@@ -5072,10 +5128,383 @@ function sshFindJob(id) {
 }
 
 
+/* ------------------------------------------------------------------- auth */
+// Web login (username + password + TOTP) replacing nginx basic auth.
+// Users/sessions live in auth.json (mode 600, gitignored). Passwords are
+// scrypt-hashed; TOTP is RFC 6238 (SHA-1, 30s, 6 digits). Requests arriving
+// directly on the loopback interface *without* proxy headers (curl on the box,
+// an SSH tunnel) are trusted — the box itself is root-only already.
+
+const AUTH_FILE = path.join(__dirname, 'auth.json');
+const AUTH_SESSION_TTL_MS = 30 * 24 * 3600_000;   // 30 days
+const AUTH_SETUP_TTL_MS = 15 * 60_000;
+const AUTH_COOKIE = 'rhc_sid';
+const AUTH_MAX_FAILS = 6;                          // per IP before lockout
+const AUTH_LOCK_MS = 10 * 60_000;
+const AUTH_ISSUER = 'rhc-srv-mon';
+let authCache = { users: [], sessions: {}, log: [] };
+const authFails = new Map();                        // ip -> { n, until }
+const authSetups = new Map();                       // setupToken -> { user, expires }
+const authPending = new Map();                      // pendingToken -> { username, expires } (password ok, awaiting TOTP)
+
+function loadAuth() {
+  try {
+    const d = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8'));
+    if (d && typeof d === 'object') authCache = { users: Array.isArray(d.users) ? d.users : [], sessions: d.sessions && typeof d.sessions === 'object' ? d.sessions : {}, log: Array.isArray(d.log) ? d.log : [] };
+  } catch (_) {}
+  // drop expired sessions
+  const now = Date.now();
+  for (const [k, s] of Object.entries(authCache.sessions)) if (!s || s.expires < now) delete authCache.sessions[k];
+}
+function saveAuth() {
+  try {
+    authCache.log = authCache.log.slice(-200);
+    fs.writeFileSync(AUTH_FILE + '.tmp', JSON.stringify(authCache, null, 2), { mode: 0o600 });
+    fs.renameSync(AUTH_FILE + '.tmp', AUTH_FILE);
+    fs.chmodSync(AUTH_FILE, 0o600);
+  } catch (e) { console.error('saveAuth failed:', e.message); }
+}
+function authLog(ev, req, extra) {
+  authCache.log.push(Object.assign({ t: new Date().toISOString(), ev, ip: clientIp(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }, extra || {}));
+}
+function clientIp(req) {
+  return String(req.headers['x-real-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0] || (req.socket && req.socket.remoteAddress) || '').trim();
+}
+function isLocalDirect(req) {
+  const ra = req.socket && req.socket.remoteAddress;
+  return (ra === '127.0.0.1' || ra === '::1' || ra === '::ffff:127.0.0.1') && !req.headers['x-real-ip'] && !req.headers['x-forwarded-for'];
+}
+function isHttps(req) {
+  return String(req.headers['x-forwarded-proto'] || '').toLowerCase() === 'https' || !!(req.socket && req.socket.encrypted);
+}
+function authUsersExist() { return authCache.users.length > 0; }
+function authFindUser(name) { name = String(name || '').trim().toLowerCase(); return authCache.users.find((u) => u.username.toLowerCase() === name) || null; }
+
+// --- passwords (scrypt)
+function pwHash(password, salt) {
+  salt = salt || crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(String(password), salt, 64, { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }).toString('hex');
+  return { salt, hash };
+}
+function pwVerify(password, user) {
+  try { const h = pwHash(password, user.salt).hash; return crypto.timingSafeEqual(Buffer.from(h, 'hex'), Buffer.from(user.hash, 'hex')); } catch (_) { return false; }
+}
+function pwPolicy(p) {
+  if (typeof p !== 'string' || p.length < 10) return 'Password must be at least 10 characters';
+  if (p.length > 200) return 'Password too long';
+  return null;
+}
+
+// --- TOTP (RFC 6238)
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+function b32encode(buf) {
+  let bits = 0, val = 0, out = '';
+  for (const b of buf) { val = (val << 8) | b; bits += 8; while (bits >= 5) { out += B32[(val >>> (bits - 5)) & 31]; bits -= 5; } }
+  if (bits > 0) out += B32[(val << (5 - bits)) & 31];
+  return out;
+}
+function b32decode(s) {
+  s = String(s).toUpperCase().replace(/[^A-Z2-7]/g, '');
+  let bits = 0, val = 0; const out = [];
+  for (const c of s) { val = (val << 5) | B32.indexOf(c); bits += 5; if (bits >= 8) { out.push((val >>> (bits - 8)) & 255); bits -= 8; } }
+  return Buffer.from(out);
+}
+function totpAt(secretB32, counter) {
+  const msg = Buffer.alloc(8); msg.writeBigUInt64BE(BigInt(counter));
+  const h = crypto.createHmac('sha1', b32decode(secretB32)).update(msg).digest();
+  const o = h[19] & 15;
+  const code = ((h[o] & 0x7f) << 24 | h[o + 1] << 16 | h[o + 2] << 8 | h[o + 3]) % 1_000_000;
+  return String(code).padStart(6, '0');
+}
+// returns the matching counter (number) or null; window = ±1 step; never accepts a counter <= lastCounter (replay)
+function totpCheck(secretB32, code, lastCounter) {
+  code = String(code || '').replace(/\s+/g, '');
+  if (!/^\d{6}$/.test(code)) return null;
+  const now = Math.floor(Date.now() / 30_000);
+  for (const c of [now, now - 1, now + 1]) {
+    if (lastCounter != null && c <= lastCounter) continue;
+    const exp = totpAt(secretB32, c);
+    if (exp.length === code.length && crypto.timingSafeEqual(Buffer.from(exp), Buffer.from(code))) return c;
+  }
+  return null;
+}
+function totpUri(username, secret) {
+  return 'otpauth://totp/' + encodeURIComponent(AUTH_ISSUER + ':' + username) + '?secret=' + secret + '&issuer=' + encodeURIComponent(AUTH_ISSUER) + '&algorithm=SHA1&digits=6&period=30';
+}
+
+// --- sessions / cookies
+function parseCookies(req) {
+  const out = {};
+  for (const part of String(req.headers.cookie || '').split(';')) { const i = part.indexOf('='); if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); }
+  return out;
+}
+function sessionKey(token) { return crypto.createHash('sha256').update(String(token)).digest('hex'); }
+function authSessionOf(req) {
+  const tok = parseCookies(req)[AUTH_COOKIE];
+  if (!tok) return null;
+  const s = authCache.sessions[sessionKey(tok)];
+  if (!s || s.expires < Date.now()) return null;
+  if (!authFindUser(s.user)) return null;
+  return s;
+}
+function authCreateSession(req, res, username) {
+  const tok = crypto.randomBytes(32).toString('base64url');
+  const now = Date.now();
+  authCache.sessions[sessionKey(tok)] = { user: username, created: now, expires: now + AUTH_SESSION_TTL_MS, ip: clientIp(req), ua: String(req.headers['user-agent'] || '').slice(0, 120), seen: now };
+  saveAuth();
+  res.setHeader('Set-Cookie', AUTH_COOKIE + '=' + tok + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=' + Math.floor(AUTH_SESSION_TTL_MS / 1000) + (isHttps(req) ? '; Secure' : ''));
+}
+function authClearSession(req, res) {
+  const tok = parseCookies(req)[AUTH_COOKIE];
+  if (tok) { delete authCache.sessions[sessionKey(tok)]; saveAuth(); }
+  res.setHeader('Set-Cookie', AUTH_COOKIE + '=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+}
+function authTouch(s) { const now = Date.now(); if (now - (s.seen || 0) > 3600_000) { s.seen = now; saveAuth(); } }
+
+// --- brute-force guard (per client IP)
+function authLocked(req) { const f = authFails.get(clientIp(req)); return !!(f && f.until && f.until > Date.now()); }
+function authFail(req) {
+  const ip = clientIp(req); const f = authFails.get(ip) || { n: 0, until: 0 };
+  f.n += 1; if (f.n >= AUTH_MAX_FAILS) { f.until = Date.now() + AUTH_LOCK_MS; f.n = 0; }
+  authFails.set(ip, f);
+}
+function authOk(req) { authFails.delete(clientIp(req)); }
+
+// Routes that never require a session.
+const AUTH_PUBLIC = new Set(['/login', '/api/auth/login', '/api/auth/totp', '/api/auth/setup', '/api/auth/setup/verify', '/api/auth/state', '/api/auth/logout']);
+// Returns true when the request may proceed; otherwise it has already been answered.
+function authGate(req, res, url) {
+  if (AUTH_PUBLIC.has(url)) return true;
+  if (isLocalDirect(req)) return true;
+  const s = authSessionOf(req);
+  if (s) { authTouch(s); req.authUser = s.user; return true; }
+  if (url.startsWith('/api/') || url.startsWith('/ws/')) {
+    res.writeHead(401, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ error: 'unauthenticated' }));
+    return false;
+  }
+  res.writeHead(302, { Location: 'login', 'Cache-Control': 'no-store' });
+  res.end();
+  return false;
+}
+function authJson(res, code, obj) { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); }
+
+function handleAuthRoute(req, res, url) {
+  if (url === '/login' && req.method === 'GET') {
+    if (authSessionOf(req)) { res.writeHead(302, { Location: './' }); return res.end(), true; }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(LOGIN_PAGE); return true;
+  }
+  if (url === '/api/auth/state') {
+    authJson(res, 200, { setupRequired: !authUsersExist(), locked: authLocked(req), issuer: AUTH_ISSUER }); return true;
+  }
+  if (url === '/api/auth/me') {
+    const s = authSessionOf(req);
+    authJson(res, 200, { user: s ? s.user : (isLocalDirect(req) ? 'local' : null), local: isLocalDirect(req), sessions: s ? Object.values(authCache.sessions).filter((x) => x.user === s.user).length : 0 }); return true;
+  }
+  if (url === '/api/auth/logout' && req.method === 'POST') { authLog('logout', req); authClearSession(req, res); authJson(res, 200, { ok: true }); return true; }
+
+  // first-run setup: create the admin account + enrol TOTP
+  if (url === '/api/auth/setup' && req.method === 'POST') {
+    if (authUsersExist()) return authJson(res, 403, { error: 'Setup already completed' }), true;
+    readJsonBody(req, res, (b) => {
+      const username = String(b.username || '').trim();
+      if (!/^[A-Za-z0-9._@\-]{2,40}$/.test(username)) return authJson(res, 400, { error: 'Username: 2-40 letters, digits, . _ - @' });
+      const pe = pwPolicy(b.password); if (pe) return authJson(res, 400, { error: pe });
+      const secret = b32encode(crypto.randomBytes(20));
+      const token = crypto.randomBytes(24).toString('base64url');
+      authSetups.set(token, { user: Object.assign({ username, totpSecret: secret, totpLast: null, created: new Date().toISOString() }, pwHash(b.password)), expires: Date.now() + AUTH_SETUP_TTL_MS });
+      authJson(res, 200, { setupToken: token, secret, uri: totpUri(username, secret) });
+    });
+    return true;
+  }
+  if (url === '/api/auth/setup/verify' && req.method === 'POST') {
+    readJsonBody(req, res, (b) => {
+      const st = authSetups.get(String(b.setupToken || ''));
+      if (!st || st.expires < Date.now()) return authJson(res, 400, { error: 'Setup expired — start again' });
+      if (authUsersExist()) return authJson(res, 403, { error: 'Setup already completed' });
+      const c = totpCheck(st.user.totpSecret, b.code, null);
+      if (c == null) return authJson(res, 400, { error: 'Code does not match — check the time on your phone and try again' });
+      st.user.totpLast = c; authCache.users.push(st.user); authSetups.clear();
+      authLog('setup', req, { user: st.user.username });
+      authCreateSession(req, res, st.user.username);
+      authJson(res, 200, { ok: true });
+    });
+    return true;
+  }
+  // login step 1: username + password -> pending token; step 2: TOTP
+  if (url === '/api/auth/login' && req.method === 'POST') {
+    if (!authUsersExist()) return authJson(res, 409, { error: 'setup', setupRequired: true }), true;
+    if (authLocked(req)) return authJson(res, 429, { error: 'Too many failed attempts — locked for 10 minutes' }), true;
+    readJsonBody(req, res, (b) => {
+      const u = authFindUser(b.username);
+      // constant-ish time: hash even when the user is unknown
+      const ok = u ? pwVerify(b.password, u) : (pwHash(String(b.password || ''), 'deadbeef'), false);
+      if (!ok) { authFail(req); authLog('login_fail', req, { user: String(b.username || '').slice(0, 40) }); return authJson(res, 401, { error: 'Wrong username or password' }); }
+      if (typeof b.code === 'string' && b.code.trim()) {
+        // one-shot login with the code included
+        const c = totpCheck(u.totpSecret, b.code, u.totpLast);
+        if (c == null) { authFail(req); authLog('totp_fail', req, { user: u.username }); return authJson(res, 401, { error: 'Invalid authenticator code' }); }
+        u.totpLast = c; authOk(req); authLog('login', req, { user: u.username }); authCreateSession(req, res, u.username);
+        return authJson(res, 200, { ok: true });
+      }
+      const tok = crypto.randomBytes(24).toString('base64url');
+      authPending.set(tok, { username: u.username, expires: Date.now() + 5 * 60_000 });
+      authJson(res, 200, { pending: tok });
+    });
+    return true;
+  }
+  if (url === '/api/auth/totp' && req.method === 'POST') {
+    if (authLocked(req)) return authJson(res, 429, { error: 'Too many failed attempts — locked for 10 minutes' }), true;
+    readJsonBody(req, res, (b) => {
+      const p = authPending.get(String(b.pending || ''));
+      if (!p || p.expires < Date.now()) return authJson(res, 400, { error: 'Login expired — start again' });
+      const u = authFindUser(p.username); if (!u) return authJson(res, 400, { error: 'Unknown user' });
+      const c = totpCheck(u.totpSecret, b.code, u.totpLast);
+      if (c == null) { authFail(req); authLog('totp_fail', req, { user: u.username }); return authJson(res, 401, { error: 'Invalid authenticator code' }); }
+      authPending.delete(String(b.pending)); u.totpLast = c; authOk(req);
+      authLog('login', req, { user: u.username }); authCreateSession(req, res, u.username);
+      authJson(res, 200, { ok: true });
+    });
+    return true;
+  }
+  // account management (session required — enforced by authGate before we get here)
+  if (url === '/api/auth/password' && req.method === 'POST') {
+    readJsonBody(req, res, (b) => {
+      const u = authFindUser(req.authUser); if (!u) return authJson(res, 401, { error: 'No session user (local access has no account)' });
+      if (!pwVerify(b.current, u)) return authJson(res, 401, { error: 'Current password is wrong' });
+      const pe = pwPolicy(b.next); if (pe) return authJson(res, 400, { error: pe });
+      const c = totpCheck(u.totpSecret, b.code, u.totpLast); if (c == null) return authJson(res, 401, { error: 'Invalid authenticator code' });
+      u.totpLast = c; Object.assign(u, pwHash(b.next)); authLog('password_change', req, { user: u.username }); saveAuth();
+      authJson(res, 200, { ok: true });
+    });
+    return true;
+  }
+  if (url === '/api/auth/mfa/reset' && req.method === 'POST') {
+    readJsonBody(req, res, (b) => {
+      const u = authFindUser(req.authUser); if (!u) return authJson(res, 401, { error: 'No session user' });
+      if (!pwVerify(b.password, u)) return authJson(res, 401, { error: 'Password is wrong' });
+      const c = totpCheck(u.totpSecret, b.code, u.totpLast); if (c == null) return authJson(res, 401, { error: 'Invalid current authenticator code' });
+      u.totpLast = c; u.totpPendingSecret = b32encode(crypto.randomBytes(20)); saveAuth();
+      authJson(res, 200, { secret: u.totpPendingSecret, uri: totpUri(u.username, u.totpPendingSecret) });
+    });
+    return true;
+  }
+  if (url === '/api/auth/mfa/confirm' && req.method === 'POST') {
+    readJsonBody(req, res, (b) => {
+      const u = authFindUser(req.authUser); if (!u || !u.totpPendingSecret) return authJson(res, 400, { error: 'No pending authenticator enrolment' });
+      const c = totpCheck(u.totpPendingSecret, b.code, null); if (c == null) return authJson(res, 401, { error: 'Code does not match the new authenticator' });
+      u.totpSecret = u.totpPendingSecret; delete u.totpPendingSecret; u.totpLast = c; authLog('mfa_reset', req, { user: u.username }); saveAuth();
+      authJson(res, 200, { ok: true });
+    });
+    return true;
+  }
+  if (url === '/api/auth/sessions/others' && req.method === 'DELETE') {
+    const s = authSessionOf(req); if (!s) return authJson(res, 401, { error: 'No session' }), true;
+    const mine = sessionKey(parseCookies(req)[AUTH_COOKIE]);
+    for (const [k, x] of Object.entries(authCache.sessions)) if (x.user === s.user && k !== mine) delete authCache.sessions[k];
+    saveAuth(); authJson(res, 200, { ok: true }); return true;
+  }
+  if (url === '/api/auth/log') { authJson(res, 200, { log: authCache.log.slice(-50).reverse() }); return true; }
+  return false;
+}
+
+const LOGIN_PAGE = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in · RHC Server Monitor</title>
+<style>
+  :root { color-scheme: dark; } * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background:#161823; color:#e9e9e9; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; padding:20px; }
+  .card { width:100%; max-width:400px; background:#1e2230; border-radius:16px; padding:28px 28px 24px; box-shadow:0 10px 40px rgba(0,0,0,.45); border:1px solid #2a2f40; }
+  h1 { font-size:20px; margin:0 0 4px; } .sub { color:#6b7280; font-size:13px; margin-bottom:20px; }
+  label { display:block; font-size:11.5px; font-weight:700; color:#9ca3af; text-transform:uppercase; letter-spacing:.5px; margin:14px 0 6px; }
+  input { width:100%; background:#12141d; border:1px solid #2a2f40; color:#e9e9e9; border-radius:9px; padding:11px 13px; font-size:15px; outline:none; }
+  input:focus { border-color:#5cdd8b88; } input.code { font-size:24px; letter-spacing:8px; text-align:center; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  button { width:100%; margin-top:20px; background:#5cdd8b; color:#0b2818; border:none; border-radius:9px; padding:12px; font-size:15px; font-weight:700; cursor:pointer; }
+  button:hover { background:#6fee9c; } button:disabled { opacity:.5; cursor:not-allowed; } button.sec { background:#2a2f40; color:#e9e9e9; margin-top:10px; }
+  .err { margin-top:14px; background:#5a1f25; color:#ff8088; border-radius:9px; padding:10px 12px; font-size:13px; display:none; }
+  .ok { margin-top:14px; background:#1f4e34; color:#5cdd8b; border-radius:9px; padding:10px 12px; font-size:13px; }
+  .hint { font-size:12px; color:#6b7280; margin-top:8px; line-height:1.5; }
+  .qr { display:flex; justify-content:center; margin:14px 0 6px; } .qr canvas, .qr img { border-radius:10px; background:#fff; padding:10px; }
+  .secret { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px; letter-spacing:1px; background:#12141d; border-radius:8px; padding:8px 10px; word-break:break-all; text-align:center; color:#cbd5e1; }
+  .step { display:none; } .step.on { display:block; }
+  footer { text-align:center; color:#4b5563; font-size:11px; margin-top:18px; }
+</style></head><body>
+<div class="card">
+  <h1>📊 RHC Server Monitor</h1>
+  <div class="sub" id="sub">Sign in</div>
+
+  <form class="step" id="s-login" autocomplete="on">
+    <label>Username</label><input id="l-user" autocomplete="username" required autofocus>
+    <label>Password</label><input id="l-pass" type="password" autocomplete="current-password" required>
+    <button type="submit" id="l-btn">Continue</button>
+  </form>
+
+  <form class="step" id="s-totp">
+    <label>Authenticator code</label><input id="t-code" class="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="••••••">
+    <div class="hint">Open your authenticator app (Google Authenticator, 1Password, Authy…) and enter the 6-digit code for <b>rhc-srv-mon</b>.</div>
+    <button type="submit" id="t-btn">Sign in</button>
+    <button type="button" class="sec" onclick="show('s-login')">← Back</button>
+  </form>
+
+  <form class="step" id="s-setup1">
+    <div class="ok">First run — create the administrator account. Two-factor authentication is mandatory; you will scan a QR code in the next step.</div>
+    <label>Username</label><input id="u-user" autocomplete="username" value="roman" required>
+    <label>Password</label><input id="u-pass" type="password" autocomplete="new-password" required minlength="10">
+    <label>Repeat password</label><input id="u-pass2" type="password" autocomplete="new-password" required minlength="10">
+    <div class="hint">At least 10 characters. Stored as scrypt hash in auth.json (mode 600) on the server.</div>
+    <button type="submit">Create account →</button>
+  </form>
+
+  <form class="step" id="s-setup2">
+    <div class="hint" style="margin-top:0">Scan this QR code with your authenticator app, or type the secret manually, then enter the code it shows.</div>
+    <div class="qr" id="qr"></div>
+    <div class="secret" id="secret"></div>
+    <label>Code from the app</label><input id="u-code" class="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="••••••">
+    <button type="submit">Verify &amp; finish</button>
+  </form>
+
+  <div class="err" id="err"></div>
+  <footer>rhc-srv-mon · sessions last 30 days · <span id="lock"></span></footer>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<script>
+const $ = (i) => document.getElementById(i);
+let pending = null, setupToken = null;
+function show(id){ document.querySelectorAll('.step').forEach(s => s.classList.toggle('on', s.id === id)); $('err').style.display='none';
+  const f = document.querySelector('#' + id + ' input:not([value]), #' + id + ' input'); if (f) setTimeout(() => f.focus(), 30);
+  $('sub').textContent = id === 's-login' ? 'Sign in' : id === 's-totp' ? 'Two-factor authentication' : id === 's-setup1' ? 'Initial setup (1/2)' : 'Set up authenticator (2/2)'; }
+function err(m){ $('err').textContent = m; $('err').style.display = ''; }
+async function post(url, body){ const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{}) }); let d = {}; try { d = await r.json(); } catch(e){} if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }
+function busy(b, on){ b.disabled = on; }
+fetch('api/auth/state').then(r => r.json()).then(s => { if (s.setupRequired) show('s-setup1'); else show('s-login'); if (s.locked) $('lock').textContent = 'too many attempts — locked'; }).catch(() => show('s-login'));
+
+$('s-login').addEventListener('submit', async (e) => { e.preventDefault(); const b = $('l-btn'); busy(b, true);
+  try { const d = await post('api/auth/login', { username: $('l-user').value.trim(), password: $('l-pass').value });
+    if (d.ok) return location.replace('./'); pending = d.pending; $('t-code').value=''; show('s-totp'); }
+  catch(x){ if (/setup/.test(x.message)) return show('s-setup1'); err(x.message); } finally { busy(b, false); } });
+$('s-totp').addEventListener('submit', async (e) => { e.preventDefault(); const b = $('t-btn'); busy(b, true);
+  try { await post('api/auth/totp', { pending, code: $('t-code').value.trim() }); location.replace('./'); }
+  catch(x){ err(x.message); $('t-code').select(); } finally { busy(b, false); } });
+$('t-code').addEventListener('input', () => { if ($('t-code').value.replace(/\\D/g,'').length === 6) $('s-totp').requestSubmit(); });
+$('s-setup1').addEventListener('submit', async (e) => { e.preventDefault();
+  if ($('u-pass').value !== $('u-pass2').value) return err('Passwords do not match');
+  try { const d = await post('api/auth/setup', { username: $('u-user').value.trim(), password: $('u-pass').value });
+    setupToken = d.setupToken; $('secret').textContent = d.secret.replace(/(.{4})/g, '$1 ').trim();
+    $('qr').innerHTML = ''; try { const q = qrcode(0, 'M'); q.addData(d.uri); q.make(); $('qr').innerHTML = q.createImgTag(5, 8); } catch(x){ $('qr').innerHTML = '<div class="hint">(QR unavailable — enter the secret manually)</div>'; }
+    show('s-setup2'); } catch(x){ err(x.message); } });
+$('s-setup2').addEventListener('submit', async (e) => { e.preventDefault();
+  try { await post('api/auth/setup/verify', { setupToken, code: $('u-code').value.trim() }); location.replace('./'); } catch(x){ err(x.message); } });
+$('u-code').addEventListener('input', () => { if ($('u-code').value.replace(/\\D/g,'').length === 6) $('s-setup2').requestSubmit(); });
+</script></body></html>`;
+
+
 /* ----------------------------------------------------------------- server */
 
 const server = http.createServer((req, res) => {
   const url = (req.url || '/').split('?')[0];
+  if (!authGate(req, res, url)) return;
+  if (url === '/login' || url.startsWith('/api/auth/')) { if (handleAuthRoute(req, res, url)) return; }
   if (url === '/' || url === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(PAGE);
@@ -5493,11 +5922,13 @@ server.on('upgrade', (req, socket, head) => {
   try { u = new URL(req.url || '/', 'http://localhost'); } catch (_) { return socket.destroy(); }
   if (u.pathname !== '/ws/ssh') { socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); return socket.destroy(); }
   socket.on('error', () => {});
+  if (!isLocalDirect(req) && !authSessionOf(req)) { socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); return socket.destroy(); }
   try { sshOpenTerminal(req, socket, head, u.searchParams); }
   catch (e) { console.error('ssh ws failed:', e.message); try { socket.destroy(); } catch (_) {} }
 });
 ensureSshHelpers();
 loadSsh();
+loadAuth();
 
 loadHistory();
 loadUpdates();
