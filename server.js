@@ -855,10 +855,34 @@ function readPkgJson(dir) {
   catch { return null; }
 }
 
+// Map `pnpm outdated --format json` ({name:{current,latest,wanted,isDeprecated,dependencyType}})
+// onto the npm-outdated shape the rest of the module code expects ({current,wanted,latest,type}).
+function normalizePnpmOutdated(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const [name, info] of Object.entries(raw)) {
+    if (!info || typeof info !== 'object') continue;
+    out[name] = {
+      current: info.current || null,
+      wanted: info.wanted || info.latest || null,
+      latest: info.latest || null,
+      type: info.dependencyType || 'dependencies',
+    };
+  }
+  return out;
+}
+
+// Per-project outdated scan. Uses the project's own package manager for pnpm: npm's arborist cannot
+// read a pnpm-managed node_modules (every dep comes back as MISSING / current=null, and package.json
+// `overrides` trip EOVERRIDE), which made pnpm projects show dozens of phantom "outdated" rows that
+// the auto-updater could never clear (no current version => no severity => never picked).
 function npmOutdated(project) {
   return new Promise((resolve) => {
     const cwdEsc = project.dir.replace(/'/g, `'\\''`);
-    const shCmd = `cd '${cwdEsc}' && npm outdated --json --depth=0 2>/dev/null || true`;
+    const pm = project.pm || detectPM(project.dir);
+    const shCmd = pm === 'pnpm'
+      ? `cd '${cwdEsc}' && pnpm outdated --format json 2>/dev/null || true`
+      : `cd '${cwdEsc}' && npm outdated --json --depth=0 2>/dev/null || true`;
     const isRoot = !project.user || project.user === 'root';
     const bin = isRoot ? 'sh' : 'sudo';
     const args = isRoot ? ['-c', shCmd] : ['-n', '-H', '-u', project.user, 'sh', '-c', shCmd];
@@ -867,8 +891,15 @@ function npmOutdated(project) {
         if (err && !stdout) return resolve({ error: String(err.code || err.signal || err.message) });
         const trimmed = (stdout || '').trim();
         if (!trimmed) return resolve({ outdated: {} });
-        try { return resolve({ outdated: JSON.parse(trimmed) }); }
-        catch (_) { return resolve({ error: 'npm outdated parse failed' }); }
+        let parsed;
+        try { parsed = JSON.parse(trimmed); }
+        catch (_) { return resolve({ error: pm + ' outdated parse failed' }); }
+        // npm prints its failure as {"error":{code,summary,detail}} on stdout -- report it as an
+        // error instead of listing a package literally named "error".
+        if (parsed && parsed.error && typeof parsed.error === 'object' && !parsed.error.latest) {
+          return resolve({ error: parsed.error.summary || parsed.error.code || 'npm outdated failed' });
+        }
+        return resolve({ outdated: pm === 'pnpm' ? normalizePnpmOutdated(parsed) : parsed });
       });
   });
 }
@@ -928,7 +959,7 @@ async function collectModules() {
         const i = idx++;
         const p = enriched[i];
         modulesScanProgress.current = p.dir;
-        const r = await npmOutdated({ dir: p.dir, user: p.user });
+        const r = await npmOutdated({ dir: p.dir, user: p.user, pm: p.pm });
         p.error = r.error || null;
         p.outdated = r.outdated || {};
         p.scannedAt = new Date().toISOString();
@@ -1028,7 +1059,8 @@ async function rescanProject(dir, user) {
   if (!modulesCache) return;
   const idx = modulesCache.projects.findIndex((p) => p.dir === dir);
   if (idx < 0) return;
-  const r = await npmOutdated({ dir, user });
+  const pm = detectPM(dir);
+  const r = await npmOutdated({ dir, user, pm });
   const pkg = readPkgJson(dir) || {};
   const direct = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
   const proj = modulesCache.projects[idx];
@@ -1038,7 +1070,7 @@ async function rescanProject(dir, user) {
   proj.pkgName = pkg.name || path.basename(dir);
   proj.pkgVersion = pkg.version || null;
   proj.depCount = Object.keys(direct).length;
-  proj.pm = detectPM(dir);
+  proj.pm = pm;
   recomputeModulesSummary();
   modulesCache.generated_at = new Date().toISOString();
   saveModulesCache();
