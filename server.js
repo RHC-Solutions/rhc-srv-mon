@@ -2426,6 +2426,7 @@ const PAGE = `<!doctype html>
          padding:10px 16px; border-bottom:2px solid transparent; margin-bottom:-1px; }
   .tab:hover { color:#e9e9e9; }
   .tab.active { color:#5cdd8b; border-bottom-color:#5cdd8b; }
+  a.tab { text-decoration:none; display:inline-block; }
   .creds { margin-top:8px; }
   .creds summary { cursor:pointer; color:#9ca3af; font-size:13px; font-weight:600; padding:8px 0; }
   .creds table { border-collapse:collapse; width:100%; margin-top:8px; font-size:13px; }
@@ -2684,13 +2685,13 @@ const PAGE = `<!doctype html>
   <div class="hdr-row"><h1>📊 RHC SRV Manager <span id="host" class="sub" style="margin:0"></span></h1><div class="userbar" id="userbar"></div></div>
   <div class="sub" id="updated">loading…</div>
   <div class="tabs">
-    <button class="tab active" data-tab="pm2">⚙️ PM2 Services</button>
-    <button class="tab" data-tab="db">🐘 PostgreSQL</button>
-    <button class="tab" data-tab="updates">🔄 Updates</button>
-    <button class="tab" data-tab="sites">🌐 Sites</button>
-    <button class="tab" data-tab="modules">📦 Modules</button>
-    <button class="tab" data-tab="backup">💾 Backups</button>
-    <button class="tab" data-tab="ssh">🖥️ SSH</button>
+    <a class="tab active" href="pm2" data-tab="pm2">⚙️ PM2 Services</a>
+    <a class="tab" href="postgres" data-tab="db">🐘 PostgreSQL</a>
+    <a class="tab" href="updates" data-tab="updates">🔄 Updates</a>
+    <a class="tab" href="sites" data-tab="sites">🌐 Sites</a>
+    <a class="tab" href="modules" data-tab="modules">📦 Modules</a>
+    <a class="tab" href="backups" data-tab="backup">💾 Backups</a>
+    <a class="tab" href="ssh" data-tab="ssh">🖥️ SSH</a>
   </div>
   <div id="banner" class="banner ok" style="display:none"></div>
   <div id="pm2view">
@@ -4492,8 +4493,19 @@ async function authKillOthers(){
 }
 authInit();
 
-function setTab(tab){
+// Each tab has its own URL (…/rhc-srv-mon/ssh, …/postgres, …). Slugs are single path
+// segments so every relative URL in this page (api/…, login, ws/ssh) keeps resolving.
+const TAB_SLUG = { pm2:'pm2', db:'postgres', updates:'updates', sites:'sites', modules:'modules', backup:'backups', ssh:'ssh' };
+const SLUG_TAB = Object.assign(Object.fromEntries(Object.entries(TAB_SLUG).map(([k,v]) => [v,k])),
+  { services:'pm2', postgresql:'db', db:'db', backup:'backup', terminal:'ssh' });
+function tabFromPath(){ const seg = (location.pathname.split('/').filter(Boolean).pop() || '').toLowerCase(); return SLUG_TAB[seg] || null; }
+function setTab(tab, opts){
+  opts = opts || {};
+  if (!TAB_SLUG[tab]) tab = 'pm2';
   state.tab = tab; saveState();
+  if (!opts.noHistory && tabFromPath() !== tab) {
+    try { history[opts.replace ? 'replaceState' : 'pushState']({ tab }, '', TAB_SLUG[tab] + location.search); } catch(e){}
+  }
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===tab));
   document.getElementById('pm2view').style.display = tab==='pm2' ? '' : 'none';
   document.getElementById('dbview').style.display  = tab==='db'  ? '' : 'none';
@@ -4520,7 +4532,10 @@ document.getElementById('sort').addEventListener('change', e => { state.sort = e
 document.getElementById('sharedToggle').addEventListener('click', () => {
   state.sharedOnly = !state.sharedOnly; saveState(); render();
 });
-document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', (e) => {
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;   // let "open in new tab" use the real href
+  e.preventDefault(); setTab(t.dataset.tab);
+}));
 
 async function refresh(){
   try { [lastData, lastDb, lastUpdates, lastSites, lastModules, lastBackup] = await Promise.all([
@@ -4547,7 +4562,8 @@ async function pm2Action(action, user, app) {
     refresh();
   } catch(e) { toast('Error: ' + e, 'error'); }
 }
-setTab(state.tab);
+setTab(tabFromPath() || state.tab, { replace: true });
+window.addEventListener('popstate', () => setTab(tabFromPath() || state.tab, { noHistory: true }));
 refresh(); setInterval(refresh, 10000);
 </script>
 </body></html>`;
@@ -5271,6 +5287,8 @@ function authFail(req) {
 function authOk(req) { authFails.delete(clientIp(req)); }
 
 // Routes that never require a session.
+// Tab URLs (…/rhc-srv-mon/<slug>) — all serve the SPA; the client picks the tab from the path.
+const TAB_ROUTES = new Set(['pm2', 'services', 'postgres', 'postgresql', 'db', 'updates', 'sites', 'modules', 'backups', 'backup', 'ssh', 'terminal']);
 const AUTH_PUBLIC = new Set(['/login', '/api/auth/login', '/api/auth/totp', '/api/auth/setup', '/api/auth/setup/verify', '/api/auth/state', '/api/auth/logout']);
 // Returns true when the request may proceed; otherwise it has already been answered.
 function authGate(req, res, url) {
@@ -5283,7 +5301,8 @@ function authGate(req, res, url) {
     res.end(JSON.stringify({ error: 'unauthenticated' }));
     return false;
   }
-  res.writeHead(302, { Location: 'login', 'Cache-Control': 'no-store' });
+  const slug = url.slice(1).toLowerCase();
+  res.writeHead(302, { Location: 'login' + (TAB_ROUTES.has(slug) ? '?next=' + slug : ''), 'Cache-Control': 'no-store' });
   res.end();
   return false;
 }
@@ -5475,16 +5494,18 @@ function show(id){ document.querySelectorAll('.step').forEach(s => s.classList.t
   const f = document.querySelector('#' + id + ' input:not([value]), #' + id + ' input'); if (f) setTimeout(() => f.focus(), 30);
   $('sub').textContent = id === 's-login' ? 'Sign in' : id === 's-totp' ? 'Two-factor authentication' : id === 's-setup1' ? 'Initial setup (1/2)' : 'Set up authenticator (2/2)'; }
 function err(m){ $('err').textContent = m; $('err').style.display = ''; }
+// after sign-in go back to the tab that was requested (login?next=ssh), else the root
+const NEXT = (function(){ const n = new URLSearchParams(location.search).get('next') || ''; return /^[a-z0-9-]{1,20}$/.test(n) ? './' + n : './'; })();
 async function post(url, body){ const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{}) }); let d = {}; try { d = await r.json(); } catch(e){} if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }
 function busy(b, on){ b.disabled = on; }
 fetch('api/auth/state').then(r => r.json()).then(s => { if (s.setupRequired) show('s-setup1'); else show('s-login'); if (s.locked) $('lock').textContent = 'too many attempts — locked'; }).catch(() => show('s-login'));
 
 $('s-login').addEventListener('submit', async (e) => { e.preventDefault(); const b = $('l-btn'); busy(b, true);
   try { const d = await post('api/auth/login', { username: $('l-user').value.trim(), password: $('l-pass').value });
-    if (d.ok) return location.replace('./'); pending = d.pending; $('t-code').value=''; show('s-totp'); }
+    if (d.ok) return location.replace(NEXT); pending = d.pending; $('t-code').value=''; show('s-totp'); }
   catch(x){ if (/setup/.test(x.message)) return show('s-setup1'); err(x.message); } finally { busy(b, false); } });
 $('s-totp').addEventListener('submit', async (e) => { e.preventDefault(); const b = $('t-btn'); busy(b, true);
-  try { await post('api/auth/totp', { pending, code: $('t-code').value.trim() }); location.replace('./'); }
+  try { await post('api/auth/totp', { pending, code: $('t-code').value.trim() }); location.replace(NEXT); }
   catch(x){ err(x.message); $('t-code').select(); } finally { busy(b, false); } });
 $('t-code').addEventListener('input', () => { if ($('t-code').value.replace(/\\D/g,'').length === 6) $('s-totp').requestSubmit(); });
 $('s-setup1').addEventListener('submit', async (e) => { e.preventDefault();
@@ -5494,7 +5515,7 @@ $('s-setup1').addEventListener('submit', async (e) => { e.preventDefault();
     $('qr').innerHTML = ''; try { const q = qrcode(0, 'M'); q.addData(d.uri); q.make(); $('qr').innerHTML = q.createImgTag(5, 8); } catch(x){ $('qr').innerHTML = '<div class="hint">(QR unavailable — enter the secret manually)</div>'; }
     show('s-setup2'); } catch(x){ err(x.message); } });
 $('s-setup2').addEventListener('submit', async (e) => { e.preventDefault();
-  try { await post('api/auth/setup/verify', { setupToken, code: $('u-code').value.trim() }); location.replace('./'); } catch(x){ err(x.message); } });
+  try { await post('api/auth/setup/verify', { setupToken, code: $('u-code').value.trim() }); location.replace(NEXT); } catch(x){ err(x.message); } });
 $('u-code').addEventListener('input', () => { if ($('u-code').value.replace(/\\D/g,'').length === 6) $('s-setup2').requestSubmit(); });
 </script></body></html>`;
 
@@ -5505,8 +5526,8 @@ const server = http.createServer((req, res) => {
   const url = (req.url || '/').split('?')[0];
   if (!authGate(req, res, url)) return;
   if (url === '/login' || url.startsWith('/api/auth/')) { if (handleAuthRoute(req, res, url)) return; }
-  if (url === '/' || url === '/index.html') {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  if (url === '/' || url === '/index.html' || TAB_ROUTES.has(url.slice(1).toLowerCase())) {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end(PAGE);
   }
   if (url === '/api/status' || url === '/status') {
