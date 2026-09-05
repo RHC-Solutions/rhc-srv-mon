@@ -862,6 +862,8 @@ function normalizePnpmOutdated(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
   for (const [name, info] of Object.entries(raw)) {
     if (!info || typeof info !== 'object') continue;
+    // pnpm also lists deprecated packages that are already on the latest version -- nothing to update.
+    if (info.current && info.latest && info.current === info.latest) continue;
     out[name] = {
       current: info.current || null,
       wanted: info.wanted || info.latest || null,
