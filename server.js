@@ -34,10 +34,12 @@ const CHECK_INTERVAL_MS = 3600_000;          // check for latest versions hourly
 const UPDATE_LOG_MAX = 50;
 
 const COMPONENTS = [
-  { key: 'node',     label: 'Node.js',     bin: 'node',     pkg: null,                         verFlag: '--version' },
+  { key: 'node',     label: 'Node.js',     bin: 'node',     pkg: null,                         verFlag: '--version',
+    // system package from the NodeSource apt repo (one major per repo, so this stays within 26.x)
+    updateCmd: ['sh', '-c', 'apt-get update -qq >/dev/null 2>&1; apt-get install -y --only-upgrade nodejs 2>&1'] },
   { key: 'pi',       label: 'Pi',          bin: 'pi',       pkg: '@earendil-works/pi-coding-agent', verFlag: '--version' },
   { key: 'opencode', label: 'OpenCode',    bin: 'opencode', pkg: 'opencode-ai',                verFlag: '--version' },
-  { key: 'codex',    label: 'Codex CLI',   bin: 'codex',    pkg: 'codex',                      verFlag: '--version' },
+  { key: 'codex',    label: 'Codex CLI',   bin: 'codex',    pkg: '@openai/codex',                   verFlag: '--version' },
   { key: 'gemini',   label: 'Gemini CLI',  bin: 'gemini',   pkg: '@google/gemini-cli',         verFlag: '--version' },
   { key: 'claude',   label: 'Claude Code', bin: 'claude',   pkg: '@anthropic-ai/claude-code',  verFlag: '--version', updateCmd: ['claude', 'update'] },
 ];
@@ -287,8 +289,10 @@ async function getCurrentVersion(comp) {
     execFile(comp.bin, [comp.verFlag], { timeout: 8000 }, (err, stdout) => {
       if (err) return resolve(null);
       let v = stdout.trim().split('\n')[0].replace(/^v/, '');
-      // Strip trailing annotations like "(Claude Code)"
+      // Strip trailing annotations like "(Claude Code)" and leading labels like "codex-cli 0.150.1"
       v = v.replace(/\s*\(.*\)\s*$/, '').trim();
+      const m = v.match(/\d+\.\d+[\w.\-]*/);
+      if (m) v = m[0];
       resolve(v || null);
     });
   });
@@ -296,7 +300,12 @@ async function getCurrentVersion(comp) {
 
 async function getLatestVersion(comp) {
   if (!comp.pkg) {
-    // Node.js: fetch latest release (not just LTS) from nodejs.org
+    // Node.js comes from the NodeSource apt repo, so "latest" is what apt can actually install.
+    try {
+      const pol = execFileSync('apt-cache', ['policy', 'nodejs'], { timeout: 15000, encoding: 'utf8' });
+      const m = pol.match(/Candidate:\s*(\d+\.\d+\.\d+)/);
+      if (m) return m[1];
+    } catch (_) { /* fall back to nodejs.org */ }
     try {
       const res = await fetch('https://nodejs.org/dist/index.json', { signal: AbortSignal.timeout(8000) });
       const list = await res.json();
@@ -441,7 +450,7 @@ async function runUpdate(compKey) {
   if (updatesRunning.has(compKey)) return { error: 'Update already in progress' };
   const comp = COMPONENTS.find(c => c.key === compKey);
   if (!comp) return { error: 'Unknown component' };
-  if (!comp.pkg) return { error: 'Update command not defined for ' + comp.label + '. Use nvm/fnm/n manually.' };
+  if (!comp.pkg && !comp.updateCmd) return { error: 'Update command not defined for ' + comp.label + '.' };
 
   updatesRunning.set(compKey, true);
   const start = Date.now();
@@ -450,7 +459,7 @@ async function runUpdate(compKey) {
   try {
     const cmd = comp.updateCmd || ['npm', 'update', '-g', comp.pkg];
     const result = await new Promise((resolve) => {
-      execFile(cmd[0], cmd.slice(1), { timeout: 120000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      execFile(cmd[0], cmd.slice(1), { timeout: 600000, maxBuffer: 4 * 1024 * 1024, env: Object.assign({}, process.env, { DEBIAN_FRONTEND: 'noninteractive' }) }, (err, stdout, stderr) => {
         resolve({ err, stdout: stdout || '', stderr: stderr || '' });
       });
     });
@@ -710,6 +719,7 @@ function loadModulesCache() {
       modulesCache = data;
       moduleUpdateLog = Array.isArray(data.updateLog) ? data.updateLog : [];
       autoUpdateLog = Array.isArray(data.autoUpdateLog) ? data.autoUpdateLog : [];
+      cleanupLog = Array.isArray(data.cleanupLog) ? data.cleanupLog : [];
     }
   } catch (_) { /* first run */ }
 }
@@ -719,6 +729,7 @@ function saveModulesCache() {
     if (modulesCache) {
       modulesCache.updateLog = moduleUpdateLog;
       modulesCache.autoUpdateLog = autoUpdateLog;
+      modulesCache.cleanupLog = cleanupLog;
     }
     fs.writeFileSync(MODULES_FILE + '.tmp', JSON.stringify(modulesCache));
     fs.renameSync(MODULES_FILE + '.tmp', MODULES_FILE);
@@ -953,6 +964,7 @@ async function collectModules() {
     }
 
     const prevAutoUpdate = modulesCache && modulesCache.autoUpdate;
+    const prevCleanup = modulesCache && modulesCache.cleanup;
     modulesCache = {
       generated_at: new Date().toISOString(),
       summary: {
@@ -967,6 +979,8 @@ async function collectModules() {
       updateLog: moduleUpdateLog,
       autoUpdateLog,
       autoUpdate: prevAutoUpdate || undefined,
+      cleanup: prevCleanup || undefined,
+      cleanupLog,
     };
     saveModulesCache();
   } catch (e) {
@@ -1092,6 +1106,14 @@ function _runInstall(dir, user, pm, packages, extraFlags) {
 // Detect a fix strategy from npm output. Returns { strategy, ...metadata } or null.
 function detectAutoFix(output, error) {
   const out = (output || '') + ' ' + (error || '');
+  // pnpm >=11: dependencies with install scripts must be explicitly allowed in pnpm-workspace.yaml
+  // (allowBuilds), otherwise install exits 1 with ERR_PNPM_IGNORED_BUILDS and native modules
+  // (better-sqlite3, ...) are left unbuilt. Recovery: allow them, rebuild, retry the install.
+  const ib = out.match(/ERR_PNPM_IGNORED_BUILDS\]?\s*Ignored build scripts:\s*([^\n]+)/i);
+  if (ib) {
+    const pkgs = ib[1].split(',').map((x) => x.trim().replace(/@[^@/]+$/, '')).filter((p) => p && PKG_NAME_RE.test(p));
+    if (pkgs.length) return { strategy: 'approve-builds', packages: pkgs };
+  }
   // Permission errors — chown back to project owner (most decisive: fixes the root cause)
   // Covers npm/pnpm/yarn ("EACCES"/"EPERM"/"operation was rejected") + bun ("error ACCES" / "GlobError")
   if (/operation was rejected by your operating system|EACCES|EPERM|do not have the permissions|permission denied|\berror ACCES\b|GlobError/i.test(out)) {
@@ -1187,6 +1209,91 @@ exit 0`;
   return _runShell('root', shCmd, 300_000);
 }
 
+// Allow build scripts for the given packages in <dir>/pnpm-workspace.yaml (pnpm >=10 `allowBuilds`
+// map, or the older `onlyBuiltDependencies` list if that is what the project uses). Line-based edit
+// so comments/ordering survive; the file is rewritten in place so ownership is preserved.
+function approveBuildsInWorkspaceYaml(dir, pkgs) {
+  const file = path.join(dir, 'pnpm-workspace.yaml');
+  let text = '';
+  const existed = fs.existsSync(file);
+  try { text = fs.readFileSync(file, 'utf8'); } catch (_) { text = ''; }
+  const lines = text.length ? text.replace(/\r\n/g, '\n').split('\n') : [];
+  const yamlKey = (p) => (/^[A-Za-z0-9_.-]+$/.test(p) ? p : "'" + p + "'");
+  const escRe = (x) => x.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
+  const blockEnd = (start) => {
+    let end = start + 1;
+    while (end < lines.length && (lines[end].trim() === '' || /^\s/.test(lines[end]))) end++;
+    while (end > start + 1 && lines[end - 1].trim() === '') end--;
+    return end;
+  };
+  const idx = lines.findIndex((l) => /^allowBuilds:\s*(#.*)?$/.test(l));
+  if (idx === -1) {
+    const ob = lines.findIndex((l) => /^onlyBuiltDependencies:\s*(#.*)?$/.test(l));
+    if (ob !== -1) {
+      const end = blockEnd(ob);
+      const have = lines.slice(ob + 1, end).map((l) => l.replace(/^\s*-\s*/, '').replace(/^['"]|['"]$/g, '').trim());
+      lines.splice(end, 0, ...pkgs.filter((p) => !have.includes(p)).map((p) => '  - ' + yamlKey(p)));
+    } else {
+      while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+      lines.push('allowBuilds:');
+      for (const p of pkgs) lines.push('  ' + yamlKey(p) + ': true');
+    }
+  } else {
+    let end = blockEnd(idx);
+    for (const p of pkgs) {
+      const re = new RegExp('^\\s+[\'"]?' + escRe(p) + '[\'"]?\\s*:');
+      let found = false;
+      for (let i = idx + 1; i < end; i++) {
+        if (re.test(lines[i])) { lines[i] = '  ' + yamlKey(p) + ': true'; found = true; }
+      }
+      if (!found) { lines.splice(idx + 1, 0, '  ' + yamlKey(p) + ': true'); end++; }
+    }
+  }
+  fs.writeFileSync(file, lines.join('\n') + '\n');
+  if (!existed) {
+    // new file must stay editable by the project owner (pnpm itself writes allowBuilds stubs)
+    try { const st = fs.statSync(dir); fs.chownSync(file, st.uid, st.gid); fs.chmodSync(file, 0o664); } catch (_) {}
+  }
+  return file;
+}
+
+// Strategy: approve-builds -- allow the flagged build scripts, then rebuild those packages as the
+// project owner so the native binaries exist before the actual install is retried.
+async function _runApproveBuilds(project, pkgs) {
+  if (!USER_NAME_RE.test(project.user)) return { success: false, error: 'invalid user: ' + project.user, output: '', duration_ms: 0 };
+  if (project.pm !== 'pnpm') return { success: false, error: 'approve-builds only applies to pnpm projects', output: '', duration_ms: 0 };
+  const valid = pkgs.filter((p) => PKG_NAME_RE.test(p));
+  if (!valid.length) return { success: false, error: 'no valid package names', output: '', duration_ms: 0 };
+  const startedAt = Date.now();
+  let file;
+  try { file = approveBuildsInWorkspaceYaml(project.dir, valid); }
+  catch (e) { return { success: false, error: 'pnpm-workspace.yaml edit failed: ' + e.message, output: '', duration_ms: Date.now() - startedAt }; }
+  const dirEsc = project.dir.replace(/'/g, `'\\''`);
+  const list = valid.map((p) => `'${p}'`).join(' ');
+  const r = await _runShell(project.user, `cd '${dirEsc}' && pnpm rebuild ${list} 2>&1`, MOD_UPDATE_TIMEOUT);
+  r.output = 'allowed build scripts in ' + file + ': ' + valid.join(', ') + '\n' + (r.output || '');
+  r.duration_ms = Date.now() - startedAt;
+  return r;
+}
+
+// Turn a failed install's output into a one-line reason (instead of a bare exit code).
+function summarizeInstallError(output, code) {
+  const lines = String(output || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const prio = [
+    /ERR_PNPM_[A-Z_]+/, /ELIFECYCLE/, /npm error (?!code\b|For a full|A complete log)/i,
+    /\bE[A-Z]{4,}\b/, /(^|\s)error[:\s]/i, /failed/i,
+  ];
+  let pick = '';
+  for (const re of prio) {
+    const hits = lines.filter((l) => re.test(l));
+    if (hits.length) { pick = hits[hits.length - 1]; break; }
+  }
+  if (!pick && lines.length) pick = lines[lines.length - 1];
+  const tag = code ? ('exit ' + code) : 'failed';
+  const base = pick.replace(/\s+/g, ' ').slice(0, 220);
+  return base ? (base + ' (' + tag + ')') : tag;
+}
+
 // Run an update for one project with auto-fix retry chain.
 // Returns { success, attempts, finalOutput, autoFix, finalPackages }.
 async function runProjectUpdateWithFix(project, packages, withAutoFix) {
@@ -1196,11 +1303,35 @@ async function runProjectUpdateWithFix(project, packages, withAutoFix) {
   // Attempt 1: default flags
   let r = await _runInstall(project.dir, project.user, project.pm, packages, '');
   attempts.push({ strategy: 'normal', success: r.success, error: r.error, duration_ms: r.duration_ms });
-  if (r.success || !withAutoFix) {
-    return { success: r.success, attempts, finalOutput: r.output, finalPackages, autoFix: null };
+  if (r.success) return { success: true, attempts, finalOutput: r.output, finalPackages, autoFix: null };
+
+  let fix = detectAutoFix(r.output, r.error);
+
+  // Strategy: approve-builds -- pnpm >=11 aborts with ERR_PNPM_IGNORED_BUILDS when a dependency's
+  // install script is not allowed in pnpm-workspace.yaml. npm ran those scripts unconditionally,
+  // so allowing them restores the pre-migration behaviour. It is a project policy fix rather than
+  // a workaround, so it applies to manual updates as well (independent of the auto-fix switch).
+  if (fix && fix.strategy === 'approve-builds') {
+    const approved = [];
+    for (let iter = 0; iter < 3 && fix && fix.strategy === 'approve-builds'; iter++) {
+      const pkgs = (fix.packages || []).filter((p) => !approved.includes(p));
+      if (!pkgs.length) break;
+      const ra = await _runApproveBuilds(project, pkgs);
+      approved.push(...pkgs);
+      attempts.push({ strategy: 'approve-builds:' + pkgs.join(','), success: ra.success, error: ra.error, duration_ms: ra.duration_ms });
+      if (!ra.success) return { success: false, attempts, finalOutput: ra.output, finalPackages, autoFix: 'approve-builds:' + approved.join(',') };
+      r = await _runInstall(project.dir, project.user, project.pm, packages, '');
+      attempts.push({ strategy: 'retry-after-approve', success: r.success, error: r.error, duration_ms: r.duration_ms });
+      if (r.success) return { success: true, attempts, finalOutput: r.output, finalPackages, autoFix: 'approve-builds:' + approved.join(',') };
+      fix = detectAutoFix(r.output, r.error);
+    }
+    if (!fix || fix.strategy === 'approve-builds') {
+      return { success: false, attempts, finalOutput: r.output, finalPackages, autoFix: 'approve-builds:' + approved.join(',') };
+    }
+    // a different, fixable error surfaced after approving builds -- fall through to the normal chain
   }
 
-  const fix = detectAutoFix(r.output, r.error);
+  if (!withAutoFix) return { success: false, attempts, finalOutput: r.output, finalPackages, autoFix: null };
   if (!fix) return { success: false, attempts, finalOutput: r.output, finalPackages, autoFix: null };
 
   // Strategy: --force
@@ -1321,7 +1452,7 @@ async function runModuleUpdate(dir, user, packagesIn) {
       dir, relDir: project.relDir, user,
       packages, pm: project.pm,
       success: r.success,
-      error: r.success ? null : (r.attempts[r.attempts.length - 1].error || 'failed'),
+      error: r.success ? null : summarizeInstallError(r.finalOutput, r.attempts[r.attempts.length - 1].error),
       output: (r.finalOutput || '').slice(-4000),
       duration_ms: r.attempts.reduce((s, a) => s + (a.duration_ms || 0), 0),
       attempts: r.attempts,
@@ -1495,7 +1626,7 @@ async function runAutoUpdatePass(triggeredBy) {
         success: r.success,
         autoFix: r.autoFix,
         attempts: r.attempts.map((a) => ({ strategy: a.strategy, success: a.success, error: a.error, duration_ms: a.duration_ms })),
-        finalError: r.success ? null : (r.attempts[r.attempts.length - 1].error || 'failed'),
+        finalError: r.success ? null : summarizeInstallError(r.finalOutput, r.attempts[r.attempts.length - 1].error),
         outputTail: (r.finalOutput || '').slice(-2000),
         duration_ms: r.attempts.reduce((s, a) => s + (a.duration_ms || 0), 0),
       });
@@ -1536,6 +1667,9 @@ async function runAutoUpdatePass(triggeredBy) {
             if (!r.success && r.attempts.length) {
               lines.push('   tried: ' + r.attempts.map((a) => a.strategy + (a.success ? '✓' : '✗')).join(', '));
             }
+            if (!r.success && r.finalError) {
+              lines.push('   `' + String(r.finalError).replace(/`/g, "'").slice(0, 160) + '`');
+            }
           }
           try { await sendTelegram(lines.join('\n')); } catch (_) { /* ignore */ }
         }
@@ -1562,7 +1696,205 @@ function autoUpdateTick() {
   const key = `${now.toISOString().slice(0, 10)}-${config.hour}-${config.min}`;
   if (lastAutoTickKey === key) return;
   lastAutoTickKey = key;
-  runAutoUpdatePass('schedule').catch((e) => console.error('auto-update pass failed:', e.message));
+  runAutoUpdatePass('schedule')
+    .then((r) => {
+      if (r && !r.skipped && getCleanupConfig().afterAutoUpdate) {
+        return runCleanup('after-auto-update').catch((e) => console.error('post-update cleanup failed:', e.message));
+      }
+    })
+    .catch((e) => console.error('auto-update pass failed:', e.message));
+}
+
+/* ---------------------------------------------------------------- cleanup */
+// Disk cleanup of regenerable package-manager caches and build leftovers. Everything here is
+// re-creatable by the next install/build; project sources, site runtime output (.next itself,
+// dist, uploads) and databases are never touched. Paths are validated against fixed patterns
+// under /home/<user>/ and /root/ before anything is removed.
+const CLEANUP_LOG_MAX = 30;
+const DEFAULT_CLEANUP = {
+  npmCache: true,        // ~/.npm/_cacache + ~/.npm/_logs (every user + root)
+  pnpmCache: true,       // ~/.cache/pnpm (metadata cache; the content store is separate)
+  pnpmStore: true,       // `pnpm store prune` on the shared store: drops packages no project references
+  bunCache: true,        // ~/.bun/install/cache
+  pipCache: true,        // ~/.cache/pip
+  projectCaches: true,   // <project>/node_modules/.cache (babel/eslint/webpack/turbo caches)
+  nextCache: false,      // <project>/.next/cache (next build is slower once after removal)
+  leftovers: false,      // <project>/node_modules.pre-*, node_modules.bak*, node_modules.old* (migration copies)
+  afterAutoUpdate: false,
+};
+const CLEANUP_LEFTOVER_RE = /^node_modules[._-](pre-[\w.-]+|bak[\w.-]*|old[\w.-]*|backup[\w.-]*)$/;
+const PNPM_STORE_DIR = '/var/lib/pnpm-store';
+let cleanupRunning = false;
+let cleanupPreview = null;    // { measuredAt, targets: [{ key, label, prune, count, bytes, items:[{path,bytes}] }], totalBytes }
+let cleanupLog = [];          // recent runs, newest last
+
+function getCleanupConfig() {
+  return { ...DEFAULT_CLEANUP, ...((modulesCache && modulesCache.cleanup) || {}) };
+}
+function setCleanupConfig(patch) {
+  if (!modulesCache) modulesCache = { generated_at: null, summary: {}, projects: [], outdated: [] };
+  const next = { ...getCleanupConfig() };
+  for (const k of Object.keys(DEFAULT_CLEANUP)) if (typeof patch[k] === 'boolean') next[k] = patch[k];
+  modulesCache.cleanup = next;
+  saveModulesCache();
+  return next;
+}
+function getCleanupState() {
+  return { config: getCleanupConfig(), preview: cleanupPreview, running: cleanupRunning, log: cleanupLog.slice(-10) };
+}
+function homeUsers() {
+  try { return fs.readdirSync('/home').filter((u) => USER_NAME_RE.test(u) && u !== 'clp'); } catch (_) { return []; }
+}
+function existingDir(p) { try { return fs.statSync(p).isDirectory(); } catch (_) { return false; } }
+
+// Concrete paths per cleanup key. Site roots = /home/<user>/htdocs/<site> plus one level of
+// sub-projects (dirs with a package.json), which is how CloudPanel + monorepo-ish sites are laid out here.
+function cleanupTargets() {
+  const t = {
+    npmCache:      { label: 'npm caches', paths: [] },
+    pnpmCache:     { label: 'pnpm metadata caches', paths: [] },
+    pnpmStore:     { label: 'pnpm store prune', paths: [], prune: true },
+    bunCache:      { label: 'bun caches', paths: [] },
+    pipCache:      { label: 'pip caches', paths: [] },
+    projectCaches: { label: 'project tool caches', paths: [] },
+    nextCache:     { label: 'Next.js build caches', paths: [] },
+    leftovers:     { label: 'leftover node_modules copies', paths: [] },
+  };
+  const users = homeUsers();
+  for (const h of users.map((u) => '/home/' + u).concat(['/root'])) {
+    for (const p of [h + '/.npm/_cacache', h + '/.npm/_logs']) if (existingDir(p)) t.npmCache.paths.push(p);
+    if (existingDir(h + '/.cache/pnpm')) t.pnpmCache.paths.push(h + '/.cache/pnpm');
+    if (existingDir(h + '/.bun/install/cache')) t.bunCache.paths.push(h + '/.bun/install/cache');
+    if (existingDir(h + '/.cache/pip')) t.pipCache.paths.push(h + '/.cache/pip');
+  }
+  if (existingDir(PNPM_STORE_DIR)) t.pnpmStore.paths.push(PNPM_STORE_DIR);
+  for (const u of users) {
+    const htdocs = '/home/' + u + '/htdocs';
+    let sites = [];
+    try { sites = fs.readdirSync(htdocs, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => path.join(htdocs, e.name)); } catch (_) {}
+    const roots = [];
+    for (const sdir of sites) {
+      roots.push(sdir);
+      try {
+        for (const e of fs.readdirSync(sdir, { withFileTypes: true })) {
+          if (e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules' && fs.existsSync(path.join(sdir, e.name, 'package.json'))) roots.push(path.join(sdir, e.name));
+        }
+      } catch (_) {}
+    }
+    for (const p of roots) {
+      if (existingDir(path.join(p, 'node_modules', '.cache'))) t.projectCaches.paths.push(path.join(p, 'node_modules', '.cache'));
+      if (existingDir(path.join(p, '.next', 'cache'))) t.nextCache.paths.push(path.join(p, '.next', 'cache'));
+      try {
+        for (const e of fs.readdirSync(p, { withFileTypes: true })) {
+          if (e.isDirectory() && !e.isSymbolicLink() && CLEANUP_LEFTOVER_RE.test(e.name)) t.leftovers.paths.push(path.join(p, e.name));
+        }
+      } catch (_) {}
+    }
+  }
+  // CloudPanel pairs each site user with an ssh user whose ~/htdocs symlinks to the same tree, so
+  // the same directory shows up twice; keep one path per real directory.
+  for (const key of Object.keys(t)) {
+    const seen = new Set();
+    t[key].paths = t[key].paths.filter((p) => {
+      let real = p;
+      try { real = fs.realpathSync(p); } catch (_) {}
+      if (seen.has(real)) return false;
+      seen.add(real);
+      return true;
+    });
+  }
+  return t;
+}
+
+async function duSizes(paths) {
+  const sizes = new Map();
+  if (!paths.length) return sizes;
+  const r = await execP('du', ['-s', '-B1', '--', ...paths], { timeout: 15 * 60_000 });
+  for (const line of String(r.stdout || '').split('\n')) {
+    const m = line.match(/^(\d+)\s+(.+)$/);
+    if (m) sizes.set(m[2], parseInt(m[1], 10));
+  }
+  return sizes;
+}
+
+async function measureCleanup() {
+  const t = cleanupTargets();
+  const targets = [];
+  for (const key of Object.keys(t)) {
+    const sizes = await duSizes(t[key].paths);   // one du per group so a slow group can't hide the others
+    const items = t[key].paths.map((p) => ({ path: p, bytes: sizes.get(p) || 0 }));
+    targets.push({ key, label: t[key].label, prune: !!t[key].prune, count: items.length, bytes: items.reduce((a, i) => a + i.bytes, 0), items });
+  }
+  cleanupPreview = {
+    measuredAt: new Date().toISOString(),
+    targets,
+    totalBytes: targets.filter((x) => !x.prune).reduce((a, x) => a + x.bytes, 0),
+  };
+  return cleanupPreview;
+}
+
+function safeCleanupPath(p) {
+  if (typeof p !== 'string' || !path.isAbsolute(p) || p.split('/').includes('..')) return false;
+  if (!/^\/home\/[^/]+\/.+/.test(p) && !/^\/root\/.+/.test(p)) return false;
+  const base = path.basename(p);
+  return ['_cacache', '_logs', 'pnpm', 'cache', 'pip'].includes(base) || CLEANUP_LEFTOVER_RE.test(base);
+}
+
+async function runCleanup(trigger, overrides) {
+  if (cleanupRunning) return { skipped: true, reason: 'already running' };
+  // never pull caches out from under a running install
+  if (Object.keys(moduleUpdatesActive).length || moduleUpdateAllRunning || (autoUpdateRunning && trigger !== 'after-auto-update')) {
+    return { skipped: true, reason: 'package updates in progress' };
+  }
+  cleanupRunning = true;
+  const startedAt = Date.now();
+  const cfg = { ...getCleanupConfig(), ...(overrides || {}) };
+  const results = [];
+  const errors = [];
+  try {
+    const before = await measureCleanup();
+    for (const tgt of before.targets) {
+      if (!cfg[tgt.key] || !tgt.count) continue;
+      if (tgt.prune) {
+        const r = await execP('pnpm', ['store', 'prune', '--store-dir', PNPM_STORE_DIR], { timeout: 30 * 60_000, env: Object.assign({}, process.env, { HOME: '/root' }) });
+        if (r.err) errors.push('pnpm store prune: ' + ((r.stderr || r.stdout || r.err.message || '').split('\n').filter(Boolean).slice(-1)[0] || 'failed'));
+        const after = await duSizes([PNPM_STORE_DIR]);
+        const storeAfter = after.get(PNPM_STORE_DIR);
+        results.push({ key: tgt.key, label: tgt.label, count: 1, freed: (storeAfter != null) ? Math.max(0, tgt.bytes - storeAfter) : 0, ok: !r.err });
+        continue;
+      }
+      let freed = 0, n = 0;
+      for (const it of tgt.items) {
+        if (!safeCleanupPath(it.path)) { errors.push('refused unsafe path: ' + it.path); continue; }
+        try { fs.rmSync(it.path, { recursive: true, force: true }); n++; freed += it.bytes; }
+        catch (e) { errors.push('rm ' + it.path + ': ' + e.message); }
+      }
+      results.push({ key: tgt.key, label: tgt.label, count: n, freed, ok: n === tgt.items.length });
+    }
+  } catch (e) {
+    errors.push('cleanup: ' + e.message);
+  } finally {
+    cleanupRunning = false;
+    cleanupPreview = null;   // sizes are stale now; UI offers Measure again
+  }
+  const entry = {
+    timestamp: new Date().toISOString(), trigger, duration_ms: Date.now() - startedAt,
+    freedBytes: results.reduce((a, r) => a + (r.freed || 0), 0), results, errors,
+  };
+  cleanupLog.push(entry);
+  if (cleanupLog.length > CLEANUP_LOG_MAX) cleanupLog.splice(0, cleanupLog.length - CLEANUP_LOG_MAX);
+  if (modulesCache) modulesCache.cleanupLog = cleanupLog;
+  saveModulesCache();
+  if (trigger !== 'manual' && (entry.freedBytes > 0 || errors.length)) {
+    const tel = (updatesCache && updatesCache.telegram) || {};
+    if (tel.enabled && tel.botToken && tel.chatId) {
+      try {
+        await sendTelegram('🧹 *Cleanup on ' + os.hostname() + '* (' + trigger + ') — freed ' + fmtBytes(entry.freedBytes)
+          + (errors.length ? '\n⚠ ' + errors.length + ' error' + (errors.length === 1 ? '' : 's') + ': ' + errors.slice(0, 3).join('; ') : ''));
+      } catch (_) { /* ignore */ }
+    }
+  }
+  return entry;
 }
 
 /* ---------------------------------------------------------------- collect */
@@ -1737,10 +2069,17 @@ const BACKUP_LOG_MAX = 100;
 // regenerable / heavy dirs excluded from site tarballs
 const SITE_TAR_EXCLUDES = ['node_modules', '.next', '.turbo', '.cache', 'cache', 'vendor', '.git', 'logs', 'tmp'];
 
+// What a backup run includes. pgDatabases / siteDomains: null = all, array = only those.
+const DEFAULT_BACKUP_SCOPE = {
+  postgres: true, pgDatabases: null,
+  sites: true, siteDomains: null,
+  configs: true, cloudpanelDb: true, crontabs: true, pm2: true, fail2ban: true,
+  extraPaths: [],
+};
 let backupsCache = {
   schedule: { enabled: true, hour: 3, minute: 30 },
   retentionDays: 14,
-  scope: { postgres: true, sites: true, configs: true },
+  scope: Object.assign({}, DEFAULT_BACKUP_SCOPE),
   running: false,
   lastRun: null,     // { startedAt, finishedAt, success, bytes, itemCount, items, errors, duration_ms, stamp }
   log: [],           // recent runs (newest last)
@@ -1751,6 +2090,7 @@ function loadBackups() {
   try {
     const data = JSON.parse(fs.readFileSync(BACKUP_FILE, 'utf8'));
     backupsCache = Object.assign(backupsCache, data);
+    backupsCache.scope = Object.assign({}, DEFAULT_BACKUP_SCOPE, backupsCache.scope || {});
     backupsCache.running = false;        // never resurrect a stuck "running" flag
   } catch (_) { /* keep defaults */ }
 }
@@ -1804,7 +2144,8 @@ function dirSize(p) {
 async function dumpPostgres(stageDir, result) {
   const dir = path.join(stageDir, 'postgres');
   fs.mkdirSync(dir, { recursive: true });
-  for (const db of listPgDatabases()) {
+  const sel = Array.isArray(backupsCache.scope.pgDatabases) ? backupsCache.scope.pgDatabases : null;
+  for (const db of listPgDatabases().filter((name) => !sel || sel.includes(name))) {
     const file = path.join(dir, db + '.dump');
     // -Fc = custom format: compressed and restorable with `pg_restore`
     const r = await execP('pg_dump', ['-U', 'postgres', '-h', PG_HOST, '-Fc', '-f', file, db], { timeout: 30 * 60_000 });
@@ -1816,8 +2157,10 @@ async function tarSites(stageDir, result) {
   const dir = path.join(stageDir, 'sites');
   fs.mkdirSync(dir, { recursive: true });
   const excl = SITE_TAR_EXCLUDES.map(d => "--exclude='" + d + "'").join(' ');
+  const sel = Array.isArray(backupsCache.scope.siteDomains) ? backupsCache.scope.siteDomains : null;
   for (const s of querySitesDb()) {
     if (!s.user || !s.domain) continue;
+    if (sel && !sel.includes(s.domain)) continue;
     const src = (s.root && fs.existsSync(s.root)) ? s.root : ('/home/' + s.user + '/htdocs/' + s.domain);
     if (!fs.existsSync(src)) continue;
     const file = path.join(dir, s.domain + '.tar.zst');
@@ -1832,14 +2175,65 @@ async function tarSites(stageDir, result) {
 async function tarConfigs(stageDir, result) {
   const dir = path.join(stageDir, 'configs');
   fs.mkdirSync(dir, { recursive: true });
-  const targets = ['/etc/nginx', '/etc/systemd/system', '/root/.config/rclone/rclone.conf', __dirname]
-    .filter(p => fs.existsSync(p)).map(t => "'" + t + "'").join(' ');
+  const sc = backupsCache.scope || {};
+  const list = ['/etc/nginx', '/etc/systemd/system', '/root/.config/rclone/rclone.conf', __dirname];
+  if (sc.crontabs !== false) list.push('/var/spool/cron/crontabs', '/etc/cron.d', '/etc/crontab');
+  if (sc.fail2ban !== false) list.push('/etc/fail2ban');
+  if (sc.pm2 !== false) {
+    for (const h of ['/root'].concat(homeUsers().map((u) => '/home/' + u))) {
+      const f = path.join(h, '.pm2', 'dump.pm2');
+      if (fs.existsSync(f)) list.push(f);
+    }
+  }
+  const targets = list.filter(p => fs.existsSync(p)).map(t => "'" + t + "'").join(' ');
   const file = path.join(dir, 'configs.tar.zst');
   const r = await execP('bash', ['-c',
     "tar --warning=no-file-changed --ignore-failed-read -cf - " + targets + " | zstd -q -o '" + file + "' -f"],
     { timeout: 10 * 60_000 });
   if (r.err && !fs.existsSync(file)) result.errors.push('tar configs: ' + (r.stderr || '').split('\n')[0]);
   else result.items.push('configs/configs.tar.zst');
+  if (sc.cloudpanelDb !== false && fs.existsSync(CLP_DB)) {
+    // consistent snapshot of CloudPanel's sqlite DB (sites, users, vhosts) via the online-backup API
+    const out = path.join(dir, 'cloudpanel-db.sq3');
+    const r2 = await execP('sqlite3', [CLP_DB, ".backup '" + out + "'"], { timeout: 5 * 60_000 });
+    if (r2.err) result.errors.push('cloudpanel db: ' + (r2.stderr || r2.err.message || '').split('\n')[0]);
+    else result.items.push('configs/cloudpanel-db.sq3');
+  }
+}
+// User-chosen extra paths -> extra/extra.tar.zst. Only absolute, existing paths outside of the
+// pseudo filesystems and our own staging dir are accepted.
+function validExtraPath(p) {
+  if (typeof p !== 'string') return false;
+  const t = p.trim();
+  if (!t || !path.isAbsolute(t) || t === '/' || t.split('/').includes('..')) return false;
+  if (/^\/(proc|sys|dev|run|tmp)(\/|$)/.test(t) || t.startsWith(BACKUP_STAGE)) return false;
+  return fs.existsSync(t);
+}
+async function tarExtras(stageDir, result, paths) {
+  const valid = [], bad = [];
+  for (const p of paths) (validExtraPath(p) ? valid : bad).push(String(p).trim());
+  for (const b of bad) result.errors.push('extra path skipped (missing or not allowed): ' + b);
+  if (!valid.length) return;
+  const dir = path.join(stageDir, 'extra');
+  fs.mkdirSync(dir, { recursive: true });
+  const excl = SITE_TAR_EXCLUDES.filter(d => d !== '.git').map(d => "--exclude='" + d + "'").join(' ');
+  const targets = valid.map(t => "'" + t.replace(/'/g, "'\\''") + "'").join(' ');
+  const file = path.join(dir, 'extra.tar.zst');
+  const r = await execP('bash', ['-c',
+    "tar " + excl + " --warning=no-file-changed --ignore-failed-read -cf - " + targets + " | zstd -q -T2 -o '" + file + "' -f"],
+    { timeout: 60 * 60_000 });
+  if (r.err && !fs.existsSync(file)) result.errors.push('tar extra: ' + (r.stderr || '').split('\n')[0]);
+  else result.items.push('extra/extra.tar.zst');
+}
+let backupAvailableCache = null;   // { at, databases, sites }
+function backupAvailable() {
+  if (backupAvailableCache && Date.now() - backupAvailableCache.at < 60_000) return backupAvailableCache;
+  backupAvailableCache = {
+    at: Date.now(),
+    databases: listPgDatabases(),
+    sites: querySitesDb().filter(s => s.domain).map(s => ({ domain: s.domain, user: s.user, type: s.type })),
+  };
+  return backupAvailableCache;
 }
 
 async function pruneBackups(result) {
@@ -1866,6 +2260,7 @@ async function runBackup(trigger) {
     if (scope.postgres) await dumpPostgres(stageDir, result);
     if (scope.sites)    await tarSites(stageDir, result);
     if (scope.configs)  await tarConfigs(stageDir, result);
+    if (Array.isArray(scope.extraPaths) && scope.extraPaths.length) await tarExtras(stageDir, result, scope.extraPaths);
     bytes = dirSize(stageDir);
     if (result.items.length) {
       const dest = RCLONE_REMOTE + BACKUP_BUCKET + '/' + BACKUP_PREFIX + '/' + stamp;
@@ -2842,7 +3237,7 @@ function renderModules(){
 
   html += '<div class="auto-row"><label class="switch"><input type="checkbox" id="auAutoFix" '+(au.autoFix?'checked':'')+'><span class="slider"></span></label>';
   html += '<label for="auAutoFix">Auto-fix common npm errors</label>';
-  html += '<span class="hint">retry with <code style="background:#12141d;padding:1px 6px;border-radius:4px">--force</code> on ERESOLVE; resync lockfile on EUSAGE; one retry on network errors</span></div>';
+  html += '<span class="hint">retry with <code style="background:#12141d;padding:1px 6px;border-radius:4px">--force</code> on ERESOLVE; resync lockfile on EUSAGE; one retry on network errors; pnpm build scripts (ERR_PNPM_IGNORED_BUILDS) are always approved + rebuilt</span></div>';
 
   html += '<div class="auto-row"><label class="switch"><input type="checkbox" id="auNotify" '+(au.notifyTelegram?'checked':'')+'><span class="slider"></span></label>';
   html += '<label for="auNotify">Telegram notify</label>';
@@ -2867,6 +3262,46 @@ function renderModules(){
   html += '<div class="auto-row" style="margin-top:6px"><button class="btn" id="auSave" style="background:#5cdd8b;color:#0b2818;padding:8px 16px;font-size:12px">💾 Save settings</button>';
   html += '<button class="btn" id="auRunNow" '+(auRunning?'disabled':'')+' style="padding:8px 16px;font-size:12px">'+(auRunning?'⏳ running…':'⏱ Run now (one pass)')+'</button>';
   html += '<span class="hint" id="auRunHint" style="margin-left:auto"></span></div>';
+  html += '</div>';
+
+  // Cleanup card (disk hygiene: regenerable caches + build leftovers)
+  const cu = d.cleanup || { config: {}, preview: null, running: false, log: [] };
+  const cuCfg = cu.config || {};
+  const cuPrev = cu.preview;
+  const cuLast = (cu.log && cu.log.length) ? cu.log[cu.log.length-1] : null;
+  const cuKeys = ['npmCache','pnpmCache','pnpmStore','bunCache','pipCache','projectCaches','nextCache','leftovers'];
+  const cuLabels = { npmCache:'npm caches', pnpmCache:'pnpm metadata caches', pnpmStore:'pnpm store prune', bunCache:'bun caches', pipCache:'pip caches', projectCaches:'project tool caches (node_modules/.cache)', nextCache:'Next.js build caches (.next/cache)', leftovers:'leftover node_modules copies (node_modules.pre-*, .bak, .old)' };
+  const cuHints = { npmCache:'~/.npm/_cacache + _logs for every user and root', pnpmCache:'~/.cache/pnpm — metadata only, the content store is untouched', pnpmStore:'/var/lib/pnpm-store: removes packages no project references any more (shows store size, not the reclaimable amount)', bunCache:'~/.bun/install/cache', pipCache:'~/.cache/pip', projectCaches:'babel/eslint/webpack/turbo caches, rebuilt on the next build', nextCache:'the next Next.js build is slower once after removal', leftovers:'copies left behind by the npm → pnpm migration; safe to drop once the site runs fine on pnpm' };
+  let cuSel = 0;
+  html += '<div class="auto-card" style="margin-top:14px">';
+  html += '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px">';
+  html += '<h3 style="margin:0;font-size:15px;font-weight:700">🧹 Cleanup</h3>';
+  html += '<span class="hint" style="font-size:12px">regenerable caches + build leftovers · only under /home/*/ and /root · refuses to run while an install is active</span>';
+  if (cuLast) html += '<span class="auto-stat" style="margin-left:auto" title="Last run">last run <span class="v">'+new Date(cuLast.timestamp).toLocaleString()+'</span> · freed <span class="v">'+bkBytes(cuLast.freedBytes||0)+'</span>'+((cuLast.errors||[]).length?' · ⚠ <span class="v">'+cuLast.errors.length+'</span> errors':'')+'</span>';
+  else html += '<span class="auto-stat" style="margin-left:auto">never run</span>';
+  html += '</div>';
+  html += '<div class="auto-projlist" style="grid-template-columns:repeat(auto-fill,minmax(360px,1fr))">';
+  for (const k of cuKeys) {
+    const t = cuPrev ? (cuPrev.targets||[]).find(x => x.key===k) : null;
+    const on = !!cuCfg[k];
+    if (on && t && !t.prune) cuSel += (t.bytes||0);
+    const size = t ? (t.count ? bkBytes(t.bytes)+(t.prune?' in store':'')+' · '+t.count+(t.count===1?' path':' paths') : 'nothing found') : '';
+    html += '<label title="'+esc(cuHints[k])+'" style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="cuOpt" data-key="'+k+'" '+(on?'checked':'')+'><span>'+esc(cuLabels[k])+'</span><span style="margin-left:auto;color:#9ca3af;font-size:11.5px;font-family:ui-monospace,Menlo,Consolas,monospace;white-space:nowrap">'+esc(size)+'</span></label>';
+  }
+  html += '</div>';
+  if (cuPrev && cuPrev.targets) {
+    const lo = cuPrev.targets.find(x => x.key==='leftovers');
+    if (lo && lo.items && lo.items.length) html += '<div class="hint" style="font-size:11.5px;margin-top:8px;line-height:1.7">leftovers: '+lo.items.map(i => '<code style="background:#12141d;padding:1px 6px;border-radius:4px">'+esc(i.path.replace(/^\\/home\\//,'~'))+'</code> '+bkBytes(i.bytes)).join(' · ')+'</div>';
+  }
+  html += '<div class="auto-row" style="margin-top:10px"><label class="switch"><input type="checkbox" id="cuAfterAuto" '+(cuCfg.afterAutoUpdate?'checked':'')+'><span class="slider"></span></label>';
+  html += '<label for="cuAfterAuto">Run after the nightly auto-update pass</label>';
+  html += '<span class="hint" style="margin-left:auto">'+(cuPrev?('measured '+new Date(cuPrev.measuredAt).toLocaleString()+' · selected ≈ '+bkBytes(cuSel)):'not measured yet — click Measure')+'</span></div>';
+  html += '<div class="auto-row"><button class="btn" id="cuSave" style="background:#5cdd8b;color:#0b2818;padding:8px 16px;font-size:12px">💾 Save</button>';
+  html += '<button class="btn" id="cuMeasure" style="padding:8px 16px;font-size:12px">📏 Measure</button>';
+  html += '<button class="btn" id="cuRun" '+(cu.running?'disabled':'')+' style="padding:8px 16px;font-size:12px">'+(cu.running?'⏳ cleaning…':'🧹 Clean now')+'</button>';
+  if (cuLast && cuLast.results && cuLast.results.length) html += '<span class="hint" style="margin-left:auto">'+cuLast.results.map(r => esc(cuLabels[r.key]||r.key)+': '+bkBytes(r.freed||0)).join(' · ')+'</span>';
+  html += '</div>';
+  if (cuLast && cuLast.errors && cuLast.errors.length) html += '<div class="hint" style="color:#ff8088;font-size:11.5px;margin-top:6px">'+cuLast.errors.slice(0,5).map(esc).join('<br>')+'</div>';
   html += '</div>';
 
   // Toolbar (Orient): filter chips + search + refresh
@@ -3080,6 +3515,7 @@ function renderModules(){
               html += '<div class="att">🔁 '+r.attempts.map(a => esc(a.strategy) + (a.success?'✓':'✗')+(a.error?'('+esc(a.error)+')':'')).join(' → ')+'</div>';
             }
             if (r.autoFix) html += '<div class="att">🔧 auto-fix: '+esc(r.autoFix)+'</div>';
+            if (!r.success && r.finalError) html += '<div class="att" style="color:#ff8088">⚠ '+esc(r.finalError)+'</div>';
             if (!r.success && r.outputTail) html += '<pre>'+esc(r.outputTail)+'</pre>';
           }
           html += '</div>';
@@ -3142,6 +3578,59 @@ function renderModules(){
     renderModules();
     toast('Auto-update log cleared', 'info');
   }));
+
+  // Cleanup wiring
+  const cuSaveBtn = document.getElementById('cuSave');
+  if (cuSaveBtn) cuSaveBtn.addEventListener('click', () => saveCleanupConfig(false));
+  const cuMeasureBtn = document.getElementById('cuMeasure');
+  if (cuMeasureBtn) cuMeasureBtn.addEventListener('click', () => measureCleanupNow());
+  const cuRunBtn = document.getElementById('cuRun');
+  if (cuRunBtn) cuRunBtn.addEventListener('click', () => armConfirm(cuRunBtn, '⚠ Click again to delete', () => runCleanupNow()));
+}
+
+function readCleanupForm() {
+  const view = document.getElementById('modulesview');
+  const cfg = {};
+  for (const c of view.querySelectorAll('.cuOpt')) cfg[c.dataset.key] = c.checked;
+  const aa = view.querySelector('#cuAfterAuto');
+  cfg.afterAutoUpdate = aa ? aa.checked : false;
+  return cfg;
+}
+async function saveCleanupConfig(silent) {
+  try {
+    const res = await fetch('api/modules/cleanup/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(readCleanupForm()) });
+    const j = await res.json();
+    if (!res.ok) { toast('Save failed: ' + (j.error || res.status), 'error'); return false; }
+    if (lastModules) lastModules.cleanup = j.cleanup;
+    if (!silent) { renderModules(); toast('Cleanup settings saved', 'success'); }
+    return true;
+  } catch (e) { toast('Error: ' + e.message, 'error'); return false; }
+}
+async function measureCleanupNow() {
+  toast('Measuring caches… this can take a minute', 'info');
+  try {
+    const res = await fetch('api/modules/cleanup/measure', { method:'POST' });
+    const j = await res.json();
+    if (!res.ok) { toast('Measure failed: ' + (j.error || res.status), 'error'); return; }
+    if (lastModules) lastModules.cleanup = j.cleanup;
+    if (state.tab === 'modules') renderModules();
+    const p = j.cleanup && j.cleanup.preview;
+    toast('Measured · ' + bkBytes(p ? p.totalBytes : 0) + ' in regenerable caches/leftovers', 'success');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+async function runCleanupNow() {
+  if (!(await saveCleanupConfig(true))) return;
+  toast('Cleanup started…', 'info');
+  if (lastModules && lastModules.cleanup) lastModules.cleanup.running = true;
+  if (state.tab === 'modules') renderModules();
+  try {
+    const res = await fetch('api/modules/cleanup/run', { method:'POST', headers:{'Content-Type':'application/json'}, body: '{}' });
+    const j = await res.json();
+    if (!res.ok) toast('Cleanup not run: ' + (j.error || j.reason || res.status), 'error');
+    else toast('Cleanup done · freed ' + bkBytes(j.freedBytes||0) + ((j.errors||[]).length ? ' · ' + j.errors.length + ' errors' : ''), (j.errors||[]).length ? 'warn' : 'success');
+    if (j.cleanup && lastModules) lastModules.cleanup = j.cleanup;
+    if (state.tab === 'modules') renderModules();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 function readAutoUpdateForm() {
@@ -3400,7 +3889,7 @@ function renderBackup(){
   const view = document.getElementById('backupview');
   if (!lastBackup){ view.innerHTML = '<div class="upd-card">Loading…</div>'; return; }
   // don't clobber a field the user is mid-edit on during the 10s auto-refresh
-  if (view.contains(document.activeElement) && ['INPUT','SELECT'].includes((document.activeElement.tagName||''))) return;
+  if (view.contains(document.activeElement) && ['INPUT','SELECT','TEXTAREA'].includes((document.activeElement.tagName||''))) return;
   const d = lastBackup, sc = d.scope||{}, sch = d.schedule||{}, lr = d.lastRun;
   let html = '';
 
@@ -3423,12 +3912,39 @@ function renderBackup(){
   html += '</div>';
 
   html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px">';
-  html += '<h3 style="margin:0 0 10px">Schedule &amp; scope</h3>';
-  html += '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:12px">';
-  html += scopeChk('bkScopePg','Postgres databases',sc.postgres);
-  html += scopeChk('bkScopeSites','CloudPanel site files',sc.sites);
-  html += scopeChk('bkScopeCfg','App + system configs',sc.configs);
+  html += '<h3 style="margin:0 0 10px">What to back up</h3>';
+  const av = d.available || { databases: [], sites: [] };
+  const pgSel = Array.isArray(sc.pgDatabases) ? sc.pgDatabases : null;
+  const siteSel = Array.isArray(sc.siteDomains) ? sc.siteDomains : null;
+  const box = '<div style="background:#12141d;border:1px solid #232838;border-radius:8px;padding:12px">';
+  const sub = '<div style="margin:8px 0 0 22px;display:flex;flex-direction:column;gap:4px;font-size:12.5px;max-height:220px;overflow:auto">';
+  const mono = 'font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px';
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-bottom:14px">';
+  // Postgres
+  html += box + scopeChk('bkScopePg','<strong>Postgres databases</strong> <span class="hint">pg_dump -Fc, one file per DB</span>',sc.postgres);
+  html += sub + '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="bkPgAll" '+(pgSel?'':'checked')+'> all databases ('+av.databases.length+')</label>';
+  for (const db of av.databases) html += '<label style="display:flex;gap:6px;align-items:center;margin-left:16px"><input type="checkbox" class="bkPgDb" data-db="'+esc(db)+'" '+(!pgSel||pgSel.includes(db)?'checked':'')+' '+(pgSel?'':'disabled')+'> <span style="'+mono+'">'+esc(db)+'</span></label>';
+  html += '</div></div>';
+  // Sites
+  html += box + scopeChk('bkScopeSites','<strong>CloudPanel site files</strong> <span class="hint">tar+zstd · excludes node_modules, .next, .git, caches</span>',sc.sites);
+  html += sub + '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="bkSitesAll" '+(siteSel?'':'checked')+'> all sites ('+av.sites.length+')</label>';
+  for (const st of av.sites) html += '<label style="display:flex;gap:6px;align-items:center;margin-left:16px"><input type="checkbox" class="bkSite" data-domain="'+esc(st.domain)+'" '+(!siteSel||siteSel.includes(st.domain)?'checked':'')+' '+(siteSel?'':'disabled')+'> '+esc(st.domain)+' <span class="hint" style="'+mono+'">'+esc(st.user||'')+'</span></label>';
+  html += '</div></div>';
+  // Configs
+  html += box + scopeChk('bkScopeCfg','<strong>App + system configs</strong> <span class="hint">/etc/nginx, systemd units, rclone.conf, this app</span>',sc.configs);
+  html += sub;
+  html += scopeChk('bkCfgClp','CloudPanel database <span class="hint">db.sq3 snapshot: sites, users, vhosts</span>',sc.cloudpanelDb!==false);
+  html += scopeChk('bkCfgCron','crontabs <span class="hint">/var/spool/cron/crontabs, /etc/cron.d, /etc/crontab</span>',sc.crontabs!==false);
+  html += scopeChk('bkCfgPm2','PM2 process lists <span class="hint">~/.pm2/dump.pm2 for root + every site user</span>',sc.pm2!==false);
+  html += scopeChk('bkCfgF2b','fail2ban config <span class="hint">/etc/fail2ban</span>',sc.fail2ban!==false);
+  html += '</div></div>';
+  // Extra paths
+  html += box + '<strong>Extra paths</strong> <span class="hint">one absolute path per line → extra/extra.tar.zst</span>';
+  html += '<textarea id="bkExtraPaths" rows="6" spellcheck="false" style="width:100%;box-sizing:border-box;margin-top:8px;'+mono+';background:#0b0d14;color:#e5e7eb;border:1px solid #2a2f3d;border-radius:6px;padding:6px" placeholder="/etc/letsencrypt&#10;/opt/some-app/config">'+esc((sc.extraPaths||[]).join('\\n'))+'</textarea>';
+  html += '<div class="hint" style="font-size:11.5px;margin-top:4px">missing paths are reported in the run errors, never fatal · /proc, /sys, /dev, /run, /tmp are refused</div>';
   html += '</div>';
+  html += '</div>';
+  html += '<h3 style="margin:0 0 10px">Schedule &amp; retention</h3>';
   html += '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">';
   html += '<label class="switch"><input type="checkbox" id="bkSchedEnable" '+(sch.enabled?'checked':'')+'><span class="slider"></span></label><span>Daily at</span>';
   html += '<input id="bkSchedHour" type="number" min="0" max="23" value="'+(sch.hour!=null?sch.hour:3)+'" style="width:56px">:';
@@ -3456,6 +3972,11 @@ function renderBackup(){
   if (save) save.addEventListener('click', saveBackupConfig);
   const list = document.getElementById('bkList');
   if (list) list.addEventListener('click', loadRemoteList);
+  // "all" toggles enable/disable the per-item pickers
+  for (const pair of [['bkPgAll','.bkPgDb'],['bkSitesAll','.bkSite']]) {
+    const all = document.getElementById(pair[0]);
+    if (all) all.addEventListener('change', () => { for (const c of view.querySelectorAll(pair[1])) { c.disabled = all.checked; if (all.checked) c.checked = true; } });
+  }
 }
 async function runBackupNow(){
   try { const r = await fetch('api/backup/run',{method:'POST'}); const j = await r.json();
@@ -3464,6 +3985,7 @@ async function runBackupNow(){
   } catch(e){ toast('Error: '+e,'error'); }
 }
 function saveBackupConfig(){
+  const pgAll = document.getElementById('bkPgAll'), siteAll = document.getElementById('bkSitesAll');
   const body = {
     schedule: { enabled: document.getElementById('bkSchedEnable').checked,
       hour: parseInt(document.getElementById('bkSchedHour').value)||0,
@@ -3471,7 +3993,14 @@ function saveBackupConfig(){
     retentionDays: parseInt(document.getElementById('bkRetention').value)||14,
     scope: { postgres: document.getElementById('bkScopePg').checked,
       sites: document.getElementById('bkScopeSites').checked,
-      configs: document.getElementById('bkScopeCfg').checked },
+      configs: document.getElementById('bkScopeCfg').checked,
+      pgDatabases: (pgAll && !pgAll.checked) ? Array.from(document.querySelectorAll('.bkPgDb')).filter(c=>c.checked).map(c=>c.dataset.db) : null,
+      siteDomains: (siteAll && !siteAll.checked) ? Array.from(document.querySelectorAll('.bkSite')).filter(c=>c.checked).map(c=>c.dataset.domain) : null,
+      cloudpanelDb: document.getElementById('bkCfgClp').checked,
+      crontabs: document.getElementById('bkCfgCron').checked,
+      pm2: document.getElementById('bkCfgPm2').checked,
+      fail2ban: document.getElementById('bkCfgF2b').checked,
+      extraPaths: document.getElementById('bkExtraPaths').value.split('\\n').map(x=>x.trim()).filter(Boolean) },
   };
   fetch('api/backup/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(()=>toast('Saved','success'));
   if (lastBackup){ lastBackup.schedule=Object.assign({},lastBackup.schedule,body.schedule); lastBackup.retentionDays=body.retentionDays; lastBackup.scope=body.scope; }
@@ -3672,8 +4201,8 @@ const server = http.createServer((req, res) => {
   if (url === '/api/modules') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify(modulesCache
-      ? { ...modulesCache, scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress, activeUpdates: moduleUpdatesActive, updateLog: moduleUpdateLog, updateAllRunning: moduleUpdateAllRunning, updateAllProgress: moduleUpdateAllProgress, autoUpdate: getAutoUpdateConfig(), autoUpdateLog, autoUpdateRunning }
-      : { generated_at: null, summary: {}, projects: [], outdated: [], scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress, activeUpdates: moduleUpdatesActive, updateLog: moduleUpdateLog, updateAllRunning: moduleUpdateAllRunning, updateAllProgress: moduleUpdateAllProgress, autoUpdate: getAutoUpdateConfig(), autoUpdateLog, autoUpdateRunning }));
+      ? { ...modulesCache, scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress, activeUpdates: moduleUpdatesActive, updateLog: moduleUpdateLog, updateAllRunning: moduleUpdateAllRunning, updateAllProgress: moduleUpdateAllProgress, autoUpdate: getAutoUpdateConfig(), autoUpdateLog, autoUpdateRunning, cleanup: getCleanupState() }
+      : { generated_at: null, summary: {}, projects: [], outdated: [], scanInProgress: modulesScanInProgress, scanProgress: modulesScanProgress, activeUpdates: moduleUpdatesActive, updateLog: moduleUpdateLog, updateAllRunning: moduleUpdateAllRunning, updateAllProgress: moduleUpdateAllProgress, autoUpdate: getAutoUpdateConfig(), autoUpdateLog, autoUpdateRunning, cleanup: getCleanupState() }));
   }
   if (url === '/api/modules/check' && req.method === 'POST') {
     if (modulesScanInProgress) {
@@ -3764,9 +4293,64 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true }));
   }
+  if (url === '/api/modules/cleanup' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(getCleanupState()));
+  }
+  if (url === '/api/modules/cleanup/measure' && req.method === 'POST') {
+    measureCleanup().then(() => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, cleanup: getCleanupState() }));
+    }).catch((e) => {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    });
+    return;
+  }
+  if (url === '/api/modules/cleanup/config' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 64 * 1024) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const cfg = JSON.parse(body);
+        setCleanupConfig(cfg || {});
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, cleanup: getCleanupState() }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'invalid JSON: ' + e.message }));
+      }
+    });
+    return;
+  }
+  if (url === '/api/modules/cleanup/run' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 64 * 1024) req.destroy(); });
+    req.on('end', () => {
+      let overrides = {};
+      try { overrides = body ? (JSON.parse(body) || {}) : {}; } catch (_) { overrides = {}; }
+      const clean = {};
+      for (const k of Object.keys(DEFAULT_CLEANUP)) if (typeof overrides[k] === 'boolean') clean[k] = overrides[k];
+      runCleanup('manual', clean).then((r) => {
+        res.writeHead(r.skipped ? 409 : 200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(Object.assign({}, r, { cleanup: getCleanupState() })));
+      }).catch((e) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      });
+    });
+    return;
+  }
+  if (url === '/api/modules/cleanup/log' && req.method === 'DELETE') {
+    cleanupLog = [];
+    if (modulesCache) modulesCache.cleanupLog = [];
+    saveModulesCache();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: true }));
+  }
   if (url === '/api/backup') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify(backupsCache));
+    return res.end(JSON.stringify(Object.assign({}, backupsCache, { available: backupAvailable() })));
   }
   if (url === '/api/backup/run' && req.method === 'POST') {
     if (backupRunning) { res.writeHead(409, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'A backup is already running' })); }
@@ -3788,7 +4372,13 @@ const server = http.createServer((req, res) => {
       try {
         const cfg = JSON.parse(body);
         if (cfg.schedule) backupsCache.schedule = Object.assign({}, backupsCache.schedule, cfg.schedule);
-        if (cfg.scope) backupsCache.scope = Object.assign({}, backupsCache.scope, cfg.scope);
+        if (cfg.scope && typeof cfg.scope === 'object') {
+          const sIn = cfg.scope, next = Object.assign({}, DEFAULT_BACKUP_SCOPE, backupsCache.scope);
+          for (const k of ['postgres', 'sites', 'configs', 'cloudpanelDb', 'crontabs', 'pm2', 'fail2ban']) if (typeof sIn[k] === 'boolean') next[k] = sIn[k];
+          for (const k of ['pgDatabases', 'siteDomains']) if (k in sIn) next[k] = Array.isArray(sIn[k]) ? sIn[k].filter((x) => typeof x === 'string').slice(0, 200) : null;
+          if ('extraPaths' in sIn) next.extraPaths = Array.isArray(sIn.extraPaths) ? sIn.extraPaths.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()).slice(0, 50) : [];
+          backupsCache.scope = next;
+        }
         if (cfg.retentionDays != null) backupsCache.retentionDays = Math.max(1, Math.min(365, parseInt(cfg.retentionDays) || 14));
         saveBackups();
         res.writeHead(200, { 'Content-Type': 'application/json' });
