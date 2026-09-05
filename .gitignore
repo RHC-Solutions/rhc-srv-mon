@@ -2,3 +2,5 @@ db-credentials.json
 history.json
 updates.json
 backups.json
+ssh-hosts.json
+.helpers/

@@ -16,7 +16,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execFile, execFileSync } = require('child_process');
+const { execFile, execFileSync, spawn } = require('child_process');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT || 8899;
 const HOST = '127.0.0.1';
@@ -2602,6 +2603,78 @@ const PAGE = `<!doctype html>
      Below 860px the bars are hidden entirely (next rule). */
   @media (max-width:860px){ .beats, .hdr .beats-h { display:none; } }
   @media (max-width:560px){ .col { flex:0 0 48px; } .info{ display:none; } .stat { flex:0 0 54px; } }
+  /* ---- SSH tab ---- */
+  .ssh-layout { display:flex; gap:14px; align-items:stretch; height:calc(100vh - 230px); min-height:420px; }
+  .ssh-side { flex:0 0 250px; background:#1e2230; border-radius:14px; box-shadow:0 2px 8px rgba(0,0,0,.25); display:flex; flex-direction:column; min-width:0; overflow:hidden; }
+  .ssh-side-hd { display:flex; align-items:center; justify-content:space-between; padding:12px 14px 8px; font-size:13px; font-weight:700; }
+  .ssh-side input.q { margin:0 12px 8px; background:#12141d; border:1px solid #2a2f40; color:#e9e9e9; border-radius:8px; padding:7px 10px; font-size:12.5px; outline:none; }
+  .ssh-side input.q:focus { border-color:#5cdd8b66; }
+  .ssh-hostlist { flex:1; overflow-y:auto; padding:0 6px 8px; }
+  .ssh-grp { font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; color:#6b7280; font-weight:700; padding:10px 8px 4px; }
+  .ssh-host { display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:8px; cursor:pointer; font-size:13px; user-select:none; }
+  .ssh-host:hover { background:#262b3b; }
+  .ssh-host .dot { width:8px; height:8px; border-radius:50%; background:#6b7280; flex-shrink:0; }
+  .ssh-host .dot.on { background:#5cdd8b; box-shadow:0 0 6px #5cdd8b99; }
+  .ssh-host .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+  .ssh-host .nm small { display:block; font-weight:400; color:#6b7280; font-size:11px; overflow:hidden; text-overflow:ellipsis; }
+  .ssh-host .mon { font-size:11px; flex-shrink:0; opacity:.9; }
+  .ssh-host .acts { display:none; gap:2px; flex-shrink:0; }
+  .ssh-host:hover .acts { display:flex; }
+  .ssh-host .acts button { background:#2a2f40; border:none; color:#e9e9e9; border-radius:6px; width:24px; height:24px; font-size:12px; cursor:pointer; padding:0; }
+  .ssh-host .acts button:hover { background:#3a4054; }
+  .ssh-side-ft { padding:8px 14px; font-size:11px; color:#6b7280; border-top:1px solid #2a2f40; line-height:1.5; }
+  .ssh-main { flex:1; min-width:0; display:flex; flex-direction:column; background:#0c0e16; border-radius:14px; box-shadow:0 2px 8px rgba(0,0,0,.25); overflow:hidden; border:1px solid #2a2f40; }
+  .ssh-tabbar { display:flex; align-items:stretch; background:#1e2230; border-bottom:1px solid #2a2f40; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; flex-shrink:0; }
+  .ssh-tab { display:flex; align-items:center; gap:7px; padding:0 10px 0 12px; height:36px; font-size:12.5px; font-weight:600; color:#9ca3af; cursor:pointer; border-right:1px solid #2a2f40; white-space:nowrap; max-width:220px; user-select:none; position:relative; }
+  .ssh-tab:hover { background:#262b3b; color:#e9e9e9; }
+  .ssh-tab.active { background:#0c0e16; color:#e9e9e9; box-shadow:inset 0 2px 0 #5cdd8b; }
+  .ssh-tab .st { width:7px; height:7px; border-radius:50%; background:#f8a306; flex-shrink:0; }
+  .ssh-tab .st.open { background:#5cdd8b; }
+  .ssh-tab .st.dead { background:#ff8088; }
+  .ssh-tab .tt { overflow:hidden; text-overflow:ellipsis; }
+  .ssh-tab .x { border:none; background:transparent; color:#6b7280; font-size:14px; line-height:1; cursor:pointer; padding:2px 4px; border-radius:4px; }
+  .ssh-tab .x:hover { background:#3a4054; color:#fff; }
+  .ssh-tab.plus { padding:0 12px; font-size:16px; border-right:none; }
+  .ssh-tabbar .sp { flex:1; }
+  .ssh-tabbar .tools { display:flex; align-items:center; gap:4px; padding:0 8px; }
+  .ssh-tabbar .tools button { background:transparent; border:1px solid #2a2f40; color:#9ca3af; border-radius:6px; padding:3px 9px; font-size:11.5px; cursor:pointer; white-space:nowrap; }
+  .ssh-tabbar .tools button:hover { color:#e9e9e9; background:#262b3b; }
+  .ssh-terms { flex:1; position:relative; min-height:0; }
+  .ssh-term { position:absolute; inset:0; padding:6px 0 4px 8px; display:none; }
+  .ssh-term.active { display:block; }
+  .ssh-term .xterm { height:100%; }
+  .ssh-empty { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#6b7280; font-size:13.5px; gap:10px; text-align:center; padding:20px; }
+  .ssh-empty b { color:#9ca3af; font-size:15px; }
+  .ssh-empty kbd { background:#1e2230; border:1px solid #2a2f40; border-radius:4px; padding:1px 6px; font-size:11px; }
+  .ssh-deadbar { position:absolute; left:0; right:0; bottom:0; background:#5a1f25e6; color:#ffb4b8; font-size:12.5px; padding:7px 14px; display:flex; align-items:center; gap:12px; z-index:2; }
+  .ssh-deadbar button { background:#2a2f40; border:none; color:#e9e9e9; border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; }
+  .ssh-deadbar button.re { background:#5cdd8b; color:#0b2818; font-weight:700; }
+  .ssh-installs { margin-top:16px; display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:14px; }
+  .ssh-inst { background:#1e2230; border-radius:14px; padding:14px 16px; box-shadow:0 2px 8px rgba(0,0,0,.25); }
+  .ssh-inst .top { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; }
+  .ssh-inst .top b { font-size:13.5px; }
+  .ssh-inst .meta { font-size:11.5px; color:#6b7280; margin-bottom:8px; }
+  .ssh-inst pre { margin:0; background:#0c0e16; border-radius:8px; padding:8px 10px; max-height:280px; overflow:auto; font-size:11.5px; line-height:1.5; color:#cbd5e1; white-space:pre-wrap; word-break:break-word; }
+  .ssh-inst pre .err { color:#ff8088; } .ssh-inst pre .hdr { color:#5cdd8b; font-weight:700; } .ssh-inst pre .remote { color:#9ca3af; } .ssh-inst pre .t { color:#4b5563; }
+  .ssh-modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:900; display:flex; align-items:flex-start; justify-content:center; padding:60px 16px 20px; overflow-y:auto; }
+  .ssh-modal { background:#1e2230; border-radius:14px; padding:20px 22px; width:100%; max-width:560px; box-shadow:0 10px 40px rgba(0,0,0,.5); border:1px solid #2a2f40; }
+  .ssh-modal h3 { margin:0 0 14px; font-size:15px; }
+  .ssh-modal .row2 { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+  .ssh-modal .row3 { display:grid; grid-template-columns:2fr 1fr 1fr; gap:0 12px; }
+  .ssh-modal .foot { display:flex; gap:8px; justify-content:flex-end; align-items:center; margin-top:8px; flex-wrap:wrap; }
+  .ssh-modal .foot .left { margin-right:auto; display:flex; gap:8px; }
+  .ssh-modal .btn { background:#2a2f40; border:none; color:#e9e9e9; border-radius:8px; padding:8px 16px; font-size:13px; font-weight:600; cursor:pointer; }
+  .ssh-modal .btn:hover { background:#3a4054; }
+  .ssh-modal .btn.pri { background:#5cdd8b; color:#0b2818; }
+  .ssh-modal .btn.pri:hover { background:#6fee9c; }
+  .ssh-modal .btn.danger { background:#5a1f25; color:#ff8088; }
+  .ssh-modal .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .ssh-modal .test-out { margin-top:8px; background:#0c0e16; border-radius:8px; padding:8px 10px; font-size:11.5px; font-family:ui-monospace,Menlo,Consolas,monospace; white-space:pre-wrap; color:#cbd5e1; max-height:160px; overflow:auto; }
+  .ssh-modal .test-out.ok { border-left:2px solid #5cdd8b; } .ssh-modal .test-out.bad { border-left:2px solid #dc3545; }
+  .ssh-modal .box { background:#12141d; border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:12.5px; color:#9ca3af; line-height:1.6; }
+  .ssh-modal .box b { color:#e9e9e9; }
+  @media (max-width:820px){ .ssh-layout { flex-direction:column; height:auto; } .ssh-side { flex:0 0 auto; max-height:240px; } .ssh-main { height:60vh; } }
+  body.tab-ssh .wrap { max-width:1640px; }
 </style></head>
 <body>
 <div class="wrap">
@@ -2614,6 +2687,7 @@ const PAGE = `<!doctype html>
     <button class="tab" data-tab="sites">🌐 Sites</button>
     <button class="tab" data-tab="modules">📦 Modules</button>
     <button class="tab" data-tab="backup">💾 Backups</button>
+    <button class="tab" data-tab="ssh">🖥️ SSH</button>
   </div>
   <div id="banner" class="banner ok" style="display:none"></div>
   <div id="pm2view">
@@ -2639,6 +2713,23 @@ const PAGE = `<!doctype html>
   <div id="sitesview" style="display:none"></div>
   <div id="modulesview" style="display:none"></div>
   <div id="backupview" style="display:none"></div>
+  <div id="sshview" style="display:none">
+    <div class="ssh-layout">
+      <aside class="ssh-side">
+        <div class="ssh-side-hd"><span>🖥️ Hosts</span><button class="upd-test-btn" style="padding:4px 10px" onclick="sshEditHost()">＋ Add host</button></div>
+        <input class="q" id="ssh-q" type="search" placeholder="Filter hosts…" autocomplete="off" oninput="sshRenderHosts()">
+        <div class="ssh-hostlist" id="ssh-hostlist"><div class="ssh-grp">loading…</div></div>
+        <div class="ssh-side-ft" id="ssh-side-ft"></div>
+      </aside>
+      <section class="ssh-main">
+        <div class="ssh-tabbar" id="ssh-tabbar"></div>
+        <div class="ssh-terms" id="ssh-terms">
+          <div class="ssh-empty" id="ssh-empty"><b>No open sessions</b><span>Click a host on the left to open a terminal tab. Each click opens a new tab — like mRemoteNG.</span><span><kbd>＋</kbd> in the tab bar connects ad hoc to any user@host.</span></div>
+        </div>
+      </section>
+    </div>
+    <div class="ssh-installs" id="ssh-installs"></div>
+  </div>
   <footer>auto-refresh 10s · heartbeat = <span id="ivl">60</span>s samples · 🟩 up · 🟥 down · 🟧 restarted</footer>
 </div>
 <div id="toast-host"></div>
@@ -4044,6 +4135,307 @@ async function loadRemoteList(){
   try { const r = await fetch('api/backup/remote'); window._bkRemote = await r.json(); renderBackup(); } catch(e){ toast('Error: '+e,'error'); }
 }
 
+/* ================================================================ SSH tab */
+let sshData = null;                 // last /api/ssh payload
+const sshSess = new Map();          // tabId -> { id, hostId, label, term, fit, ws, el, status, host, user, port }
+let sshActive = null;
+let sshLibPromise = null;
+let sshPollTimer = null;
+let sshTabSeq = 0;
+const sshEnc = new TextEncoder();
+
+function sshLoadLib(){
+  if (window.Terminal && window.FitAddon) return Promise.resolve();
+  if (sshLibPromise) return sshLibPromise;
+  const base = 'https://cdn.jsdelivr.net/npm/@xterm/';
+  const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = base + 'xterm@5.5.0/css/xterm.min.css'; document.head.appendChild(css);
+  const load = (src) => new Promise((ok, bad) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => bad(new Error('failed to load ' + src)); document.head.appendChild(s); });
+  sshLibPromise = load(base + 'xterm@5.5.0/lib/xterm.min.js')
+    .then(() => Promise.all([load(base + 'addon-fit@0.10.0/lib/addon-fit.min.js'), load(base + 'addon-web-links@0.11.0/lib/addon-web-links.min.js')]))
+    .catch((e) => { sshLibPromise = null; throw e; });
+  return sshLibPromise;
+}
+
+async function renderSsh(){
+  try { sshData = await fetch('api/ssh').then(r => r.json()); } catch(e){ return; }
+  sshRenderHosts();
+  sshRenderInstalls();
+  const src = sshData.source || {};
+  document.getElementById('ssh-side-ft').innerHTML = 'source: <b>' + esc(src.host || '') + '</b> · node ' + esc(src.node || '') + (src.git ? ' · ' + esc(src.git) : '')
+    + '<br>' + sshData.hosts.length + ' host' + (sshData.hosts.length===1?'':'s') + ' · ' + (sshData.sessions||[]).length + ' active session' + ((sshData.sessions||[]).length===1?'':'s')
+    + (sshData.helperOk ? '' : '<br><span style="color:#ff8088">⚠ pty helper missing</span>');
+  if (sshSess.size) sshRenderTabs();
+  const running = (sshData.installs||[]).some(j => j.status === 'running');
+  if (running && !sshPollTimer) sshPollTimer = setInterval(() => { if (state.tab === 'ssh') renderSsh(); }, 2000);
+  if (!running && sshPollTimer) { clearInterval(sshPollTimer); sshPollTimer = null; }
+}
+
+function sshRenderHosts(){
+  const box = document.getElementById('ssh-hostlist'); if (!box || !sshData) return;
+  const q = (document.getElementById('ssh-q').value || '').toLowerCase();
+  const openHosts = new Set([...sshSess.values()].filter(s => s.status === 'open').map(s => s.hostId));
+  let hosts = sshData.hosts.slice().sort((a,b) => (a.group||'').localeCompare(b.group||'') || (a.name||'').localeCompare(b.name||''));
+  if (q) hosts = hosts.filter(h => ((h.name||'') + ' ' + (h.host||'') + ' ' + (h.user||'') + ' ' + (h.group||'') + ' ' + (h.notes||'')).toLowerCase().includes(q));
+  if (!hosts.length) { box.innerHTML = '<div class="ssh-grp" style="padding-top:16px">' + (sshData.hosts.length ? 'no match' : 'no hosts yet — add one ↑') + '</div>'; return; }
+  let html = '', lastGrp = null;
+  for (const h of hosts) {
+    const g = h.group || 'Ungrouped';
+    if (g !== lastGrp) { html += '<div class="ssh-grp">' + esc(g) + '</div>'; lastGrp = g; }
+    html += '<div class="ssh-host" onclick="sshConnect(\\'' + h.id + '\\')" title="' + esc((h.user||'root') + '@' + h.host + ':' + (h.port||22) + (h.notes ? ' — ' + h.notes : '')) + '">'
+      + '<span class="dot' + (openHosts.has(h.id) ? ' on' : '') + '"' + (h.color ? ' style="background:' + esc(h.color) + '"' : '') + '></span>'
+      + '<span class="nm">' + esc(h.name) + '<small>' + esc((h.user||'root') + '@' + h.host) + (h.port && h.port != 22 ? ':' + h.port : '') + (h.auth === 'password' ? ' · pw' : '') + '</small></span>'
+      + (h.monitor ? '<span class="mon" title="rhc-srv-mon installed ' + esc(h.monitor.installedAt||'') + ' (port ' + h.monitor.port + ')">📊</span>' : '')
+      + '<span class="acts">'
+      + '<button title="Install rhc-srv-mon on this host" onclick="event.stopPropagation();sshInstallDialog(\\'' + h.id + '\\')">📦</button>'
+      + '<button title="Edit" onclick="event.stopPropagation();sshEditHost(\\'' + h.id + '\\')">✎</button>'
+      + '</span></div>';
+  }
+  box.innerHTML = html;
+}
+
+/* ---- terminal tabs ---- */
+function sshRenderTabs(){
+  const bar = document.getElementById('ssh-tabbar'); if (!bar) return;
+  let html = '';
+  for (const s of sshSess.values()) {
+    html += '<div class="ssh-tab' + (s.id === sshActive ? ' active' : '') + '" data-id="' + s.id + '" onclick="sshActivate(\\'' + s.id + '\\')" onauxclick="if(event.button===1){event.preventDefault();sshCloseTab(\\'' + s.id + '\\')}" ondblclick="sshRenameTab(\\'' + s.id + '\\')" title="' + esc(s.target || '') + '">'
+      + '<span class="st ' + s.status + '"></span><span class="tt">' + esc(s.label) + '</span>'
+      + '<button class="x" title="Close tab" onclick="event.stopPropagation();sshCloseTab(\\'' + s.id + '\\')">×</button></div>';
+  }
+  html += '<div class="ssh-tab plus" title="Ad-hoc connection (user@host)" onclick="sshAdhocDialog()">＋</div><div class="sp"></div>';
+  if (sshSess.size) html += '<div class="tools"><button onclick="sshDuplicateTab()" title="Open another tab to the same host">⧉ Duplicate</button><button onclick="sshCloseAll()" title="Close all tabs">Close all</button></div>';
+  bar.innerHTML = html;
+  document.getElementById('ssh-empty').style.display = sshSess.size ? 'none' : '';
+}
+function sshActivate(id){
+  sshActive = id;
+  for (const s of sshSess.values()) s.el.classList.toggle('active', s.id === id);
+  sshRenderTabs();
+  const s = sshSess.get(id);
+  if (s) requestAnimationFrame(() => { try { s.fit.fit(); s.term.focus(); } catch(e){} });
+}
+function sshRenameTab(id){
+  const s = sshSess.get(id); if (!s) return;
+  const n = prompt('Tab name', s.label); if (n && n.trim()) { s.label = n.trim().slice(0, 60); sshRenderTabs(); }
+}
+function sshDuplicateTab(){ const s = sshSess.get(sshActive); if (!s) return; if (s.hostId) sshConnect(s.hostId); else sshConnectAdhoc(s.adhoc); }
+function sshCloseAll(){ for (const id of [...sshSess.keys()]) sshCloseTab(id); }
+function sshCloseTab(id){
+  const s = sshSess.get(id); if (!s) return;
+  try { if (s.ws && s.ws.readyState <= 1) s.ws.close(); } catch(e){}
+  try { s.term.dispose(); } catch(e){}
+  s.el.remove(); sshSess.delete(id);
+  if (sshActive === id) { const rest = [...sshSess.keys()]; sshActive = rest.length ? rest[rest.length-1] : null; if (sshActive) sshActivate(sshActive); }
+  sshRenderTabs(); sshRenderHosts();
+}
+
+async function sshConnect(hostId){
+  const h = sshData && sshData.hosts.find(x => x.id === hostId); if (!h) return toast('Unknown host', 'error');
+  await sshOpenTab({ hostId, label: h.name, target: (h.user||'root') + '@' + h.host, query: 'id=' + encodeURIComponent(hostId) });
+}
+async function sshConnectAdhoc(a){
+  if (!a || !a.host) return;
+  await sshOpenTab({ hostId: null, adhoc: a, label: (a.user||'root') + '@' + a.host, target: (a.user||'root') + '@' + a.host + ':' + (a.port||22), query: 'host=' + encodeURIComponent(a.host) + '&user=' + encodeURIComponent(a.user||'root') + '&port=' + encodeURIComponent(a.port||22) });
+}
+async function sshOpenTab(o){
+  try { await sshLoadLib(); } catch(e){ return toast('Cannot load terminal library: ' + e.message, 'error'); }
+  const id = 't' + (++sshTabSeq);
+  const el = document.createElement('div'); el.className = 'ssh-term'; el.dataset.id = id;
+  document.getElementById('ssh-terms').appendChild(el);
+  const term = new Terminal({ cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace', scrollback: 8000, allowProposedApi: true,
+    theme: { background: '#0c0e16', foreground: '#e9e9e9', cursor: '#5cdd8b', selectionBackground: '#2a2f40', black: '#1e2230', brightBlack: '#6b7280', green: '#5cdd8b', yellow: '#f8a306', red: '#ff8088', blue: '#7aa2f7', magenta: '#c678dd', cyan: '#56b6c2' } });
+  const fit = new FitAddon.FitAddon(); term.loadAddon(fit);
+  try { term.loadAddon(new WebLinksAddon.WebLinksAddon()); } catch(e){}
+  term.open(el);
+  const s = { id, hostId: o.hostId, adhoc: o.adhoc || null, label: o.label, target: o.target, term, fit, el, ws: null, status: 'connecting' };
+  sshSess.set(id, s);
+  sshActivate(id);
+  try { fit.fit(); } catch(e){}
+  sshWsConnect(s, o.query);
+  term.onData(d => { if (s.ws && s.ws.readyState === 1) s.ws.send(sshEnc.encode(d)); });
+  term.onBinary(d => { if (s.ws && s.ws.readyState === 1) { const b = new Uint8Array(d.length); for (let i=0;i<d.length;i++) b[i] = d.charCodeAt(i) & 255; s.ws.send(b); } });
+  term.onResize(({cols, rows}) => { if (s.ws && s.ws.readyState === 1) s.ws.send(JSON.stringify({ t:'resize', cols, rows })); });
+  term.attachCustomKeyEventHandler(ev => {
+    // Ctrl+Shift+C / V = copy / paste (leave plain Ctrl+C for the remote shell)
+    if (ev.type === 'keydown' && ev.ctrlKey && ev.shiftKey && (ev.key === 'C' || ev.key === 'c')) { const sel = term.getSelection(); if (sel) { navigator.clipboard && navigator.clipboard.writeText(sel); return false; } }
+    if (ev.type === 'keydown' && ev.ctrlKey && ev.shiftKey && (ev.key === 'V' || ev.key === 'v')) { navigator.clipboard && navigator.clipboard.readText().then(t => { if (t && s.ws && s.ws.readyState === 1) s.ws.send(sshEnc.encode(t)); }); return false; }
+    if (ev.type === 'keydown' && ev.ctrlKey && ev.shiftKey && ev.key === 'W') { sshCloseTab(s.id); return false; }
+    return true;
+  });
+}
+function sshWsConnect(s, query){
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  const base = new URL('ws/ssh', location.href).pathname;
+  const cols = s.term.cols || 120, rows = s.term.rows || 32;
+  const ws = new WebSocket(proto + location.host + base + '?' + query + '&cols=' + cols + '&rows=' + rows);
+  ws.binaryType = 'arraybuffer';
+  s.ws = ws; s.status = 'connecting'; sshRenderTabs();
+  const dead = s.el.querySelector('.ssh-deadbar'); if (dead) dead.remove();
+  ws.onopen = () => { s.status = 'open'; sshRenderTabs(); sshRenderHosts(); try { s.fit.fit(); ws.send(JSON.stringify({ t:'resize', cols: s.term.cols, rows: s.term.rows })); } catch(e){} };
+  ws.onmessage = (ev) => {
+    if (typeof ev.data === 'string') {
+      let m = null; try { m = JSON.parse(ev.data); } catch(e){ return; }
+      if (m.t === 'exit') sshSessionEnded(s, m.code, m.error);
+      return;
+    }
+    s.term.write(new Uint8Array(ev.data));
+  };
+  ws.onerror = () => {};
+  ws.onclose = (ev) => { if (s.status !== 'dead') sshSessionEnded(s, null, ev.code === 1006 ? 'connection lost (WebSocket ' + ev.code + ')' : null); };
+}
+function sshSessionEnded(s, code, error){
+  if (s.status === 'dead') return;
+  s.status = 'dead'; sshRenderTabs(); sshRenderHosts();
+  const msg = error ? error : ('session closed' + (code != null ? ', exit code ' + code : ''));
+  try { s.term.write('\\r\\n\\x1b[90m── ' + msg + ' ──\\x1b[0m\\r\\n'); } catch(e){}
+  const bar = document.createElement('div'); bar.className = 'ssh-deadbar';
+  bar.innerHTML = '<span>⏹ ' + esc(msg) + '</span><span style="flex:1"></span><button class="re" onclick="sshReconnect(\\'' + s.id + '\\')">↻ Reconnect</button><button onclick="sshCloseTab(\\'' + s.id + '\\')">Close tab</button>';
+  s.el.appendChild(bar);
+}
+function sshReconnect(id){
+  const s = sshSess.get(id); if (!s) return;
+  s.term.reset();
+  const q = s.hostId ? 'id=' + encodeURIComponent(s.hostId) : 'host=' + encodeURIComponent(s.adhoc.host) + '&user=' + encodeURIComponent(s.adhoc.user||'root') + '&port=' + encodeURIComponent(s.adhoc.port||22);
+  sshWsConnect(s, q); s.term.focus();
+}
+// keep the active terminal sized to its pane
+new ResizeObserver(() => { const s = sshSess.get(sshActive); if (s && state.tab === 'ssh') { try { s.fit.fit(); } catch(e){} } }).observe(document.getElementById('ssh-terms'));
+window.addEventListener('beforeunload', (e) => { if ([...sshSess.values()].some(s => s.status === 'open')) { e.preventDefault(); e.returnValue = ''; } });
+
+/* ---- modals ---- */
+function sshModal(html){
+  sshModalClose();
+  const bg = document.createElement('div'); bg.className = 'ssh-modal-bg'; bg.id = 'ssh-modal';
+  bg.innerHTML = '<div class="ssh-modal">' + html + '</div>';
+  bg.addEventListener('mousedown', (e) => { if (e.target === bg) sshModalClose(); });
+  document.body.appendChild(bg);
+  const f = bg.querySelector('input,select,textarea'); if (f) setTimeout(() => f.focus(), 30);
+  return bg;
+}
+function sshModalClose(){ const m = document.getElementById('ssh-modal'); if (m) m.remove(); }
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.getElementById('ssh-modal')) sshModalClose(); });
+function sshField(label, inner, hint){ return '<div class="upd-field"><label>' + label + '</label>' + inner + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</div>'; }
+
+function sshEditHost(id){
+  const h = (id && sshData && sshData.hosts.find(x => x.id === id)) || { name:'', group:'', host:'', port:22, user:'root', auth:'key', identityFile:'', notes:'' };
+  const groups = [...new Set((sshData ? sshData.hosts : []).map(x => x.group).filter(Boolean))];
+  sshModal('<h3>' + (id ? '✎ Edit host' : '＋ Add host') + '</h3>'
+    + '<div class="row2">' + sshField('Name', '<input id="shf-name" value="' + esc(h.name) + '" placeholder="web02 (prod)">')
+    + sshField('Group', '<input id="shf-group" list="shf-groups" value="' + esc(h.group||'') + '" placeholder="Production"><datalist id="shf-groups">' + groups.map(g => '<option value="' + esc(g) + '">').join('') + '</datalist>') + '</div>'
+    + '<div class="row3">' + sshField('Host / IP', '<input id="shf-host" value="' + esc(h.host) + '" placeholder="203.0.113.10">')
+    + sshField('Port', '<input id="shf-port" type="number" min="1" max="65535" value="' + (h.port||22) + '">')
+    + sshField('User', '<input id="shf-user" value="' + esc(h.user||'root') + '">') + '</div>'
+    + '<div class="row2">' + sshField('Authentication', '<select id="shf-auth" onchange="document.getElementById(\\'shf-pwwrap\\').style.display=this.value===\\'password\\'?\\'\\':\\'none\\'"><option value="key"' + (h.auth!=='password'?' selected':'') + '>SSH key (default keys / file below)</option><option value="password"' + (h.auth==='password'?' selected':'') + '>Password</option></select>')
+    + sshField('Identity file', '<input id="shf-ident" value="' + esc(h.identityFile||'') + '" placeholder="/root/.ssh/id_ed25519 (optional)">') + '</div>'
+    + '<div id="shf-pwwrap" style="display:' + (h.auth==='password'?'':'none') + '">' + sshField('Password', '<input id="shf-pw" type="password" autocomplete="new-password" placeholder="' + (h.hasPassword ? '•••••••• (stored — leave blank to keep)' : 'password') + '">', 'Stored in ssh-hosts.json (mode 600, gitignored). Typed automatically at the ssh prompt; sudo prompts are left to you.') + '</div>'
+    + sshField('Notes', '<input id="shf-notes" value="' + esc(h.notes||'') + '" placeholder="optional">')
+    + '<div id="shf-test"></div>'
+    + '<div class="foot"><div class="left">' + (id ? '<button class="btn danger" onclick="sshDeleteHost(\\'' + id + '\\')">Delete</button>' : '') + (id ? '<button class="btn" onclick="sshTestHost(\\'' + id + '\\')">🔌 Test connection</button>' : '') + '</div>'
+    + '<button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="sshSaveHost(' + (id ? '\\'' + id + '\\'' : 'null') + ')">' + (id ? 'Save' : 'Add host') + '</button></div>');
+}
+function sshReadHostForm(){
+  const v = (i) => document.getElementById(i).value;
+  const o = { name: v('shf-name'), group: v('shf-group'), host: v('shf-host').trim(), port: parseInt(v('shf-port')) || 22, user: v('shf-user').trim() || 'root', auth: v('shf-auth'), identityFile: v('shf-ident').trim(), notes: v('shf-notes') };
+  const pw = document.getElementById('shf-pw').value; if (pw) o.password = pw;
+  return o;
+}
+async function sshSaveHost(id){
+  const o = sshReadHostForm();
+  if (!o.host) return toast('Host is required', 'error');
+  try {
+    const r = await fetch(id ? 'api/ssh/hosts/' + id : 'api/ssh/hosts', { method: id ? 'PUT' : 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(o) });
+    const d = await r.json();
+    if (!r.ok || d.error) return toast(d.error || 'Save failed', 'error');
+    toast(id ? 'Host saved' : 'Host added', 'success'); sshModalClose(); renderSsh();
+  } catch(e){ toast('Error: ' + e, 'error'); }
+}
+async function sshDeleteHost(id){
+  const h = sshData.hosts.find(x => x.id === id);
+  if (!confirm('Delete host "' + (h ? h.name : id) + '"?')) return;
+  try { await fetch('api/ssh/hosts/' + id, { method: 'DELETE' }); toast('Host deleted', 'success'); sshModalClose(); renderSsh(); } catch(e){ toast('Error: ' + e, 'error'); }
+}
+async function sshTestHost(id){
+  const box = document.getElementById('shf-test'); if (!box) return;
+  // save first so the test uses what is on screen
+  const o = sshReadHostForm();
+  box.innerHTML = '<div class="test-out">connecting…</div>';
+  try {
+    const r0 = await fetch('api/ssh/hosts/' + id, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(o) });
+    const d0 = await r0.json(); if (d0.error) { box.innerHTML = '<div class="test-out bad">' + esc(d0.error) + '</div>'; return; }
+    const r = await fetch('api/ssh/hosts/' + id + '/test', { method: 'POST' });
+    const d = await r.json();
+    box.innerHTML = '<div class="test-out ' + (d.ok ? 'ok' : 'bad') + '">' + (d.ok ? '✅ connected in ' + d.ms + ' ms\\n' : '❌ failed after ' + d.ms + ' ms\\n') + esc(d.output || '') + '</div>';
+    renderSsh();
+  } catch(e){ box.innerHTML = '<div class="test-out bad">' + esc(String(e)) + '</div>'; }
+}
+function sshAdhocDialog(){
+  sshModal('<h3>＋ Ad-hoc connection</h3>'
+    + '<div class="row3">' + sshField('Host / IP', '<input id="sha-host" placeholder="203.0.113.10">') + sshField('Port', '<input id="sha-port" type="number" value="22">') + sshField('User', '<input id="sha-user" value="root">') + '</div>'
+    + '<div class="box">Uses this server\\'s default SSH keys; a password prompt, if any, is answered in the terminal. Not saved — use <b>＋ Add host</b> to keep it.</div>'
+    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="sshAdhocGo()">Connect</button></div>');
+  document.getElementById('sha-host').addEventListener('keydown', e => { if (e.key === 'Enter') sshAdhocGo(); });
+}
+function sshAdhocGo(){
+  const host = document.getElementById('sha-host').value.trim(); if (!host) return;
+  const a = { host, port: parseInt(document.getElementById('sha-port').value) || 22, user: document.getElementById('sha-user').value.trim() || 'root' };
+  sshModalClose(); sshConnectAdhoc(a);
+}
+
+/* ---- remote install ---- */
+function sshInstallDialog(id){
+  const h = sshData && sshData.hosts.find(x => x.id === id); if (!h) return;
+  const src = sshData.source || {};
+  const chk = (i, label, on, hint) => '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:6px 0;cursor:pointer"><input type="checkbox" id="' + i + '"' + (on ? ' checked' : '') + ' style="accent-color:#5cdd8b;margin-top:3px"><span>' + label + (hint ? '<br><span style="font-size:11px;color:#6b7280">' + hint + '</span>' : '') + '</span></label>';
+  sshModal('<h3>📦 Install rhc-srv-mon on ' + esc(h.name) + '</h3>'
+    + '<div class="box">Copies <b>server.js</b> from this server (' + esc(src.host||'') + (src.git ? ', ' + esc(src.git) : '') + ') to <b>' + esc((h.user||'root') + '@' + h.host) + '</b> over SSH, installs Node.js ≥ ' + (src.minNode||20) + ' and pm2 if missing, and starts it under pm2 with your settings. Needs root or passwordless sudo on the target.' + (h.monitor ? '<br>Already installed there on ' + esc((h.monitor.installedAt||'').slice(0,16).replace('T',' ')) + ' (port ' + h.monitor.port + ') — this will update it.' : '') + '</div>'
+    + '<div class="row3">' + sshField('Install dir', '<input id="shi-dir" value="' + esc(h.monitor ? h.monitor.appDir : '/opt/rhc-srv-mon') + '">') + sshField('Port', '<input id="shi-port" type="number" value="' + (h.monitor ? h.monitor.port : (src.port||8899)) + '">') + sshField('pm2 name', '<input id="shi-name" value="rhc-srv-mon">') + '</div>'
+    + '<div style="font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin:4px 0 2px">Copy settings from this server</div>'
+    + chk('shi-c-modules', 'Modules auto-update + cleanup schedule', true, 'severities, time, Telegram flags, cleanup targets — not the project scan')
+    + chk('shi-c-updates', 'Updates tab schedule (Node.js, CLI tools)', true)
+    + chk('shi-c-telegram', 'Telegram bot token + chat id', true, 'so the target notifies the same chat')
+    + chk('shi-c-backups', 'Backups schedule + scope + retention', true, 'per-DB / per-site selections are reset to "all"; needs rclone remote configured on the target')
+    + chk('shi-c-ssh', 'SSH host list (this tab, incl. stored passwords)', true)
+    + '<div style="font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin:10px 0 2px">Options</div>'
+    + chk('shi-node', 'Install Node.js ' + esc((src.node||'v22').split('.')[0]) + '.x via NodeSource if missing/too old', true)
+    + chk('shi-pm2', 'Install pm2 globally if missing', true)
+    + chk('shi-over', 'Overwrite existing install (update in place, keeps its history/data files)', !!h.monitor)
+    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="sshInstallGo(\\'' + id + '\\')">🚀 Install</button></div>');
+}
+async function sshInstallGo(id){
+  const g = (i) => document.getElementById(i);
+  const opts = { appDir: g('shi-dir').value.trim(), port: parseInt(g('shi-port').value) || 8899, appName: g('shi-name').value.trim(),
+    installNode: g('shi-node').checked, installPm2: g('shi-pm2').checked, overwrite: g('shi-over').checked,
+    copy: { modules: g('shi-c-modules').checked, updates: g('shi-c-updates').checked, telegram: g('shi-c-telegram').checked, backups: g('shi-c-backups').checked, sshHosts: g('shi-c-ssh').checked } };
+  try {
+    const r = await fetch('api/ssh/install', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ hostId: id, opts }) });
+    const d = await r.json();
+    if (!r.ok || d.error) return toast(d.error || 'Install failed to start', 'error');
+    sshModalClose(); toast('Install started', 'success'); window._sshOpenJob = d.jobId; renderSsh();
+    document.getElementById('ssh-installs').scrollIntoView({ behavior:'smooth', block:'start' });
+  } catch(e){ toast('Error: ' + e, 'error'); }
+}
+const sshJobLogs = new Map();
+async function sshRenderInstalls(){
+  const box = document.getElementById('ssh-installs'); if (!box || !sshData) return;
+  const jobs = (sshData.installs || []).slice(0, 6);
+  if (!jobs.length) { box.innerHTML = ''; return; }
+  // fetch logs for running + expanded jobs
+  await Promise.all(jobs.filter(j => j.status === 'running' || window._sshOpenJob === j.id || sshJobLogs.has(j.id)).map(async j => {
+    try { const d = await fetch('api/ssh/install/' + j.id).then(r => r.json()); if (d && d.log) sshJobLogs.set(j.id, d.log); } catch(e){}
+  }));
+  box.innerHTML = jobs.map(j => {
+    const st = j.status === 'running' ? '<span class="upd-badge new">⏳ running' + (j.step ? ' · ' + esc(j.step) : '') + '</span>' : j.status === 'ok' ? '<span class="upd-badge ok">✅ installed</span>' : '<span class="upd-badge err">❌ failed</span>';
+    const log = sshJobLogs.get(j.id);
+    const open = j.status === 'running' || window._sshOpenJob === j.id;
+    return '<div class="ssh-inst"><div class="top"><b>📦 ' + esc(j.hostName || j.target) + '</b>' + st + '</div>'
+      + '<div class="meta">' + esc(j.target) + ' → ' + esc(j.opts ? j.opts.appDir + ' :' + j.opts.port : '') + ' · ' + esc((j.startedAt||'').slice(0,16).replace('T',' ')) + (j.finishedAt ? ' · ' + Math.round((new Date(j.finishedAt) - new Date(j.startedAt))/1000) + 's' : '') + (j.error ? '<br><span style="color:#ff8088">' + esc(j.error) + '</span>' : '') + '</div>'
+      + (open && log ? '<pre id="ssh-log-' + j.id + '">' + log.map(l => '<span class="t">' + esc(l.t.slice(11,19)) + '</span> <span class="' + esc(l.k) + '">' + esc(l.m) + '</span>').join('\\n') + '</pre>'
+         : '<button class="upd-test-btn" onclick="window._sshOpenJob=\\'' + j.id + '\\';sshRenderInstalls()">Show log (' + (j.logLines||0) + ' lines)</button>')
+      + '</div>';
+  }).join('');
+  for (const pre of box.querySelectorAll('pre')) pre.scrollTop = pre.scrollHeight;
+}
+
 function setTab(tab){
   state.tab = tab; saveState();
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===tab));
@@ -4053,12 +4445,15 @@ function setTab(tab){
   document.getElementById('sitesview').style.display = tab==='sites' ? '' : 'none';
   document.getElementById('modulesview').style.display = tab==='modules' ? '' : 'none';
   document.getElementById('backupview').style.display = tab==='backup' ? '' : 'none';
+  document.getElementById('sshview').style.display = tab==='ssh' ? '' : 'none';
+  document.body.classList.toggle('tab-ssh', tab==='ssh');
   if (tab==='pm2') render();
   else if (tab==='db') renderDb();
   else if (tab==='updates') renderUpdates();
   else if (tab==='sites') renderSites();
   else if (tab==='modules') renderModules();
   else if (tab==='backup') renderBackup();
+  else if (tab==='ssh') renderSsh();
 }
 
 document.getElementById('q').value = state.q;
@@ -4100,6 +4495,582 @@ setTab(state.tab);
 refresh(); setInterval(refresh, 10000);
 </script>
 </body></html>`;
+
+/* -------------------------------------------------------------------- ssh */
+// SSH client (multi-tab terminal in the browser) + remote installer.
+// Dependency-free: the terminal is xterm.js (loaded from a CDN by the page),
+// the transport is a minimal RFC 6455 WebSocket implementation below, and the
+// PTY is a small python3 helper (`pty.fork` + `ssh`) written to .helpers/ at
+// startup. Password auth for interactive sessions is answered by the helper on
+// the ssh prompt; for non-interactive jobs (test / install) it goes through
+// SSH_ASKPASS (OpenSSH >= 8.4, SSH_ASKPASS_REQUIRE=force) so plain pipes work.
+
+const SSH_FILE = path.join(__dirname, 'ssh-hosts.json');   // gitignored (contains passwords)
+const SSH_HELPER_DIR = path.join(__dirname, '.helpers');
+const SSH_PTY_HELPER = path.join(SSH_HELPER_DIR, 'ssh-pty.py');
+const SSH_ASKPASS_HELPER = path.join(SSH_HELPER_DIR, 'ssh-askpass.sh');
+const SSH_INSTALL_LOG_MAX = 30;
+const SSH_JOB_LOG_MAX = 600;
+const WS_MAX_BUFFER = 4 * 1024 * 1024;
+
+let sshCache = { hosts: [], installLog: [] };
+const sshSessions = new Map();     // sessionId -> { id, hostId, label, startedAt, child, socket }
+const sshInstallJobs = new Map();  // jobId -> job (in-memory, full log)
+
+const SSH_PTY_HELPER_SRC = `#!/usr/bin/env python3
+# rhc-srv-mon pty helper: runs argv[1:] (ssh ...) under a pty.
+#   stdin  -> pty (keystrokes)      stdout <- pty (terminal output)
+#   fd 3   <- JSON lines: {"resize":[cols,rows]}
+# RHC_SSH_PASSWORD (env, removed before exec) is typed at the first ssh
+# password prompt, only until the user types something themselves.
+import os, sys, pty, select, termios, struct, fcntl, json, time, signal
+
+def set_size(fd, rows, cols):
+    try: fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
+    except OSError: pass
+
+cols = int(os.environ.get('RHC_PTY_COLS', '120') or 120)
+rows = int(os.environ.get('RHC_PTY_ROWS', '32') or 32)
+password = os.environ.pop('RHC_SSH_PASSWORD', None)
+pid, master = pty.fork()
+if pid == 0:
+    try: os.execvp(sys.argv[1], sys.argv[1:])
+    except Exception as e:
+        sys.stderr.write('exec failed: %s\\n' % e); os._exit(127)
+set_size(master, rows, cols)
+try: fcntl.fcntl(3, fcntl.F_GETFD); ctl = 3
+except OSError: ctl = None
+ctl_buf = b''; recent = b''; pw_tries = 0; user_typed = False; t0 = time.time()
+fds = [master, 0] + ([ctl] if ctl is not None else [])
+status = 0
+while True:
+    try: r, _, _ = select.select(fds, [], [], 0.5)
+    except InterruptedError: continue
+    if master in r:
+        try: data = os.read(master, 65536)
+        except OSError: data = b''
+        if not data: break
+        os.write(1, data)
+        if password and not user_typed and pw_tries < 2 and time.time() - t0 < 90:
+            recent = (recent + data)[-256:]
+            if b'assword:' in recent or b'assword: ' in recent:
+                os.write(master, password.encode() + b'\\n'); pw_tries += 1; recent = b''
+    if 0 in r:
+        try: data = os.read(0, 65536)
+        except OSError: data = b''
+        if not data:
+            try: os.kill(pid, signal.SIGHUP)
+            except OSError: pass
+            break
+        user_typed = True
+        os.write(master, data)
+    if ctl is not None and ctl in r:
+        try: d = os.read(ctl, 4096)
+        except OSError: d = b''
+        if not d: fds.remove(ctl); ctl = None
+        else:
+            ctl_buf += d
+            while b'\\n' in ctl_buf:
+                line, ctl_buf = ctl_buf.split(b'\\n', 1)
+                try:
+                    m = json.loads(line.decode() or '{}')
+                    if 'resize' in m:
+                        c, rw = int(m['resize'][0]), int(m['resize'][1])
+                        set_size(master, rw, c)
+                        try: os.kill(pid, signal.SIGWINCH)
+                        except OSError: pass
+                except Exception: pass
+    try:
+        wpid, st = os.waitpid(pid, os.WNOHANG)
+        if wpid:
+            status = st
+            # drain whatever is left in the pty
+            while True:
+                try:
+                    rr, _, _ = select.select([master], [], [], 0.05)
+                    if master not in rr: break
+                    data = os.read(master, 65536)
+                    if not data: break
+                    os.write(1, data)
+                except OSError: break
+            break
+    except ChildProcessError: break
+try: os.close(master)
+except OSError: pass
+code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else (128 + os.WTERMSIG(status) if os.WIFSIGNALED(status) else 0)
+sys.exit(code)
+`;
+
+const SSH_ASKPASS_SRC = `#!/bin/sh
+# rhc-srv-mon: SSH_ASKPASS helper for non-interactive jobs. Prints the password
+# stored in the mode-600 file named by RHC_SSH_PW_FILE.
+[ -n "$RHC_SSH_PW_FILE" ] && cat "$RHC_SSH_PW_FILE"
+`;
+
+function ensureSshHelpers() {
+  try {
+    fs.mkdirSync(SSH_HELPER_DIR, { recursive: true, mode: 0o700 });
+    fs.chmodSync(SSH_HELPER_DIR, 0o700);
+    for (const [file, src] of [[SSH_PTY_HELPER, SSH_PTY_HELPER_SRC], [SSH_ASKPASS_HELPER, SSH_ASKPASS_SRC]]) {
+      let cur = null; try { cur = fs.readFileSync(file, 'utf8'); } catch (_) {}
+      if (cur !== src) fs.writeFileSync(file, src, { mode: 0o700 });
+      fs.chmodSync(file, 0o700);
+    }
+  } catch (e) { console.error('ssh helpers setup failed:', e.message); }
+}
+
+function loadSsh() {
+  try {
+    const data = JSON.parse(fs.readFileSync(SSH_FILE, 'utf8'));
+    if (data && typeof data === 'object') {
+      sshCache.hosts = Array.isArray(data.hosts) ? data.hosts : [];
+      sshCache.installLog = Array.isArray(data.installLog) ? data.installLog : [];
+    }
+  } catch (_) { /* first run */ }
+}
+function saveSsh() {
+  try {
+    fs.writeFileSync(SSH_FILE + '.tmp', JSON.stringify(sshCache, null, 2), { mode: 0o600 });
+    fs.renameSync(SSH_FILE + '.tmp', SSH_FILE);
+    fs.chmodSync(SSH_FILE, 0o600);
+  } catch (e) { console.error('saveSsh failed:', e.message); }
+}
+
+function sshPublicHost(h) {
+  const o = Object.assign({}, h);
+  delete o.password;
+  o.hasPassword = !!h.password;
+  return o;
+}
+function sshFindHost(id) { return sshCache.hosts.find((h) => h.id === id) || null; }
+
+const SSH_HOST_RE = /^[A-Za-z0-9._:\-\[\]%]+$/;      // hostname / IPv4 / IPv6
+const SSH_USER_RE = /^[A-Za-z0-9._\-]{1,64}$/;
+function sshSanitizeHost(input, existing) {
+  const h = Object.assign({}, existing || {});
+  const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+  if ('name' in input) h.name = str(input.name, 80);
+  if ('group' in input) h.group = str(input.group, 60);
+  if ('host' in input) h.host = str(input.host, 253);
+  if ('user' in input) h.user = str(input.user, 64) || 'root';
+  if ('port' in input) h.port = Math.max(1, Math.min(65535, parseInt(input.port) || 22));
+  if ('auth' in input) h.auth = input.auth === 'password' ? 'password' : 'key';
+  if ('identityFile' in input) h.identityFile = str(input.identityFile, 300);
+  if ('notes' in input) h.notes = str(input.notes, 2000);
+  if ('color' in input) h.color = str(input.color, 16);
+  if (typeof input.password === 'string' && input.password !== '') h.password = input.password.slice(0, 256);
+  if (input.clearPassword) delete h.password;
+  if (!h.host || !SSH_HOST_RE.test(h.host)) throw new Error('Invalid host');
+  if (!SSH_USER_RE.test(h.user || 'root')) throw new Error('Invalid user');
+  if (h.identityFile && !/^[\w./~\-]+$/.test(h.identityFile)) throw new Error('Invalid identity file path');
+  if (!h.name) h.name = (h.user ? h.user + '@' : '') + h.host;
+  if (!h.port) h.port = 22;
+  if (!h.auth) h.auth = 'key';
+  return h;
+}
+
+// Common ssh CLI options. `batch` = non-interactive job (test / install).
+function sshBaseArgs(h, batch) {
+  const a = ['-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=20', '-o', 'ServerAliveInterval=30',
+             '-o', 'ServerAliveCountMax=4', '-o', 'LogLevel=ERROR', '-p', String(h.port || 22)];
+  if (h.identityFile) a.push('-i', h.identityFile.replace(/^~/, os.homedir()), '-o', 'IdentitiesOnly=yes');
+  if (h.auth === 'password') {
+    a.push('-o', 'PubkeyAuthentication=no', '-o', 'PreferredAuthentications=password,keyboard-interactive');
+    if (batch) a.push('-o', 'NumberOfPasswordPrompts=1');
+  } else if (batch) {
+    a.push('-o', 'BatchMode=yes');
+  }
+  return a;
+}
+function sshTarget(h) { return (h.user || 'root') + '@' + h.host; }
+
+// Environment for a non-interactive ssh run; writes the password to a 0600 temp file
+// consumed by the SSH_ASKPASS helper. Returns { env, cleanup }.
+function sshJobEnv(h) {
+  const env = Object.assign({}, process.env, { TERM: 'dumb' });
+  let pwFile = null;
+  if (h.auth === 'password' && h.password) {
+    pwFile = path.join(SSH_HELPER_DIR, 'pw-' + crypto.randomBytes(8).toString('hex'));
+    fs.writeFileSync(pwFile, h.password, { mode: 0o600 });
+    Object.assign(env, { SSH_ASKPASS: SSH_ASKPASS_HELPER, SSH_ASKPASS_REQUIRE: 'force', DISPLAY: env.DISPLAY || ':0', RHC_SSH_PW_FILE: pwFile });
+  }
+  return { env, cleanup: () => { if (pwFile) try { fs.unlinkSync(pwFile); } catch (_) {} } };
+}
+
+// Run a remote command non-interactively; resolves { code, stdout, stderr }.
+// `stdinData` (string/Buffer) or `stdinStream` (Readable) is fed to the remote command.
+function sshRun(h, remoteCmd, { stdinData, stdinStream, timeoutMs = 60_000, onLine } = {}) {
+  return new Promise((resolve) => {
+    const { env, cleanup } = sshJobEnv(h);
+    const args = sshBaseArgs(h, true).concat([sshTarget(h), remoteCmd]);
+    const child = spawn('ssh', args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '', err = '', done = false, lineBuf = { out: '', err: '' };
+    const emit = (which, chunk) => {
+      if (!onLine) return;
+      lineBuf[which] += chunk;
+      let i;
+      while ((i = lineBuf[which].indexOf('\n')) >= 0) { onLine(lineBuf[which].slice(0, i).replace(/\r$/, ''), which); lineBuf[which] = lineBuf[which].slice(i + 1); }
+    };
+    const timer = setTimeout(() => { if (!done) { err += '\n[timeout after ' + Math.round(timeoutMs / 1000) + 's]'; child.kill('SIGKILL'); } }, timeoutMs);
+    child.stdout.on('data', (d) => { const s = d.toString(); if (out.length < 2e6) out += s; emit('out', s); });
+    child.stderr.on('data', (d) => { const s = d.toString(); if (err.length < 2e5) err += s; emit('err', s); });
+    child.on('error', (e) => { err += e.message; });
+    child.on('close', (code) => {
+      done = true; clearTimeout(timer); cleanup();
+      if (onLine) { if (lineBuf.out) onLine(lineBuf.out, 'out'); if (lineBuf.err) onLine(lineBuf.err, 'err'); }
+      resolve({ code, stdout: out, stderr: err });
+    });
+    if (stdinStream) stdinStream.pipe(child.stdin);
+    else { if (stdinData != null) child.stdin.write(stdinData); child.stdin.end(); }
+  });
+}
+
+async function sshTestHost(h) {
+  const t0 = Date.now();
+  const r = await sshRun(h, 'echo RHC_OK; uname -n; id -un; command -v node >/dev/null 2>&1 && node -v || echo "node: none"; command -v pm2 >/dev/null 2>&1 && echo "pm2 $(pm2 -v 2>/dev/null | tail -1)" || echo "pm2: none"; test -d /opt/rhc-srv-mon && echo "rhc-srv-mon: installed" || echo "rhc-srv-mon: not installed"', { timeoutMs: 30_000 });
+  const ok = r.code === 0 && /RHC_OK/.test(r.stdout);
+  return { ok, ms: Date.now() - t0, output: (r.stdout.replace(/RHC_OK\n?/, '') + (r.stderr ? '\n' + r.stderr : '')).trim() };
+}
+
+/* ---- minimal WebSocket (RFC 6455) ---- */
+function wsHandshake(req, socket) {
+  const key = req.headers['sec-websocket-key'];
+  if (!key || String(req.headers.upgrade || '').toLowerCase() !== 'websocket') {
+    socket.write('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'); socket.destroy(); return false;
+  }
+  const accept = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+  socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\n\r\n');
+  return true;
+}
+function wsFrame(data, opcode) {
+  const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data));
+  const len = buf.length; let hdr;
+  if (len < 126) hdr = Buffer.from([0x80 | opcode, len]);
+  else if (len < 65536) { hdr = Buffer.alloc(4); hdr[0] = 0x80 | opcode; hdr[1] = 126; hdr.writeUInt16BE(len, 2); }
+  else { hdr = Buffer.alloc(10); hdr[0] = 0x80 | opcode; hdr[1] = 127; hdr.writeBigUInt64BE(BigInt(len), 2); }
+  return Buffer.concat([hdr, buf]);
+}
+function wsSendText(socket, s) { if (!socket.destroyed) socket.write(wsFrame(Buffer.from(String(s), 'utf8'), 1)); }
+function wsSendBinary(socket, b) { if (!socket.destroyed) socket.write(wsFrame(b, 2)); }
+function wsClose(socket, code, reason) {
+  try {
+    if (!socket.destroyed) {
+      const p = Buffer.alloc(2 + Buffer.byteLength(reason || '')); p.writeUInt16BE(code || 1000, 0); if (reason) p.write(reason, 2);
+      socket.write(wsFrame(p, 8));
+    }
+  } catch (_) {}
+  setTimeout(() => { try { socket.destroy(); } catch (_) {} }, 300);
+}
+// Attach a frame parser: onMessage(opcode, payloadBuffer), onClose().
+function wsAttach(socket, head, onMessage, onClose) {
+  let buf = Buffer.alloc(0), frag = [], fragOp = 0, closed = false;
+  const finish = () => { if (!closed) { closed = true; onClose(); } };
+  socket.on('data', (chunk) => {
+    if (closed) return;
+    buf = buf.length ? Buffer.concat([buf, chunk]) : chunk;
+    if (buf.length > WS_MAX_BUFFER) { wsClose(socket, 1009, 'too big'); return finish(); }
+    for (;;) {
+      if (buf.length < 2) return;
+      const fin = buf[0] & 0x80, op = buf[0] & 0x0f, masked = buf[1] & 0x80;
+      let len = buf[1] & 0x7f, off = 2;
+      if (len === 126) { if (buf.length < 4) return; len = buf.readUInt16BE(2); off = 4; }
+      else if (len === 127) { if (buf.length < 10) return; len = Number(buf.readBigUInt64BE(2)); off = 10; }
+      if (masked && buf.length < off + 4) return;
+      const mask = masked ? buf.subarray(off, off + 4) : null; if (masked) off += 4;
+      if (buf.length < off + len) return;
+      const payload = Buffer.from(buf.subarray(off, off + len));
+      if (mask) for (let i = 0; i < len; i++) payload[i] ^= mask[i & 3];
+      buf = buf.subarray(off + len);
+      if (op === 8) { wsClose(socket, 1000); return finish(); }
+      if (op === 9) { if (!socket.destroyed) socket.write(wsFrame(payload, 10)); continue; }
+      if (op === 10) continue;
+      if (op === 0) { frag.push(payload); if (fin) { const m = Buffer.concat(frag); frag = []; onMessage(fragOp, m); } continue; }
+      if (!fin) { fragOp = op; frag = [payload]; continue; }
+      onMessage(op, payload);
+    }
+  });
+  socket.on('close', finish);
+  socket.on('error', finish);
+  socket.on('end', finish);
+  if (head && head.length) socket.unshift(head);
+}
+
+/* ---- interactive terminal session over WebSocket ---- */
+function sshOpenTerminal(req, socket, head, query) {
+  let h = null;
+  if (query.get('id')) {
+    h = sshFindHost(query.get('id'));
+    if (!h) { socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nunknown host\n'); return socket.destroy(); }
+  } else {
+    try { h = sshSanitizeHost({ host: query.get('host'), user: query.get('user') || 'root', port: query.get('port') || 22, auth: 'key' }); }
+    catch (e) { socket.write('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n' + e.message + '\n'); return socket.destroy(); }
+  }
+  if (!wsHandshake(req, socket)) return;
+  socket.setNoDelay(true);
+  const cols = Math.max(20, Math.min(500, parseInt(query.get('cols')) || 120));
+  const rows = Math.max(5, Math.min(200, parseInt(query.get('rows')) || 32));
+  const id = crypto.randomBytes(6).toString('hex');
+  const env = Object.assign({}, process.env, { TERM: 'xterm-256color', LANG: process.env.LANG || 'C.UTF-8', RHC_PTY_COLS: String(cols), RHC_PTY_ROWS: String(rows) });
+  if (h.auth === 'password' && h.password) env.RHC_SSH_PASSWORD = h.password;
+  const args = [SSH_PTY_HELPER, 'ssh', '-tt'].concat(sshBaseArgs(h, false), [sshTarget(h)]);
+  let child;
+  try { child = spawn('python3', args, { env, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }); }
+  catch (e) { wsSendText(socket, JSON.stringify({ t: 'exit', code: 127, error: e.message })); return wsClose(socket, 1011, 'spawn failed'); }
+  const sess = { id, hostId: h.id || null, label: h.name || sshTarget(h), target: sshTarget(h), startedAt: new Date().toISOString(), child, socket };
+  sshSessions.set(id, sess);
+  wsSendText(socket, JSON.stringify({ t: 'hello', id, target: sshTarget(h) }));
+  let ended = false;
+  const end = (code, error) => {
+    if (ended) return; ended = true;
+    sshSessions.delete(id);
+    try { wsSendText(socket, JSON.stringify({ t: 'exit', code, error: error || null })); } catch (_) {}
+    wsClose(socket, 1000, 'session ended');
+  };
+  child.stdout.on('data', (d) => wsSendBinary(socket, d));
+  child.stderr.on('data', (d) => wsSendBinary(socket, d));
+  child.on('error', (e) => end(127, e.message));
+  child.on('close', (code) => end(code == null ? 0 : code));
+  child.stdin.on('error', () => {});
+  child.stdio[3].on('error', () => {});
+  wsAttach(socket, head, (op, payload) => {
+    if (op === 2) { if (!child.stdin.destroyed) child.stdin.write(payload); return; }
+    if (op === 1) {
+      const s = payload.toString('utf8');
+      if (s[0] === '{') {
+        try {
+          const m = JSON.parse(s);
+          if (m.t === 'resize' && child.stdio[3].writable) child.stdio[3].write(JSON.stringify({ resize: [Math.max(20, Math.min(500, +m.cols || 80)), Math.max(5, Math.min(200, +m.rows || 24))] }) + '\n');
+          else if (m.t === 'input' && typeof m.data === 'string' && !child.stdin.destroyed) child.stdin.write(m.data);
+        } catch (_) {}
+      } else if (!child.stdin.destroyed) child.stdin.write(s);
+    }
+  }, () => {
+    // browser went away -> hang up the ssh session
+    if (!ended) { ended = true; sshSessions.delete(id); }
+    try { child.stdin.end(); } catch (_) {}
+    setTimeout(() => { try { child.kill('SIGHUP'); } catch (_) {} }, 200);
+    setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 3000);
+  });
+}
+
+/* ---- remote install of rhc-srv-mon ---- */
+const SSH_INSTALL_MIN_NODE = 20;
+function sshSourceInfo() {
+  let git = null;
+  try { git = execFileSync('git', ['-C', __dirname, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8', timeout: 3000 }).trim(); } catch (_) {}
+  return { host: os.hostname(), node: process.version, port: PORT, appDir: __dirname, git, minNode: SSH_INSTALL_MIN_NODE };
+}
+
+// Build the settings bundle that mirrors *this* server's configuration but none
+// of its host-specific data (project scans, logs, per-host DB/site selections).
+function sshBuildSettingsBundle(copy) {
+  const files = {};
+  if (copy.modules !== false) {
+    const cur = modulesCache || {};
+    files['modules.json'] = { generated_at: null, summary: null, projects: [], outdated: [], updateLog: [], autoUpdateLog: [], cleanupLog: [],
+      autoUpdate: Object.assign({}, DEFAULT_AUTO_UPDATE, cur.autoUpdate || {}),
+      cleanup: Object.assign({}, DEFAULT_CLEANUP, cur.cleanup || {}) };
+  }
+  if (copy.updates !== false || copy.telegram !== false) {
+    const cur = updatesCache || {};
+    const tg = cur.telegram || { enabled: false, botToken: '', chatId: '', notifyOnUpdate: true, notifyOnComplete: true };
+    files['updates.json'] = { components: [], users: {}, siteUsers: [], lastChecked: null,
+      schedule: copy.updates !== false ? (cur.schedule || { enabled: false, hour: 3, minute: 0, components: COMPONENTS.map((c) => c.key) }) : { enabled: false, hour: 3, minute: 0, components: COMPONENTS.map((c) => c.key) },
+      telegram: copy.telegram !== false ? tg : { enabled: false, botToken: '', chatId: '', notifyOnUpdate: true, notifyOnComplete: true },
+      log: [] };
+  }
+  if (copy.backups !== false) {
+    files['backups.json'] = { schedule: Object.assign({}, backupsCache.schedule), retentionDays: backupsCache.retentionDays,
+      scope: Object.assign({}, DEFAULT_BACKUP_SCOPE, backupsCache.scope || {}, { pgDatabases: null, siteDomains: null }),
+      running: false, lastRun: null, log: [] };
+  }
+  if (copy.sshHosts !== false) {
+    files['ssh-hosts.json'] = { hosts: sshCache.hosts.map((h) => Object.assign({}, h)), installLog: [] };
+  }
+  return files;
+}
+
+const SSH_INSTALL_SCRIPT = `set -u
+export DEBIAN_FRONTEND=noninteractive
+log(){ echo "[remote] $*"; }
+have(){ command -v "$1" >/dev/null 2>&1; }
+pkg_install(){
+  if have apt-get; then apt-get install -y -qq "$@" >/dev/null 2>&1 || { apt-get update -qq >/dev/null 2>&1; apt-get install -y -qq "$@"; }
+  elif have dnf; then dnf install -y -q "$@"
+  elif have yum; then yum install -y -q "$@"
+  elif have apk; then apk add -q "$@"
+  else log "no supported package manager (apt/dnf/yum/apk) - install $* manually"; return 1; fi
+}
+log "target: $(uname -n) ($(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME" || uname -s)) as $(id -un)"
+# --- Node.js
+need_node=1
+if have node; then
+  cur=$(node -v 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+  if [ -n "$cur" ] && [ "$cur" -ge "$MIN_NODE" ]; then need_node=0; log "node $(node -v) present"; else log "node v$cur is older than the required v$MIN_NODE"; fi
+fi
+if [ "$need_node" = 1 ]; then
+  [ "$INSTALL_NODE" = 1 ] || { log "Node.js >= $MIN_NODE missing and auto-install disabled"; exit 2; }
+  log "installing Node.js $NODE_MAJOR.x"
+  have curl || pkg_install curl ca-certificates
+  if have apt-get; then
+    curl -fsSL "https://deb.nodesource.com/setup_$NODE_MAJOR.x" | bash - >/dev/null 2>&1 || { log "NodeSource setup failed"; exit 2; }
+    apt-get install -y -qq nodejs >/dev/null 2>&1 || { log "apt-get install nodejs failed"; exit 2; }
+  elif have dnf || have yum; then
+    curl -fsSL "https://rpm.nodesource.com/setup_$NODE_MAJOR.x" | bash - >/dev/null 2>&1 || { log "NodeSource setup failed"; exit 2; }
+    pkg_install nodejs || exit 2
+  elif have apk; then pkg_install nodejs npm || exit 2
+  else log "cannot install Node.js automatically on this OS"; exit 2; fi
+  log "node $(node -v) installed"
+fi
+# --- python3 (pty helper for the SSH tab)
+have python3 || { log "installing python3"; pkg_install python3 || log "WARN: python3 missing - the SSH tab on the target will not work"; }
+# --- pm2
+if ! have pm2; then
+  [ "$INSTALL_PM2" = 1 ] || { log "pm2 missing and auto-install disabled"; exit 3; }
+  log "installing pm2 (npm -g)"
+  npm install -g pm2 >/dev/null 2>&1 || { log "npm install -g pm2 failed"; exit 3; }
+fi
+log "pm2 $(pm2 -v 2>/dev/null | tail -1)"
+# --- app files
+cd "$APP_DIR" || { log "app dir $APP_DIR missing"; exit 4; }
+chmod 700 "$APP_DIR"
+chmod 600 "$APP_DIR"/*.json 2>/dev/null || true
+[ -f .gitignore ] || printf 'db-credentials.json\\nhistory.json\\nupdates.json\\nbackups.json\\nssh-hosts.json\\n.helpers/\\n' > .gitignore
+if [ ! -d .git ] && have git; then git init -q . 2>/dev/null && git add -A >/dev/null 2>&1 && git -c user.name=rhc-srv-mon -c user.email=rhc-srv-mon@localhost commit -q -m "rhc-srv-mon installed from $SOURCE_HOST ($SOURCE_GIT)" >/dev/null 2>&1 || true; fi
+# --- start / restart under pm2
+if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
+  log "restarting existing pm2 app $APP_NAME"
+  PORT="$PORT" pm2 restart "$APP_NAME" --update-env >/dev/null 2>&1 || { log "pm2 restart failed"; exit 5; }
+else
+  log "starting $APP_NAME under pm2 (port $PORT)"
+  PORT="$PORT" pm2 start "$APP_DIR/server.js" --name "$APP_NAME" --time >/dev/null 2>&1 || { log "pm2 start failed"; exit 5; }
+fi
+pm2 save >/dev/null 2>&1 || true
+if have systemctl && [ "$(id -u)" = 0 ]; then
+  if ! systemctl list-unit-files 2>/dev/null | grep -q '^pm2-root.service'; then
+    log "installing pm2 systemd startup unit"
+    pm2 startup systemd -u root --hp /root >/dev/null 2>&1 || log "WARN: pm2 startup failed (run 'pm2 startup' manually)"
+  fi
+fi
+sleep 3
+st=$(pm2 jlist 2>/dev/null | python3 -c 'import json,sys
+try:
+  for p in json.load(sys.stdin):
+    if p["name"]==sys.argv[1]: print(p["pm2_env"]["status"]); break
+except Exception: pass' "$APP_NAME" 2>/dev/null)
+log "pm2 status: \${st:-unknown}"
+if have curl; then
+  if curl -fsS -m 8 "http://127.0.0.1:$PORT/api/status" >/dev/null 2>&1; then log "health check OK: http://127.0.0.1:$PORT/ responds"; else log "WARN: health check failed on 127.0.0.1:$PORT (see: pm2 logs $APP_NAME)"; exit 6; fi
+elif have wget; then
+  if wget -qO- -T 8 "http://127.0.0.1:$PORT/api/status" >/dev/null 2>&1; then log "health check OK"; else log "WARN: health check failed"; exit 6; fi
+fi
+log "done. The app binds 127.0.0.1:$PORT only - reach it via an SSH tunnel (ssh -L $PORT:127.0.0.1:$PORT $(id -un)@$(uname -n)) or put nginx with basic auth in front of it."
+`;
+
+function sshPushInstallLog(job) {
+  const summary = { id: job.id, hostId: job.hostId, hostName: job.hostName, target: job.target, status: job.status, startedAt: job.startedAt, finishedAt: job.finishedAt, opts: job.opts, error: job.error || null, log: job.log.slice(-200) };
+  const i = sshCache.installLog.findIndex((j) => j.id === job.id);
+  if (i >= 0) sshCache.installLog[i] = summary; else sshCache.installLog.push(summary);
+  sshCache.installLog = sshCache.installLog.slice(-SSH_INSTALL_LOG_MAX);
+  saveSsh();
+}
+
+async function runSshInstall(job, h) {
+  const log = (line, kind) => {
+    for (const l of String(line).split('\n')) {
+      if (l === '' && kind !== 'hdr') continue;
+      job.log.push({ t: new Date().toISOString(), k: kind || 'info', m: l.slice(0, 2000) });
+      if (job.log.length > SSH_JOB_LOG_MAX) job.log.splice(0, job.log.length - SSH_JOB_LOG_MAX);
+    }
+  };
+  const o = job.opts;
+  let stage = null;
+  try {
+    log('Installing rhc-srv-mon on ' + sshTarget(h) + ' (port ' + o.port + ', dir ' + o.appDir + ')', 'hdr');
+    // 1) preflight
+    job.step = 'preflight'; log('Preflight: connecting…');
+    const pre = await sshRun(h, 'echo RHC_PRE; echo "UID=$(id -u)"; echo "USER=$(id -un)"; echo "HOST=$(uname -n)"; echo "OS=$(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME")"; echo "SUDO=$(command -v sudo || true)"; echo "NODE=$(command -v node >/dev/null 2>&1 && node -v || true)"; echo "PM2=$(command -v pm2 >/dev/null 2>&1 && pm2 -v 2>/dev/null | tail -1 || true)"; echo "PY3=$(command -v python3 || true)"; echo "EXISTING=$(test -d ' + JSON.stringify(o.appDir) + ' && echo yes || echo no)"; if [ "$(id -u)" != 0 ] && command -v sudo >/dev/null 2>&1; then sudo -n true >/dev/null 2>&1 && echo SUDO_OK=yes || echo SUDO_OK=no; fi', { timeoutMs: 45_000 });
+    if (pre.code !== 0 || !/RHC_PRE/.test(pre.stdout)) throw new Error('SSH connection failed: ' + (pre.stderr.trim() || pre.stdout.trim() || ('exit ' + pre.code)));
+    const kv = {}; for (const l of pre.stdout.split('\n')) { const m = l.match(/^([A-Z_0-9]+)=(.*)$/); if (m) kv[m[1]] = m[2]; }
+    log('Target ' + (kv.HOST || '?') + ' · ' + (kv.OS || 'unknown OS') + ' · user ' + (kv.USER || '?') + ' (uid ' + (kv.UID || '?') + ')');
+    log('Found: node ' + (kv.NODE || 'none') + ' · pm2 ' + (kv.PM2 || 'none') + ' · python3 ' + (kv.PY3 ? 'yes' : 'no') + ' · existing install: ' + (kv.EXISTING || 'no'));
+    let sudo = '';
+    if (kv.UID !== '0') {
+      if (kv.SUDO && kv.SUDO_OK === 'yes') { sudo = 'sudo -n '; log('Not root: using passwordless sudo'); }
+      else throw new Error('Remote user is not root and has no passwordless sudo. Connect as root or configure NOPASSWD sudo.');
+    }
+    if (kv.EXISTING === 'yes' && !o.overwrite) throw new Error(o.appDir + ' already exists on the target. Tick "Overwrite existing install" to update it in place.');
+    // 2) stage files
+    job.step = 'stage'; log('Staging files…');
+    stage = fs.mkdtempSync(path.join(os.tmpdir(), 'rhc-srv-mon-install-'));
+    for (const f of ['server.js', 'README.md', '.gitignore']) { try { fs.copyFileSync(path.join(__dirname, f), path.join(stage, f)); } catch (_) {} }
+    const bundle = sshBuildSettingsBundle(o.copy || {});
+    for (const [name, obj] of Object.entries(bundle)) fs.writeFileSync(path.join(stage, name), JSON.stringify(obj, null, 2), { mode: 0o600 });
+    log('Bundle: server.js' + (Object.keys(bundle).length ? ' + settings (' + Object.keys(bundle).join(', ') + ')' : ' (no settings copied)'));
+    // 3) upload (tar over ssh)
+    job.step = 'upload'; log('Uploading to ' + o.appDir + '…');
+    const tar = spawn('tar', ['-czf', '-', '-C', stage, '.']);
+    tar.on('error', (e) => log('tar failed: ' + e.message, 'err'));
+    const up = await sshRun(h, sudo + 'mkdir -p ' + JSON.stringify(o.appDir) + ' && ' + sudo + 'tar -xzf - -C ' + JSON.stringify(o.appDir) + ' && echo RHC_UPLOADED', { stdinStream: tar.stdout, timeoutMs: 180_000 });
+    if (up.code !== 0 || !/RHC_UPLOADED/.test(up.stdout)) throw new Error('Upload failed: ' + (up.stderr.trim() || up.stdout.trim() || ('exit ' + up.code)));
+    log('Upload complete');
+    // 4) remote install script
+    job.step = 'install'; log('Running remote installer…');
+    const src = sshSourceInfo();
+    const envs = ['APP_DIR=' + JSON.stringify(o.appDir), 'APP_NAME=' + JSON.stringify(o.appName), 'PORT=' + String(o.port), 'MIN_NODE=' + SSH_INSTALL_MIN_NODE,
+                  'NODE_MAJOR=' + String(parseInt(process.versions.node) || 22), 'INSTALL_NODE=' + (o.installNode === false ? 0 : 1), 'INSTALL_PM2=' + (o.installPm2 === false ? 0 : 1),
+                  'SOURCE_HOST=' + JSON.stringify(src.host), 'SOURCE_GIT=' + JSON.stringify(src.git || 'n/a')].join(' ');
+    const inst = await sshRun(h, sudo + 'env ' + envs + ' bash -s', { stdinData: SSH_INSTALL_SCRIPT, timeoutMs: 900_000, onLine: (l, which) => log(l, which === 'err' ? 'err' : 'remote') });
+    if (inst.code !== 0) throw new Error('Remote installer exited with code ' + inst.code + ({ 2: ' (Node.js install)', 3: ' (pm2 install)', 4: ' (app dir)', 5: ' (pm2 start)', 6: ' (health check)' }[inst.code] || ''));
+    job.status = 'ok'; log('✅ rhc-srv-mon is running on ' + sshTarget(h) + ' (127.0.0.1:' + o.port + ')', 'hdr');
+    if (h.id) { const hh = sshFindHost(h.id); if (hh) { hh.monitor = { installedAt: new Date().toISOString(), port: o.port, appDir: o.appDir }; } }
+  } catch (e) {
+    job.status = 'failed'; job.error = e.message; log('❌ ' + e.message, 'err');
+  } finally {
+    job.finishedAt = new Date().toISOString(); job.step = null;
+    if (stage) { try { fs.rmSync(stage, { recursive: true, force: true }); } catch (_) {} }
+    sshPushInstallLog(job);
+  }
+}
+
+function sshStartInstall(hostId, optsIn) {
+  const h = sshFindHost(hostId);
+  if (!h) throw new Error('Unknown host');
+  if ([...sshInstallJobs.values()].some((j) => j.status === 'running' && j.hostId === hostId)) throw new Error('An install is already running for this host');
+  const o = optsIn || {};
+  const opts = {
+    port: Math.max(1, Math.min(65535, parseInt(o.port) || 8899)),
+    appDir: (typeof o.appDir === 'string' && /^\/[\w./\-]+$/.test(o.appDir.trim())) ? o.appDir.trim().replace(/\/+$/, '') : '/opt/rhc-srv-mon',
+    appName: (typeof o.appName === 'string' && /^[\w.\-]{1,40}$/.test(o.appName.trim())) ? o.appName.trim() : 'rhc-srv-mon',
+    overwrite: !!o.overwrite, installNode: o.installNode !== false, installPm2: o.installPm2 !== false,
+    copy: { modules: !(o.copy && o.copy.modules === false), updates: !(o.copy && o.copy.updates === false), telegram: !(o.copy && o.copy.telegram === false),
+            backups: !(o.copy && o.copy.backups === false), sshHosts: !(o.copy && o.copy.sshHosts === false) },
+  };
+  const job = { id: crypto.randomBytes(6).toString('hex'), hostId, hostName: h.name, target: sshTarget(h), status: 'running', step: 'queued', startedAt: new Date().toISOString(), finishedAt: null, opts, log: [], error: null };
+  sshInstallJobs.set(job.id, job);
+  // keep only the last few finished jobs in memory
+  const finished = [...sshInstallJobs.values()].filter((j) => j.status !== 'running').sort((a, b) => a.startedAt < b.startedAt ? -1 : 1);
+  while (finished.length > 10) sshInstallJobs.delete(finished.shift().id);
+  runSshInstall(job, Object.assign({}, h)).catch((e) => { job.status = 'failed'; job.error = e.message; job.finishedAt = new Date().toISOString(); sshPushInstallLog(job); });
+  return job;
+}
+
+function sshApiState() {
+  const jobs = [...sshInstallJobs.values()].map((j) => Object.assign({}, j, { log: undefined, logLines: j.log.length }));
+  const seen = new Set(jobs.map((j) => j.id));
+  const hist = sshCache.installLog.filter((j) => !seen.has(j.id)).map((j) => Object.assign({}, j, { log: undefined, logLines: (j.log || []).length }));
+  return {
+    hosts: sshCache.hosts.map(sshPublicHost),
+    sessions: [...sshSessions.values()].map((s) => ({ id: s.id, hostId: s.hostId, label: s.label, target: s.target, startedAt: s.startedAt })),
+    installs: jobs.concat(hist).sort((a, b) => a.startedAt < b.startedAt ? 1 : -1).slice(0, SSH_INSTALL_LOG_MAX),
+    source: sshSourceInfo(),
+    helperOk: fs.existsSync(SSH_PTY_HELPER),
+  };
+}
+function sshFindJob(id) {
+  return sshInstallJobs.get(id) || sshCache.installLog.find((j) => j.id === id) || null;
+}
+
 
 /* ----------------------------------------------------------------- server */
 
@@ -4430,9 +5401,103 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true }));
   }
+  /* ---- ssh client / remote installer ---- */
+  if (url === '/api/ssh' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(sshApiState()));
+  }
+  if (url === '/api/ssh/hosts' && req.method === 'POST') {
+    return readJsonBody(req, res, (body) => {
+      try {
+        const h = sshSanitizeHost(body, { id: crypto.randomBytes(5).toString('hex'), createdAt: new Date().toISOString() });
+        sshCache.hosts.push(h); saveSsh();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, host: sshPublicHost(h) }));
+      } catch (e) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+    });
+  }
+  {
+    const m = url.match(/^\/api\/ssh\/hosts\/([a-f0-9]{6,16})(\/test)?$/);
+    if (m) {
+      const h = sshFindHost(m[1]);
+      if (!h) { res.writeHead(404, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unknown host' })); }
+      if (m[2] && req.method === 'POST') {
+        sshTestHost(h).then((r) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(r)); })
+          .catch((e) => { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: false, output: e.message })); });
+        return;
+      }
+      if (!m[2] && req.method === 'PUT') {
+        return readJsonBody(req, res, (body) => {
+          try {
+            const next = sshSanitizeHost(body, h);
+            Object.keys(h).forEach((k) => { if (!(k in next)) delete h[k]; });
+            Object.assign(h, next); saveSsh();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, host: sshPublicHost(h) }));
+          } catch (e) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+        });
+      }
+      if (!m[2] && req.method === 'DELETE') {
+        sshCache.hosts = sshCache.hosts.filter((x) => x.id !== h.id); saveSsh();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ ok: true }));
+      }
+    }
+  }
+  if (url === '/api/ssh/install' && req.method === 'POST') {
+    return readJsonBody(req, res, (body) => {
+      try {
+        const job = sshStartInstall(String(body.hostId || ''), body.opts || {});
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, jobId: job.id }));
+      } catch (e) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+    });
+  }
+  {
+    const m = url.match(/^\/api\/ssh\/install\/([a-f0-9]{6,16})$/);
+    if (m && req.method === 'GET') {
+      const job = sshFindJob(m[1]);
+      if (!job) { res.writeHead(404, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unknown job' })); }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(job));
+    }
+  }
+  {
+    const m = url.match(/^\/api\/ssh\/sessions\/([a-f0-9]{6,16})$/);
+    if (m && req.method === 'DELETE') {
+      const s = sshSessions.get(m[1]);
+      if (s) { try { s.child.kill('SIGHUP'); } catch (_) {} wsClose(s.socket, 1000, 'closed by admin'); }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: !!s }));
+    }
+  }
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('not found\n');
 });
+
+// small JSON body reader shared by the ssh routes
+function readJsonBody(req, res, cb) {
+  let body = '';
+  req.on('data', (c) => { body += c; if (body.length > 256 * 1024) req.destroy(); });
+  req.on('end', () => {
+    let parsed;
+    try { parsed = body ? JSON.parse(body) : {}; } catch (_) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Invalid JSON' })); }
+    cb(parsed && typeof parsed === 'object' ? parsed : {});
+  });
+}
+
+// WebSocket endpoint for the SSH terminal tab: /ws/ssh?id=<hostId>&cols=&rows=
+// (or ?host=&user=&port= for an ad-hoc connection).
+server.on('upgrade', (req, socket, head) => {
+  let u;
+  try { u = new URL(req.url || '/', 'http://localhost'); } catch (_) { return socket.destroy(); }
+  if (u.pathname !== '/ws/ssh') { socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); return socket.destroy(); }
+  socket.on('error', () => {});
+  try { sshOpenTerminal(req, socket, head, u.searchParams); }
+  catch (e) { console.error('ssh ws failed:', e.message); try { socket.destroy(); } catch (_) {} }
+});
+ensureSshHelpers();
+loadSsh();
 
 loadHistory();
 loadUpdates();
