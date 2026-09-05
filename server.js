@@ -4584,6 +4584,7 @@ const SSH_ASKPASS_HELPER = path.join(SSH_HELPER_DIR, 'ssh-askpass.sh');
 const SSH_INSTALL_LOG_MAX = 30;
 const SSH_JOB_LOG_MAX = 600;
 const WS_MAX_BUFFER = 4 * 1024 * 1024;
+const WS_PING_MS = 30_000;                 // keepalive ping interval (Cloudflare idle cutoff is ~100 s)
 
 let sshCache = { hosts: [], installLog: [] };
 const sshSessions = new Map();     // sessionId -> { id, hostId, label, startedAt, child, socket }
@@ -4836,7 +4837,10 @@ function wsClose(socket, code, reason) {
 // Attach a frame parser: onMessage(opcode, payloadBuffer), onClose().
 function wsAttach(socket, head, onMessage, onClose) {
   let buf = Buffer.alloc(0), frag = [], fragOp = 0, closed = false;
-  const finish = () => { if (!closed) { closed = true; onClose(); } };
+  // Keepalive: Cloudflare (and some proxies) drop a WebSocket with no traffic for ~100 s, which
+  // the browser sees as close code 1006 on an idle terminal. Browsers auto-reply to pings with pongs.
+  const pinger = setInterval(() => { if (closed || socket.destroyed) return clearInterval(pinger); socket.write(wsFrame(Buffer.alloc(0), 9)); }, WS_PING_MS);
+  const finish = () => { if (!closed) { closed = true; clearInterval(pinger); onClose(); } };
   socket.on('data', (chunk) => {
     if (closed) return;
     buf = buf.length ? Buffer.concat([buf, chunk]) : chunk;
