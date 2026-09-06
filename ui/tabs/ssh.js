@@ -440,25 +440,31 @@ function sshAdhocGo(){
 }
 
 /* ---- remote install ---- */
-function sshInstallDialog(id){
+function sshInstallDialog(id, retryJob){
   const h = sshData && sshData.hosts.find(x => x.id === id); if (!h) return;
   const src = sshData.source || {};
+  // retry: start from the settings of the failed run; tick Overwrite when that is what it tripped on
+  const po = (retryJob && retryJob.opts) || {};
+  const pc = po.copy || {};
+  const on = (v, dflt) => (v === undefined ? dflt : !!v);
+  const dirExists = !!(retryJob && /already exists/i.test(retryJob.error || ''));
   const chk = (i, label, on, hint) => '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:6px 0;cursor:pointer"><input type="checkbox" id="' + i + '"' + (on ? ' checked' : '') + ' style="accent-color:#5cdd8b;margin-top:3px"><span>' + label + (hint ? '<br><span style="font-size:11px;color:#6b7280">' + hint + '</span>' : '') + '</span></label>';
   sshModal('<h3>📦 Install rhc-srv-mon on ' + esc(h.name) + '</h3>'
+    + (retryJob ? '<div class="box" style="border-color:#ff808866"><b style="color:#ff8088">Retrying the install from ' + esc((retryJob.startedAt||'').slice(0,16).replace('T',' ')) + '</b>' + (retryJob.error ? '<br>' + esc(retryJob.error) : '') + (dirExists ? '<br>“Overwrite existing install” has been ticked for you.' : '') + '</div>' : '')
     + '<div class="box">Copies <b>server.js</b> from this server (' + esc(src.host||'') + (src.git ? ', ' + esc(src.git) : '') + ') to <b>' + esc((h.user||'root') + '@' + h.host) + '</b> over SSH, installs Node.js ≥ ' + (src.minNode||20) + ' and pm2 if missing, and starts it under pm2 with your settings. Needs root on the target — or a user with passwordless sudo, or the sudo password below.' + (h.monitor ? '<br>Already installed there on ' + esc((h.monitor.installedAt||'').slice(0,16).replace('T',' ')) + ' (port ' + h.monitor.port + ') — this will update it.' : '') + '</div>'
-    + '<div class="row3">' + sshField('Install dir', '<input id="shi-dir" value="' + esc(h.monitor ? h.monitor.appDir : '/opt/rhc-srv-mon') + '">') + sshField('Port', '<input id="shi-port" type="number" value="' + (h.monitor ? h.monitor.port : (src.port||8899)) + '">') + sshField('pm2 name', '<input id="shi-name" value="rhc-srv-mon">') + '</div>'
+    + '<div class="row3">' + sshField('Install dir', '<input id="shi-dir" value="' + esc(po.appDir || (h.monitor ? h.monitor.appDir : '/opt/rhc-srv-mon')) + '">') + sshField('Port', '<input id="shi-port" type="number" value="' + (po.port || (h.monitor ? h.monitor.port : (src.port||8899))) + '">') + sshField('pm2 name', '<input id="shi-name" value="' + esc(po.appName || 'rhc-srv-mon') + '">') + '</div>'
     + '<div style="font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin:4px 0 2px">Copy settings from this server</div>'
-    + chk('shi-c-modules', 'Modules auto-update + cleanup schedule', true, 'severities, time, Telegram flags, cleanup targets — not the project scan')
-    + chk('shi-c-updates', 'Updates tab schedule (Node.js, CLI tools)', true)
-    + chk('shi-c-telegram', 'Telegram bot token + chat id', true, 'so the target notifies the same chat')
-    + chk('shi-c-backups', 'Backups schedule + scope + retention', true, 'per-DB / per-site selections are reset to "all"; needs rclone remote configured on the target')
-    + chk('shi-c-ssh', 'SSH host list (this tab, incl. stored passwords)', true)
-    + chk('shi-c-auth', 'Login users + authenticator (MFA)', !h.monitor, 'same username / password / authenticator entry works on the target; active sessions are not copied')
+    + chk('shi-c-modules', 'Modules auto-update + cleanup schedule', on(pc.modules, true), 'severities, time, Telegram flags, cleanup targets — not the project scan')
+    + chk('shi-c-updates', 'Updates tab schedule (Node.js, CLI tools)', on(pc.updates, true))
+    + chk('shi-c-telegram', 'Telegram bot token + chat id', on(pc.telegram, true), 'so the target notifies the same chat')
+    + chk('shi-c-backups', 'Backups schedule + scope + retention', on(pc.backups, true), 'per-DB / per-site selections are reset to "all"; needs rclone remote configured on the target')
+    + chk('shi-c-ssh', 'SSH host list (this tab, incl. stored passwords)', on(pc.sshHosts, true))
+    + chk('shi-c-auth', 'Login users + authenticator (MFA)', retryJob ? !!pc.auth : !h.monitor, 'same username / password / authenticator entry works on the target; active sessions are not copied')
     + '<div style="font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin:10px 0 2px">Options</div>'
-    + chk('shi-privnode', 'Private Node.js ' + esc((src.node||'v22').split('.')[0]) + '.x inside the install dir (system Node.js untouched — pick this for FreePBX / appliances / hosts where other apps depend on node)', true, 'pm2 is installed into that private prefix too')
-    + chk('shi-node', 'Otherwise: install Node.js ' + esc((src.node||'v22').split('.')[0]) + '.x system-wide via NodeSource if missing/too old', true)
-    + chk('shi-pm2', 'Install pm2 globally if missing', true)
-    + chk('shi-over', 'Overwrite existing install (update in place, keeps its history/data files)', !!h.monitor)
+    + chk('shi-privnode', 'Private Node.js ' + esc((src.node||'v22').split('.')[0]) + '.x inside the install dir (system Node.js untouched — pick this for FreePBX / appliances / hosts where other apps depend on node)', on(po.privateNode, true), 'pm2 is installed into that private prefix too')
+    + chk('shi-node', 'Otherwise: install Node.js ' + esc((src.node||'v22').split('.')[0]) + '.x system-wide via NodeSource if missing/too old', on(po.installNode, true))
+    + chk('shi-pm2', 'Install pm2 globally if missing', on(po.installPm2, true))
+    + chk('shi-over', 'Overwrite existing install (update in place, keeps its history/data files)', dirExists || (retryJob ? !!po.overwrite : !!h.monitor))
     + ((h.user||'root') !== 'root' ? '<div class="box" style="border-color:#f8a30666;margin-top:8px"><b style="color:#f8a306">⚠ ' + esc(h.user) + ' is not root.</b> The installer needs root on the target: enter the sudo password of <b>' + esc(h.user) + '</b> below (it is sent once through SUDO_ASKPASS and never stored or logged). Leave it empty only if the user has passwordless sudo.'
       + sshField('sudo password for ' + esc(h.user), '<input id="shi-sudo" type="password" autocomplete="new-password" placeholder="' + esc(h.user) + ' sudo password">') + '</div>' : '')
     + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="sshInstallGo(\'' + id + '\')">🚀 Install</button></div>');
@@ -478,9 +484,39 @@ async function sshInstallGo(id){
 }
 const sshJobLogs = new Map();
 function sshInstallsDialog(){
-  const bg = sshModal('<h3>📦 rhc-srv-mon installs</h3><div class="ssh-installs" id="ssh-installs"><div class="mod-empty">No installs yet — use 📦 on a host to install rhc-srv-mon there.</div></div><div class="foot"><button class="btn pri" onclick="sshModalClose()">Close</button></div>');
+  const bg = sshModal('<h3>📦 rhc-srv-mon installs</h3><div class="ssh-installs" id="ssh-installs"><div class="mod-empty">No installs yet — use 📦 on a host to install rhc-srv-mon there.</div></div>'
+    + '<div class="foot"><div class="left"><button class="btn" id="ssh-inst-clear">🗑 Clear history</button></div><button class="btn pri" onclick="sshModalClose()">Close</button></div>');
   const m = bg && bg.querySelector('.ssh-modal'); if (m) m.classList.add('wide');
+  const c = bg && bg.querySelector('#ssh-inst-clear');
+  if (c) c.addEventListener('click', () => armConfirm(c, '⚠ Click again to clear', sshClearInstalls));
   sshRenderInstalls();
+}
+// Forget finished installs (a running one keeps its entry until it ends).
+async function sshClearInstalls(){
+  try {
+    const r = await fetch('api/ssh/installs', { method:'DELETE' });
+    const d = await r.json();
+    if (!r.ok) return toast(d.error || 'Failed', 'error');
+    toast(d.removed ? 'Cleared ' + d.removed + ' install' + (d.removed === 1 ? '' : 's') : 'Nothing to clear', 'success');
+    sshJobLogs.clear(); window._sshOpenJob = null;
+    await renderSsh();
+  } catch(e){ toast('Error: ' + e, 'error'); }
+}
+async function sshForgetInstall(id){
+  try {
+    const r = await fetch('api/ssh/install/' + id, { method:'DELETE' });
+    const d = await r.json();
+    if (!r.ok) return toast(d.error || 'Failed', 'error');
+    sshJobLogs.delete(id); if (window._sshOpenJob === id) window._sshOpenJob = null;
+    await renderSsh();
+  } catch(e){ toast('Error: ' + e, 'error'); }
+}
+// Retry: reopen the install dialog with the failed job's settings. The sudo password is deliberately
+// never stored, and most failures need a change anyway (tick Overwrite, enter the password).
+function sshRetryInstall(id){
+  const j = (sshData.installs || []).find(x => x.id === id); if (!j) return;
+  if (!(sshData.hosts || []).some(h => h.id === j.hostId)) return toast('That host no longer exists', 'error');
+  sshInstallDialog(j.hostId, j);
 }
 function sshInstallsBadge(){
   const b = document.getElementById('ssh-inst-btn'); if (!b || !sshData) return;
@@ -503,9 +539,13 @@ async function sshRenderInstalls(){
     const open = j.status === 'running' || window._sshOpenJob === j.id;
     return '<div class="ssh-inst"><div class="top"><b>📦 ' + esc(j.hostName || j.target) + '</b>' + st + '</div>'
       + '<div class="meta">' + esc(j.target) + ' → ' + esc(j.opts ? j.opts.appDir + ' :' + j.opts.port : '') + ' · ' + esc((j.startedAt||'').slice(0,16).replace('T',' ')) + (j.finishedAt ? ' · ' + Math.round((new Date(j.finishedAt) - new Date(j.startedAt))/1000) + 's' : '') + (j.error ? '<br><span style="color:#ff8088">' + esc(j.error) + '</span>' : '') + '</div>'
-      + (open && log ? '<pre id="ssh-log-' + j.id + '">' + log.map(l => '<span class="t">' + esc(l.t.slice(11,19)) + '</span> <span class="' + esc(l.k) + '">' + esc(l.m) + '</span>').join('\n') + '</pre>'
-         : '<button class="upd-test-btn" onclick="window._sshOpenJob=\'' + j.id + '\';sshRenderInstalls()">Show log (' + (j.logLines||0) + ' lines)</button>')
-      + '</div>';
+      + (open && log ? '<pre id="ssh-log-' + j.id + '">' + log.map(l => '<span class="t">' + esc(l.t.slice(11,19)) + '</span> <span class="' + esc(l.k) + '">' + esc(l.m) + '</span>').join('\n') + '</pre>' : '')
+      + '<div class="acts">'
+      + (open ? (j.status === 'running' ? '' : '<button class="upd-test-btn" onclick="window._sshOpenJob=null;sshRenderInstalls()">Hide log</button>')
+              : '<button class="upd-test-btn" onclick="window._sshOpenJob=\'' + j.id + '\';sshRenderInstalls()">Show log (' + (j.logLines||0) + ' lines)</button>')
+      + (j.status === 'running' ? '' : '<button class="upd-test-btn" onclick="sshRetryInstall(\'' + j.id + '\')" title="Open the install dialog again with these settings">↻ ' + (j.status === 'ok' ? 'Install again' : 'Retry') + '</button>'
+        + '<button class="upd-test-btn" onclick="armConfirm(this, \'⚠ Forget?\', () => sshForgetInstall(\'' + j.id + '\'))" title="Remove this entry from the history">✕</button>')
+      + '</div></div>';
   }).join('');
   for (const pre of box.querySelectorAll('pre')) pre.scrollTop = pre.scrollHeight;
 }

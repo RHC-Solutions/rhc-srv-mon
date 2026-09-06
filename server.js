@@ -21,6 +21,7 @@ require('./lib/api/events');
 require('./lib/api/sites');
 require('./lib/api/backups');
 require('./lib/api/settings');
+require('./lib/api/ssh');
 const clpImport = require('./lib/clp-import');
 const cloudpanel = require('./lib/cloudpanel');
 const page = require('./lib/page');

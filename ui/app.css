@@ -485,6 +485,7 @@
   .ssh-inst .top { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; }
   .ssh-inst .top b { font-size:13.5px; }
   .ssh-inst .meta { font-size:11.5px; color:#6b7280; margin-bottom:8px; }
+  .ssh-inst .acts { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
   .ssh-inst pre { margin:0; background:#0c0e16; border-radius:8px; padding:8px 10px; max-height:280px; overflow:auto; font-size:11.5px; line-height:1.5; color:#cbd5e1; white-space:pre-wrap; word-break:break-word; }
   .ssh-inst pre .err { color:#ff8088; } .ssh-inst pre .hdr { color:#5cdd8b; font-weight:700; } .ssh-inst pre .remote { color:#9ca3af; } .ssh-inst pre .t { color:#4b5563; }
   .ssh-modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:900; display:flex; align-items:flex-start; justify-content:center; padding:60px 16px 20px; overflow-y:auto; }
