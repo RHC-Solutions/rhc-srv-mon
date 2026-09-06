@@ -268,6 +268,11 @@ const section = (s) => console.log('\n### ' + s);
     eq((await req('POST', u + '/files/op', { op: 'delete', paths: [dir] })).status, 200);
     return 'as ' + php.user;
   });
+  await check('file manager helper is readable by the site user (app dir is 0700 in a real install)', async () => {
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('sudo', ['-n', '-u', php.user, 'sh', '-c', 'cat /var/lib/rhc-srv-mon/fileop.js > /dev/null && echo ok'], { encoding: 'utf8' }).trim();
+    eq(out, 'ok');
+  });
   await check('file manager confinement', async () => {
     const u = '/api/sites/' + php.domain;
     eq((await req('GET', u + '/files?path=/../../etc')).status, 400);
