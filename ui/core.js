@@ -77,33 +77,33 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document
 function sshField(label, inner, hint){ return '<div class="upd-field"><label>' + label + '</label>' + inner + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</div>'; }
 // Each tab has its own URL (…/rhc-srv-mon/ssh, …/postgres, …). Slugs are single path
 // segments so every relative URL in this page (api/…, login, ws/ssh) keeps resolving.
-const TAB_SLUG = { pm2:'monitor', db:'postgres', updates:'updates', sites:'sites', modules:'modules', backup:'backups', ssh:'ssh' };
+// One entry per tab: URL slug, view element, render (on tab switch) and onRefresh (every 10 s
+// while the tab is active — omitted for tabs that fetch their own data on their own schedule).
+const TABS = {
+  sites:   { slug:'sites',    view:'sitesview',   render: () => renderSites(),   onRefresh: () => renderSites() },
+  pm2:     { slug:'monitor',  view:'pm2view',     render: () => render(),        onRefresh: () => render() },
+  db:      { slug:'postgres', view:'dbview',      render: () => renderDb(),      onRefresh: () => renderDb() },
+  updates: { slug:'updates',  view:'updatesview', render: () => renderUpdates(), onRefresh: () => renderUpdates() },
+  modules: { slug:'modules',  view:'modulesview', render: () => renderModules(), onRefresh: () => renderModules() },
+  backup:  { slug:'backups',  view:'backupview',  render: () => renderBackup(),  onRefresh: () => renderBackup() },
+  ssh:     { slug:'ssh',      view:'sshview',     render: () => renderSsh() },
+  events:  { slug:'events',   view:'eventsview',  render: () => renderEvents(),  onRefresh: () => refreshEvents() },
+};
+const TAB_SLUG = Object.fromEntries(Object.entries(TABS).map(([k, v]) => [k, v.slug]));
 const SLUG_TAB = Object.assign(Object.fromEntries(Object.entries(TAB_SLUG).map(([k,v]) => [v,k])),
   { pm2:'pm2', services:'pm2', postgresql:'db', db:'db', backup:'backup', terminal:'ssh' });
 function tabFromPath(){ const seg = (location.pathname.split('/').filter(Boolean).pop() || '').toLowerCase(); return SLUG_TAB[seg] || null; }
 function setTab(tab, opts){
   opts = opts || {};
-  if (!TAB_SLUG[tab]) tab = 'sites';
+  if (!TABS[tab]) tab = 'sites';
   state.tab = tab; saveState();
   if (!opts.noHistory && tabFromPath() !== tab) {
     try { history[opts.replace ? 'replaceState' : 'pushState']({ tab }, '', TAB_SLUG[tab] + location.search); } catch(e){}
   }
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===tab));
-  document.getElementById('pm2view').style.display = tab==='pm2' ? '' : 'none';
-  document.getElementById('dbview').style.display  = tab==='db'  ? '' : 'none';
-  document.getElementById('updatesview').style.display = tab==='updates' ? '' : 'none';
-  document.getElementById('sitesview').style.display = tab==='sites' ? '' : 'none';
-  document.getElementById('modulesview').style.display = tab==='modules' ? '' : 'none';
-  document.getElementById('backupview').style.display = tab==='backup' ? '' : 'none';
-  document.getElementById('sshview').style.display = tab==='ssh' ? '' : 'none';
+  for (const [k, t] of Object.entries(TABS)) { const el = document.getElementById(t.view); if (el) el.style.display = k===tab ? '' : 'none'; }
   document.body.classList.toggle('tab-ssh', tab==='ssh');
-  if (tab==='pm2') render();
-  else if (tab==='db') renderDb();
-  else if (tab==='updates') renderUpdates();
-  else if (tab==='sites') renderSites();
-  else if (tab==='modules') renderModules();
-  else if (tab==='backup') renderBackup();
-  else if (tab==='ssh') renderSsh();
+  TABS[tab].render();
 }
 
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', (e) => {
@@ -120,10 +120,5 @@ async function refresh(){
     fetch('api/modules').then(r=>r.json()),
     fetch('api/backup').then(r=>r.json()),
   ]); } catch(e){ return; }
-  if (state.tab==='pm2') render();
-  else if (state.tab==='db') renderDb();
-  else if (state.tab==='updates') renderUpdates();
-  else if (state.tab==='sites') renderSites();
-  else if (state.tab==='modules') renderModules();
-  else if (state.tab==='backup') renderBackup();
+  const t = TABS[state.tab]; if (t && t.onRefresh) t.onRefresh();
 }

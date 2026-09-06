@@ -15,6 +15,16 @@ Runs as root under pm2 (`rhc-srv-mon`, cwd `/root`), binds 127.0.0.1:8899, expos
   after moving code between modules). Run both before landing.
 - State files stay next to `server.js`: `auth.json`, `updates.json`, `modules.json`, `backups.json`, `ssh-hosts.json`,
   `history.json`, `.helpers/`, `.sessions/` (all gitignored).
+- `rhc.sqlite` (node:sqlite, WAL) holds the event log and key/value settings; schema changes are numbered migrations in
+  `lib/migrations/` applied at boot. `secret.key` (AES-256-GCM, 0600) encrypts stored credentials — it is excluded from
+  git *and* from the config backup on purpose: **back it up out of band**, a restored DB without it cannot decrypt anything.
+
+## Events tab
+
+Every user action and scheduler run is written to the `events` table (`lib/events.js` → `emit(type, {…})`): logins and
+failures, update runs, module updates / auto-update / cleanup, backups, pm2 start/stop/restart, SSH host changes and
+remote installs, settings saves. The tab filters by type group, level, user, site and free text, expands the JSON details
+of a row, and pages backwards. Retention defaults to 90 days (`PUT /api/events/settings {retentionDays}`); pruning runs daily.
 
 ## Development
 

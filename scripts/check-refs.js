@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // After the split: flag uses of any former top-level name of the monolithic server.js that a
 // file neither declares nor imports (a destructured require or a `module.` member access is fine).
-//   node scripts/check-refs.js [reference-server.js]   (default: git show main:server.js)
+//   node scripts/check-refs.js [reference-server.js]   (default: the last monolithic server.js, commit 7aa623b)
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const root = path.join(__dirname, '..');
+const MONOLITH = '7aa623b';   // last commit with the single-file server.js (the reference for both checks)
 
 function strip(src) {
   return src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:\\])\/\/[^\n]*/g, '$1')
@@ -19,7 +20,7 @@ function topLevel(src) {
   return out;
 }
 const ref = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8')
-  : execFileSync('git', ['show', 'main:server.js'], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
+  : execFileSync('git', ['show', MONOLITH + ':server.js'], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
 const oldNames = topLevel(strip(ref));
 for (const n of ['http', 'fs', 'path', 'os', 'execFile', 'execFileSync', 'spawn', 'net', 'crypto', 'PAGE', 'LOGIN_PAGE', 'server']) oldNames.delete(n);
 // the old PAGE literal held column-0 client code too — drop anything the ui/ files declare, and tiny names

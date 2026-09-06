@@ -14,7 +14,10 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { PORT, HOST, NO_JOBS } = require('./lib/config');
 const httpu = require('./lib/http');
-const { readJsonBody, authJson } = httpu;
+const { readJsonBody, authJson, actorOf } = httpu;
+const db = require('./lib/db');
+const events = require('./lib/events');
+require('./lib/api/events');
 const page = require('./lib/page');
 const auth = require('./lib/auth');
 const history = require('./lib/history');
@@ -63,7 +66,8 @@ const server = http.createServer((req, res) => {
   if (url === '/api/updates/run-all' && req.method === 'POST') {
     const updatesCache = updates.getCache();
     const outdated = (updatesCache ? updatesCache.components : []).filter(c => c.updateAvailable && c.key !== 'node');
-    Promise.all(outdated.map(c => updates.runUpdate(c.key))).then((results) => {
+    const actor = actorOf(req);
+    Promise.all(outdated.map(c => updates.runUpdate(c.key, actor))).then((results) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(results));
     });
@@ -73,7 +77,7 @@ const server = http.createServer((req, res) => {
     const updatesCache = updates.getCache();
     const users = (updatesCache && updatesCache.users) ? updatesCache.users : {};
     const comps = updatesCache ? updatesCache.components : [];
-    const jobs = [];
+    const jobs = [], actor = actorOf(req);
     for (const [user, uv] of Object.entries(users)) {
       for (const c of comps) {
         if (c.key === 'node') continue;
@@ -85,7 +89,7 @@ const server = http.createServer((req, res) => {
     (async () => {
       const results = [];
       for (const [user, key] of jobs) {
-        try { results.push(await updates.runUserUpdate(user, key)); }
+        try { results.push(await updates.runUserUpdate(user, key, actor)); }
         catch (e) { results.push({ user, component: key, success: false, output: e.message }); }
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -96,8 +100,8 @@ const server = http.createServer((req, res) => {
   if (url.startsWith('/api/updates/run/') && req.method === 'POST') {
     const parts = url.slice('/api/updates/run/'.length).split('/');
     const promise = parts.length >= 2 && parts[1]
-      ? updates.runUserUpdate(parts[0], parts[1])
-      : updates.runUpdate(parts[0]);
+      ? updates.runUserUpdate(parts[0], parts[1], actorOf(req))
+      : updates.runUpdate(parts[0], actorOf(req));
     promise.then((result) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result));
@@ -111,6 +115,7 @@ const server = http.createServer((req, res) => {
       try {
         const cfg = JSON.parse(body);
         updates.setConfig(cfg || {});
+        events.emit('settings.save', { req, target: 'updates', message: 'Updates settings saved (' + Object.keys(cfg || {}).join(', ') + ')', data: cfg && cfg.schedule ? { schedule: cfg.schedule } : undefined });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch (e) {
@@ -122,6 +127,7 @@ const server = http.createServer((req, res) => {
   }
   if (url === '/api/updates/log' && req.method === 'DELETE') {
     updates.clearLog();
+    events.emit('updates.log-clear', { req, message: 'Update log cleared' });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true }));
   }
@@ -141,6 +147,7 @@ const server = http.createServer((req, res) => {
       { timeout: 30000 },
       (err, stdout) => {
         const result = { action, user: targetUser, app: appName, success: !err, output: stdout.trim() };
+        events.emit('pm2.' + cmd, { req, target: targetUser + '/' + appName, level: err ? 'error' : 'info', message: 'pm2 ' + cmd + ' ' + appName + ' (' + targetUser + ')' + (err ? ' failed' : ''), data: err ? { output: result.output.slice(0, 1000) } : undefined });
         res.writeHead(err ? 500 : 200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
       });
@@ -181,7 +188,7 @@ const server = http.createServer((req, res) => {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'dir and user required' }));
       }
-      modules.runModuleUpdate(dir, user, packages || []).then((result) => {
+      modules.runModuleUpdate(dir, user, packages || [], actorOf(req)).then((result) => {
         res.writeHead(result.success ? 200 : 500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
       }).catch((e) => {
@@ -201,12 +208,14 @@ const server = http.createServer((req, res) => {
       return res.end(JSON.stringify({ error: 'scan in progress' }));
     }
     // Kick off in the background; the UI polls /api/modules for progress + per-dir activeUpdates.
+    events.emit('modules.update-all', { req, message: 'Update-all pass started' });
     modules.runUpdateAllPass().catch((e) => console.error('update-all failed:', e.message));
     res.writeHead(202, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true, started: true }));
   }
   if (url === '/api/modules/log' && req.method === 'DELETE') {
     modules.clearUpdateLog();
+    events.emit('modules.log-clear', { req, message: 'Module update log cleared' });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true }));
   }
@@ -217,6 +226,7 @@ const server = http.createServer((req, res) => {
       try {
         const cfg = JSON.parse(body);
         const next = modules.setAutoUpdateConfig(cfg || {});
+        events.emit('settings.save', { req, target: 'auto-update', message: 'Auto-update settings saved', data: next });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, autoUpdate: next }));
       } catch (e) {
@@ -231,7 +241,7 @@ const server = http.createServer((req, res) => {
       res.writeHead(409, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ error: 'auto-update already running' }));
     }
-    modules.runAutoUpdatePass('manual').then((r) => {
+    modules.runAutoUpdatePass('manual', actorOf(req)).then((r) => {
       res.writeHead(r.skipped ? 409 : 200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(r));
     }).catch((e) => {
@@ -242,6 +252,7 @@ const server = http.createServer((req, res) => {
   }
   if (url === '/api/modules/auto/log' && req.method === 'DELETE') {
     modules.clearAutoUpdateLog();
+    events.emit('modules.log-clear', { req, target: 'auto-update', message: 'Auto-update log cleared' });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true }));
   }
@@ -266,6 +277,7 @@ const server = http.createServer((req, res) => {
       try {
         const cfg = JSON.parse(body);
         modules.setCleanupConfig(cfg || {});
+        events.emit('settings.save', { req, target: 'cleanup', message: 'Cleanup settings saved', data: cfg });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, cleanup: modules.getCleanupState() }));
       } catch (e) {
@@ -283,7 +295,7 @@ const server = http.createServer((req, res) => {
       try { overrides = body ? (JSON.parse(body) || {}) : {}; } catch (_) { overrides = {}; }
       const clean = {};
       for (const k of Object.keys(modules.DEFAULT_CLEANUP)) if (typeof overrides[k] === 'boolean') clean[k] = overrides[k];
-      modules.runCleanup('manual', clean).then((r) => {
+      modules.runCleanup('manual', clean, actorOf(req)).then((r) => {
         res.writeHead(r.skipped ? 409 : 200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(Object.assign({}, r, { cleanup: modules.getCleanupState() })));
       }).catch((e) => {
@@ -295,6 +307,7 @@ const server = http.createServer((req, res) => {
   }
   if (url === '/api/modules/cleanup/log' && req.method === 'DELETE') {
     modules.clearCleanupLog();
+    events.emit('modules.log-clear', { req, target: 'cleanup', message: 'Cleanup log cleared' });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true }));
   }
@@ -304,7 +317,7 @@ const server = http.createServer((req, res) => {
   }
   if (url === '/api/backup/run' && req.method === 'POST') {
     if (backups.isRunning()) { res.writeHead(409, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'A backup is already running' })); }
-    backups.runBackup('manual').catch((e) => console.error('backup run failed:', e.message));  // async; UI polls /api/backup
+    backups.runBackup('manual', actorOf(req)).catch((e) => console.error('backup run failed:', e.message));  // async; UI polls /api/backup
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ started: true }));
   }
@@ -322,6 +335,7 @@ const server = http.createServer((req, res) => {
       try {
         const cfg = JSON.parse(body);
         backups.setConfig(cfg || {});
+        events.emit('settings.save', { req, target: 'backups', message: 'Backup settings saved (' + Object.keys(cfg || {}).join(', ') + ')' });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch (e) {
@@ -333,6 +347,7 @@ const server = http.createServer((req, res) => {
   }
   if (url === '/api/backup/log' && req.method === 'DELETE') {
     backups.clearLog();
+    events.emit('backups.log-clear', { req, message: 'Backup log cleared' });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true }));
   }
@@ -346,6 +361,7 @@ const server = http.createServer((req, res) => {
       try {
         const h = ssh.sshSanitizeHost(body, { id: crypto.randomBytes(5).toString('hex'), createdAt: new Date().toISOString() });
         ssh.addHost(h);
+        events.emit('ssh.host.add', { req, target: h.name || h.host, message: 'SSH host added: ' + (h.name || h.host) + ' (' + h.user + '@' + h.host + ':' + h.port + ')' });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, host: ssh.sshPublicHost(h) }));
       } catch (e) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
@@ -367,6 +383,7 @@ const server = http.createServer((req, res) => {
             const next = ssh.sshSanitizeHost(body, h);
             Object.keys(h).forEach((k) => { if (!(k in next)) delete h[k]; });
             Object.assign(h, next); ssh.saveSsh();
+            events.emit('ssh.host.update', { req, target: h.name || h.host, message: 'SSH host updated: ' + (h.name || h.host) });
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: true, host: ssh.sshPublicHost(h) }));
           } catch (e) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
@@ -374,6 +391,7 @@ const server = http.createServer((req, res) => {
       }
       if (!m[2] && req.method === 'DELETE') {
         ssh.removeHost(h.id);
+        events.emit('ssh.host.delete', { req, target: h.name || h.host, level: 'warn', message: 'SSH host deleted: ' + (h.name || h.host) + ' (' + h.user + '@' + h.host + ')' });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ ok: true }));
       }
@@ -383,6 +401,7 @@ const server = http.createServer((req, res) => {
     return readJsonBody(req, res, (body) => {
       try {
         const job = ssh.sshStartInstall(String(body.hostId || ''), body.opts || {});
+        events.emit('ssh.install', { req, target: job.hostName || body.hostId, message: 'Remote install started on ' + (job.hostName || body.hostId), data: { jobId: job.id, appDir: body.opts && body.opts.appDir } });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, jobId: job.id }));
       } catch (e) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
@@ -414,7 +433,7 @@ const server = http.createServer((req, res) => {
     }
     if (m && req.method === 'DELETE') {
       const s = ssh.getSession(m[1]);
-      if (s) { s.hangup(); if (s.socket) ssh.wsClose(s.socket, 1000, 'closed by admin'); }
+      if (s) { s.hangup(); if (s.socket) ssh.wsClose(s.socket, 1000, 'closed by admin'); events.emit('ssh.session.close', { req, target: s.target, message: 'SSH session closed: ' + s.target }); }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ok: !!s }));
     }
@@ -437,6 +456,7 @@ server.on('upgrade', (req, socket, head) => {
 
 /* ------------------------------------------------------------------- boot */
 page.page();                               // assemble + syntax-check the UI before anything else
+db.open();                                 // SQLite (runs pending migrations)
 ssh.ensureSshHelpers();
 ssh.loadSsh();
 ssh.sshAdoptDaemons();
@@ -465,6 +485,8 @@ if (NO_JOBS) {
   setInterval(modules.autoUpdateTick, 60_000);
   // backups: tick every minute for the daily scheduled run
   setInterval(backups.backupTick, 60_000);
+  // events: prune beyond the retention window once a day
+  setInterval(() => { try { events.prune(); } catch (e) { console.error('events prune failed:', e.message); } }, 24 * 3600_000);
 }
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => { history.saveHistory(true); process.exit(0); });

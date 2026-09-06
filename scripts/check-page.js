@@ -3,7 +3,7 @@
  * Proves the page assembled from ui/ is byte-identical to the literals in a reference
  * server.js (default: main's), and that no top-level identifier is declared in two ui files.
  *
- *   node scripts/check-page.js [reference-server.js]      # default: git show main:server.js
+ *   node scripts/check-page.js [reference-server.js]      # default: the last monolithic server.js
  *   node scripts/check-page.js --idents-only               # after UI edits: only the duplicate check
  */
 'use strict';
@@ -12,6 +12,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { evalPages } = require('./extract-ui');
 const pageLib = require('../lib/page');
+const MONOLITH = '7aa623b';   // last commit with the single-file server.js
 
 let fail = false;
 const identsOnly = process.argv.includes('--idents-only');
@@ -35,7 +36,7 @@ catch (e) { console.error(e.message); process.exit(1); }
 if (!identsOnly) {
   const ref = process.argv[2] && !process.argv[2].startsWith('--')
     ? fs.readFileSync(process.argv[2], 'utf8')
-    : execFileSync('git', ['show', 'main:server.js'], { cwd: path.join(__dirname, '..'), encoding: 'utf8', maxBuffer: 64 << 20 });
+    : execFileSync('git', ['show', MONOLITH + ':server.js'], { cwd: path.join(__dirname, '..'), encoding: 'utf8', maxBuffer: 64 << 20 });
   const { PAGE, LOGIN_PAGE } = evalPages(ref);
   const cmp = (name, a, b) => {
     if (a === b) { console.log(`${name}: identical (${a.length} bytes)`); return; }
