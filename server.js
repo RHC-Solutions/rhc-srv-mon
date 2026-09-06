@@ -2632,6 +2632,8 @@ const PAGE = `<!doctype html>
   .ssh-tab .st { width:7px; height:7px; border-radius:50%; background:#f8a306; flex-shrink:0; }
   .ssh-tab .st.open { background:#5cdd8b; }
   .ssh-tab .st.dead { background:#ff8088; }
+  .ssh-tab .st.reconnecting { background:#f8a306; animation: ssh-blink 1s ease-in-out infinite; }
+  @keyframes ssh-blink { 50% { opacity:.25; } }
   .ssh-tab .tt { overflow:hidden; text-overflow:ellipsis; }
   .ssh-tab .x { border:none; background:transparent; color:#6b7280; font-size:14px; line-height:1; cursor:pointer; padding:2px 4px; border-radius:4px; }
   .ssh-tab .x:hover { background:#3a4054; color:#fff; }
@@ -4166,7 +4168,7 @@ async function renderSsh(){
   sshRenderInstalls();
   const src = sshData.source || {};
   document.getElementById('ssh-side-ft').innerHTML = 'source: <b>' + esc(src.host || '') + '</b> · node ' + esc(src.node || '') + (src.git ? ' · ' + esc(src.git) : '')
-    + '<br>' + sshData.hosts.length + ' host' + (sshData.hosts.length===1?'':'s') + ' · ' + (sshData.sessions||[]).length + ' active session' + ((sshData.sessions||[]).length===1?'':'s')
+    + '<br>' + sshData.hosts.length + ' host' + (sshData.hosts.length===1?'':'s') + ' · ' + (sshData.sessions||[]).length + ' active session' + ((sshData.sessions||[]).length===1?'':'s') + ((sshData.sessions||[]).some(x => !x.attached) ? ' (' + (sshData.sessions||[]).filter(x => !x.attached).length + ' detached, awaiting re-attach)' : '')
     + (sshData.helperOk ? '' : '<br><span style="color:#ff8088">⚠ pty helper missing</span>');
   if (sshSess.size) sshRenderTabs();
   const running = (sshData.installs||[]).some(j => j.status === 'running');
@@ -4226,6 +4228,7 @@ function sshDuplicateTab(){ const s = sshSess.get(sshActive); if (!s) return; if
 function sshCloseAll(){ for (const id of [...sshSess.keys()]) sshCloseTab(id); }
 function sshCloseTab(id){
   const s = sshSess.get(id); if (!s) return;
+  s.status = 'dead'; clearTimeout(s.retryTimer);
   try { if (s.ws && s.ws.readyState <= 1) s.ws.close(); } catch(e){}
   try { s.term.dispose(); } catch(e){}
   s.el.remove(); sshSess.delete(id);
@@ -4275,18 +4278,51 @@ function sshWsConnect(s, query){
   ws.binaryType = 'arraybuffer';
   s.ws = ws; s.status = 'connecting'; sshRenderTabs();
   const dead = s.el.querySelector('.ssh-deadbar'); if (dead) dead.remove();
-  ws.onopen = () => { s.status = 'open'; sshRenderTabs(); sshRenderHosts(); try { s.fit.fit(); ws.send(JSON.stringify({ t:'resize', cols: s.term.cols, rows: s.term.rows })); } catch(e){} };
+  ws.onopen = () => { s.status = 'open'; s.retry = 0; sshRenderTabs(); sshRenderHosts(); try { s.fit.fit(); ws.send(JSON.stringify({ t:'resize', cols: s.term.cols, rows: s.term.rows })); } catch(e){} };
   ws.onmessage = (ev) => {
     if (typeof ev.data === 'string') {
       let m = null; try { m = JSON.parse(ev.data); } catch(e){ return; }
-      if (m.t === 'exit') sshSessionEnded(s, m.code, m.error);
+      if (m.t === 'hello') { s.sid = m.id; if (m.reattach) { try { s.term.write('\\r\\n\\x1b[90m── re-attached ──\\x1b[0m\\r\\n'); } catch(e){} } }
+      else if (m.t === 'hb') { try { ws.send('{"t":"hb"}'); } catch(e){} }
+      else if (m.t === 'note') { try { s.term.write('\\r\\n\\x1b[90m── ' + m.msg + ' ──\\x1b[0m\\r\\n'); } catch(e){} }
+      else if (m.t === 'exit') sshSessionEnded(s, m.code, m.error);
       return;
     }
     s.term.write(new Uint8Array(ev.data));
   };
   ws.onerror = () => {};
-  ws.onclose = (ev) => { if (s.status !== 'dead') sshSessionEnded(s, null, ev.code === 1006 ? 'connection lost (WebSocket ' + ev.code + ')' : null); };
+  ws.onclose = (ev) => {
+    if (s.ws !== ws || s.status === 'dead') return;
+    // Abnormal close (1006: Cloudflare/proxy cut, laptop sleep, wifi change) and we know our
+    // server-side session id -> the pty is still alive on the server; re-attach to it.
+    if (!ev.wasClean && s.sid) return sshLostTransport(s, ev.code);
+    sshSessionEnded(s, null, ev.code === 1006 ? 'connection lost (WebSocket ' + ev.code + ')' : null);
+  };
 }
+function sshLostTransport(s, code){
+  s.status = 'reconnecting'; s.retry = (s.retry || 0) + 1; sshRenderTabs(); sshRenderHosts();
+  if (s.retry === 1) { try { s.term.write('\\r\\n\\x1b[33m── connection lost (WebSocket ' + code + ') — reconnecting… ──\\x1b[0m\\r\\n'); } catch(e){} }
+  const delay = Math.min(15000, 500 * Math.pow(2, s.retry - 1));   // 0.5s, 1s, 2s … 15s (≈10 min total, matches the server grace period)
+  clearTimeout(s.retryTimer);
+  s.retryTimer = setTimeout(() => sshTryReattach(s, code), delay);
+}
+async function sshTryReattach(s, code){
+  if (s.status !== 'reconnecting') return;
+  if (navigator.onLine === false) return sshLostTransport(s, code);
+  let alive = null;
+  try {
+    const r = await fetch('api/ssh/sessions/' + encodeURIComponent(s.sid), { cache: 'no-store' });
+    if (r.status === 401) { location.reload(); return; }
+    alive = r.ok;
+  } catch(e){ alive = null; }
+  if (alive === false) return sshSessionEnded(s, null, 'connection lost (WebSocket ' + code + ') — the session expired on the server');
+  if (alive === null) { if ((s.retry || 0) >= 45) return sshSessionEnded(s, null, 'connection lost (WebSocket ' + code + ') — server unreachable'); return sshLostTransport(s, code); }
+  sshWsConnect(s, 'attach=' + encodeURIComponent(s.sid));
+}
+// Network back / tab visible again: don't wait for the backoff timer.
+function sshRetryNow(){ for (const s of sshSess.values()) if (s.status === 'reconnecting') { clearTimeout(s.retryTimer); sshTryReattach(s, 1006); } }
+window.addEventListener('online', sshRetryNow);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sshRetryNow(); });
 function sshSessionEnded(s, code, error){
   if (s.status === 'dead') return;
   s.status = 'dead'; sshRenderTabs(); sshRenderHosts();
@@ -4298,13 +4334,14 @@ function sshSessionEnded(s, code, error){
 }
 function sshReconnect(id){
   const s = sshSess.get(id); if (!s) return;
+  clearTimeout(s.retryTimer); s.sid = null; s.retry = 0;
   s.term.reset();
   const q = s.hostId ? 'id=' + encodeURIComponent(s.hostId) : 'host=' + encodeURIComponent(s.adhoc.host) + '&user=' + encodeURIComponent(s.adhoc.user||'root') + '&port=' + encodeURIComponent(s.adhoc.port||22);
   sshWsConnect(s, q); s.term.focus();
 }
 // keep the active terminal sized to its pane
 new ResizeObserver(() => { const s = sshSess.get(sshActive); if (s && state.tab === 'ssh') { try { s.fit.fit(); } catch(e){} } }).observe(document.getElementById('ssh-terms'));
-window.addEventListener('beforeunload', (e) => { if ([...sshSess.values()].some(s => s.status === 'open')) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', (e) => { if ([...sshSess.values()].some(s => s.status === 'open' || s.status === 'reconnecting')) { e.preventDefault(); e.returnValue = ''; } });
 
 /* ---- modals ---- */
 function sshModal(html){
@@ -4586,6 +4623,9 @@ const SSH_INSTALL_LOG_MAX = 30;
 const SSH_JOB_LOG_MAX = 600;
 const WS_MAX_BUFFER = 4 * 1024 * 1024;
 const WS_PING_MS = 30_000;                 // keepalive ping interval (Cloudflare idle cutoff is ~100 s)
+const WS_IDLE_DEAD_MS = 120_000;           // nothing heard from the browser for this long -> transport is dead
+const SSH_DETACH_GRACE_MS = 10 * 60_000;   // keep a pty alive this long after its WebSocket drops (browser re-attaches)
+const SSH_DETACH_BUFFER = 512 * 1024;      // bytes of terminal output buffered while detached
 
 let sshCache = { hosts: [], installLog: [] };
 const sshSessions = new Map();     // sessionId -> { id, hostId, label, startedAt, child, socket }
@@ -4837,13 +4877,21 @@ function wsClose(socket, code, reason) {
 }
 // Attach a frame parser: onMessage(opcode, payloadBuffer), onClose().
 function wsAttach(socket, head, onMessage, onClose) {
-  let buf = Buffer.alloc(0), frag = [], fragOp = 0, closed = false;
+  let buf = Buffer.alloc(0), frag = [], fragOp = 0, closed = false, clientClosed = false, lastSeen = Date.now();
   // Keepalive: Cloudflare (and some proxies) drop a WebSocket with no traffic for ~100 s, which
-  // the browser sees as close code 1006 on an idle terminal. Browsers auto-reply to pings with pongs.
-  const pinger = setInterval(() => { if (closed || socket.destroyed) return clearInterval(pinger); socket.write(wsFrame(Buffer.alloc(0), 9)); }, WS_PING_MS);
-  const finish = () => { if (!closed) { closed = true; clearInterval(pinger); onClose(); } };
+  // the browser sees as close code 1006 on an idle terminal. Browsers auto-reply to pings with pongs;
+  // the text heartbeat lets the page notice a silently dead transport (it answers with {"t":"hb"}).
+  // If nothing at all arrives from the browser for WS_IDLE_DEAD_MS the transport is treated as lost.
+  const finish = () => { if (!closed) { closed = true; clearInterval(pinger); onClose(clientClosed); } };
+  const pinger = setInterval(() => {
+    if (closed || socket.destroyed) return clearInterval(pinger);
+    if (Date.now() - lastSeen > WS_IDLE_DEAD_MS) { try { socket.destroy(); } catch (_) {} return finish(); }
+    socket.write(wsFrame(Buffer.alloc(0), 9));
+    socket.write(wsFrame('{"t":"hb"}', 1));
+  }, WS_PING_MS);
   socket.on('data', (chunk) => {
     if (closed) return;
+    lastSeen = Date.now();
     buf = buf.length ? Buffer.concat([buf, chunk]) : chunk;
     if (buf.length > WS_MAX_BUFFER) { wsClose(socket, 1009, 'too big'); return finish(); }
     for (;;) {
@@ -4858,7 +4906,7 @@ function wsAttach(socket, head, onMessage, onClose) {
       const payload = Buffer.from(buf.subarray(off, off + len));
       if (mask) for (let i = 0; i < len; i++) payload[i] ^= mask[i & 3];
       buf = buf.subarray(off + len);
-      if (op === 8) { wsClose(socket, 1000); return finish(); }
+      if (op === 8) { clientClosed = true; wsClose(socket, 1000); return finish(); }
       if (op === 9) { if (!socket.destroyed) socket.write(wsFrame(payload, 10)); continue; }
       if (op === 10) continue;
       if (op === 0) { frag.push(payload); if (fin) { const m = Buffer.concat(frag); frag = []; onMessage(fragOp, m); } continue; }
@@ -4873,7 +4921,22 @@ function wsAttach(socket, head, onMessage, onClose) {
 }
 
 /* ---- interactive terminal session over WebSocket ---- */
+// A session = one pty helper (python3 + ssh). The WebSocket is only its transport: when the
+// browser loses it (Cloudflare/proxy cut, laptop sleep, wifi change -> close code 1006) the
+// pty stays alive for SSH_DETACH_GRACE_MS with its output buffered, and the page re-attaches
+// with ?attach=<sessionId>. Only an explicit close from the browser (close frame) or the
+// grace timer hangs the ssh session up.
 function sshOpenTerminal(req, socket, head, query) {
+  if (query.get('attach')) {
+    const sess = sshSessions.get(String(query.get('attach')));
+    if (!sess || sess.ended) { socket.write('HTTP/1.1 410 Gone\r\nConnection: close\r\n\r\nsession gone\n'); return socket.destroy(); }
+    if (!wsHandshake(req, socket)) return;
+    socket.setNoDelay(true);
+    if (sess.socket && !sess.socket.destroyed) { const old = sess.socket; sess.socket = null; wsClose(old, 1000, 'superseded'); }
+    console.log(`ssh session ${sess.id} (${sess.target}) re-attached from ${clientIp(req)}`);
+    sshAttachSocket(sess, socket, head, true);
+    return;
+  }
   let h = null;
   if (query.get('id')) {
     h = sshFindHost(query.get('id'));
@@ -4893,22 +4956,42 @@ function sshOpenTerminal(req, socket, head, query) {
   let child;
   try { child = spawn('python3', args, { env, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }); }
   catch (e) { wsSendText(socket, JSON.stringify({ t: 'exit', code: 127, error: e.message })); return wsClose(socket, 1011, 'spawn failed'); }
-  const sess = { id, hostId: h.id || null, label: h.name || sshTarget(h), target: sshTarget(h), startedAt: new Date().toISOString(), child, socket };
+  const sess = { id, hostId: h.id || null, label: h.name || sshTarget(h), target: sshTarget(h), startedAt: new Date().toISOString(), child,
+    socket: null, ended: false, outBuf: [], outBufBytes: 0, outBufDropped: false, detachedAt: null, detachTimer: null, attaches: 0 };
   sshSessions.set(id, sess);
-  wsSendText(socket, JSON.stringify({ t: 'hello', id, target: sshTarget(h) }));
-  let ended = false;
+  console.log(`ssh session ${id} -> ${sess.target} opened from ${clientIp(req)}`);
   const end = (code, error) => {
-    if (ended) return; ended = true;
+    if (sess.ended) return; sess.ended = true;
+    if (sess.detachTimer) { clearTimeout(sess.detachTimer); sess.detachTimer = null; }
     sshSessions.delete(id);
-    try { wsSendText(socket, JSON.stringify({ t: 'exit', code, error: error || null })); } catch (_) {}
-    wsClose(socket, 1000, 'session ended');
+    if (sess.socket) { try { wsSendText(sess.socket, JSON.stringify({ t: 'exit', code, error: error || null })); } catch (_) {} wsClose(sess.socket, 1000, 'session ended'); }
+    console.log(`ssh session ${id} (${sess.target}) ended, code ${code}${error ? ' (' + error + ')' : ''}`);
   };
-  child.stdout.on('data', (d) => wsSendBinary(socket, d));
-  child.stderr.on('data', (d) => wsSendBinary(socket, d));
+  const out = (d) => {
+    if (sess.socket && !sess.socket.destroyed) return wsSendBinary(sess.socket, d);
+    sess.outBuf.push(d); sess.outBufBytes += d.length;
+    while (sess.outBufBytes > SSH_DETACH_BUFFER && sess.outBuf.length) { const x = sess.outBuf.shift(); sess.outBufBytes -= x.length; sess.outBufDropped = true; }
+  };
+  child.stdout.on('data', out);
+  child.stderr.on('data', out);
   child.on('error', (e) => end(127, e.message));
   child.on('close', (code) => end(code == null ? 0 : code));
   child.stdin.on('error', () => {});
   child.stdio[3].on('error', () => {});
+  sshAttachSocket(sess, socket, head, false);
+}
+// Bind a (new) WebSocket to a session: greet, replay buffered output, wire keystrokes/resizes.
+function sshAttachSocket(sess, socket, head, reattach) {
+  const child = sess.child;
+  sess.socket = socket; sess.attaches++;
+  if (sess.detachTimer) { clearTimeout(sess.detachTimer); sess.detachTimer = null; }
+  sess.detachedAt = null;
+  wsSendText(socket, JSON.stringify({ t: 'hello', id: sess.id, target: sess.target, reattach: !!reattach }));
+  if (reattach) {
+    if (sess.outBufDropped) wsSendText(socket, JSON.stringify({ t: 'note', msg: 'some output was dropped while disconnected' }));
+    for (const d of sess.outBuf) wsSendBinary(socket, d);
+    sess.outBuf = []; sess.outBufBytes = 0; sess.outBufDropped = false;
+  }
   wsAttach(socket, head, (op, payload) => {
     if (op === 2) { if (!child.stdin.destroyed) child.stdin.write(payload); return; }
     if (op === 1) {
@@ -4918,16 +5001,29 @@ function sshOpenTerminal(req, socket, head, query) {
           const m = JSON.parse(s);
           if (m.t === 'resize' && child.stdio[3].writable) child.stdio[3].write(JSON.stringify({ resize: [Math.max(20, Math.min(500, +m.cols || 80)), Math.max(5, Math.min(200, +m.rows || 24))] }) + '\n');
           else if (m.t === 'input' && typeof m.data === 'string' && !child.stdin.destroyed) child.stdin.write(m.data);
+          // m.t === 'hb' -> heartbeat reply, nothing to do (wsAttach already refreshed lastSeen)
         } catch (_) {}
       } else if (!child.stdin.destroyed) child.stdin.write(s);
     }
-  }, () => {
-    // browser went away -> hang up the ssh session
-    if (!ended) { ended = true; sshSessions.delete(id); }
-    try { child.stdin.end(); } catch (_) {}
-    setTimeout(() => { try { child.kill('SIGHUP'); } catch (_) {} }, 200);
-    setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 3000);
+  }, (clientClosed) => {
+    if (sess.socket !== socket) return;      // this transport was already superseded by a newer attach
+    sess.socket = null;
+    if (sess.ended) return;
+    if (clientClosed) { console.log(`ssh session ${sess.id} closed by browser -> hangup`); return sshHangup(sess); }
+    // transport lost (browser saw 1006) -> keep the pty for the grace period so the page can re-attach
+    sess.detachedAt = Date.now();
+    console.log(`ssh session ${sess.id} (${sess.target}) detached: transport lost, keeping pty for ${SSH_DETACH_GRACE_MS / 1000}s`);
+    sess.detachTimer = setTimeout(() => {
+      sess.detachTimer = null;
+      if (!sess.ended && !sess.socket) { console.log(`ssh session ${sess.id} not re-attached within grace period -> hangup`); sshHangup(sess); }
+    }, SSH_DETACH_GRACE_MS);
   });
+}
+function sshHangup(sess) {
+  const child = sess.child;
+  try { child.stdin.end(); } catch (_) {}
+  setTimeout(() => { try { child.kill('SIGHUP'); } catch (_) {} }, 200);
+  setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 3000);
 }
 
 /* ---- remote install of rhc-srv-mon ---- */
@@ -5142,7 +5238,7 @@ function sshApiState() {
   const hist = sshCache.installLog.filter((j) => !seen.has(j.id)).map((j) => Object.assign({}, j, { log: undefined, logLines: (j.log || []).length }));
   return {
     hosts: sshCache.hosts.map(sshPublicHost),
-    sessions: [...sshSessions.values()].map((s) => ({ id: s.id, hostId: s.hostId, label: s.label, target: s.target, startedAt: s.startedAt })),
+    sessions: [...sshSessions.values()].map((s) => ({ id: s.id, hostId: s.hostId, label: s.label, target: s.target, startedAt: s.startedAt, attached: !!s.socket, detachedAt: s.detachedAt })),
     installs: jobs.concat(hist).sort((a, b) => a.startedAt < b.startedAt ? 1 : -1).slice(0, SSH_INSTALL_LOG_MAX),
     source: sshSourceInfo(),
     helperOk: fs.existsSync(SSH_PTY_HELPER),
@@ -5923,9 +6019,15 @@ const server = http.createServer((req, res) => {
   }
   {
     const m = url.match(/^\/api\/ssh\/sessions\/([a-f0-9]{6,16})$/);
+    if (m && req.method === 'GET') {
+      // used by the page to check whether a detached session is still alive before re-attaching
+      const s = sshSessions.get(m[1]);
+      res.writeHead(s && !s.ended ? 200 : 404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      return res.end(JSON.stringify(s && !s.ended ? { id: s.id, target: s.target, startedAt: s.startedAt, attached: !!s.socket, detachedAt: s.detachedAt } : { error: 'session gone' }));
+    }
     if (m && req.method === 'DELETE') {
       const s = sshSessions.get(m[1]);
-      if (s) { try { s.child.kill('SIGHUP'); } catch (_) {} wsClose(s.socket, 1000, 'closed by admin'); }
+      if (s) { sshHangup(s); if (s.socket) wsClose(s.socket, 1000, 'closed by admin'); }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ok: !!s }));
     }
