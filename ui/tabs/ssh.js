@@ -679,6 +679,8 @@ async function sshSessRender(fetchRemote){
     sshSessView.loading = false;
   }
   box.innerHTML = sshSessHtml();
+  const k = document.getElementById('sess-killall');
+  if (k) k.addEventListener('click', () => armConfirm(k, '⚠ Click again to disconnect them', sshDisconnectOthers));
 }
 function sshSessHtml(){
   const local = (sshData && sshData.sessions) || [];
@@ -703,7 +705,9 @@ function sshSessHtml(){
   else if (sshSessView.error) h += '<p style="margin:0;color:#ff8088">⚠ ' + esc(sshSessView.error) + '</p>';
   else if (sshSessView.data) {
     const d = sshSessView.data;
-    h += '<p class="dim" style="margin:0 0 8px;font-size:12.5px">' + esc(d.target) + ' · checked ' + esc(String(d.checkedAt).slice(11, 19)) + '</p>';
+    const others = d.sessions.filter(x => !x.fromPanel && x.pid > 1);
+    h += '<p class="dim" style="margin:0 0 8px;font-size:12.5px">' + esc(d.target) + ' · checked ' + esc(String(d.checkedAt).slice(11, 19))
+      + (others.length ? ' <button class="upd-test-btn" style="margin-left:8px" id="sess-killall">⏻ Disconnect all ' + others.length + ' other session' + (others.length === 1 ? '' : 's') + '</button>' : '') + '</p>';
     h += '<table class="upd-table"><tr><th>User</th><th>TTY</th><th>From</th><th>Since</th><th>Idle</th><th>PID</th><th></th></tr>';
     for (const s of d.sessions) {
       h += '<tr><td><b>' + esc(s.user) + '</b>' + (s.fromPanel ? ' <span class="upd-badge na" title="connected from this server — probably this panel">this panel</span>' : '') + '</td><td class="mono">' + esc(s.tty || s.type || '—') + '</td><td class="mono">' + esc(s.from || '') + '</td><td class="dim">' + esc(s.since) + '</td><td class="dim">' + esc(s.idle || '') + '</td><td class="mono dim">' + (s.pid || '') + '</td>'
@@ -817,4 +821,21 @@ async function sshRdpLog(id){
       + '<pre class="site-code-pre" style="max-height:50vh">' + esc((d.log || []).join('\n') || '(nothing logged yet)') + '</pre>'
       + '<div class="foot"><button class="btn pri" onclick="sshModalClose()">Close</button></div>');
   } catch(e){ toast('Log: ' + e.message, 'error'); }
+}
+
+// Everything except this panel's own logins (the server decides, so a stale page cannot cut us off).
+async function sshDisconnectOthers(){
+  if (!sshSessView.hostId) return;
+  toast('Disconnecting…');
+  try {
+    const r = await siteApi('POST', 'api/ssh/hosts/' + sshSessView.hostId + '/sessions/disconnect-all');
+    if (r.none) toast('Nothing to disconnect — every login here is from this panel', 'info');
+    else {
+      const done = (r.results || []).filter(x => x.ok).length, failed = (r.results || []).filter(x => !x.ok);
+      toast('Disconnected ' + done + ' of ' + (r.targets || []).length + ' session' + ((r.targets||[]).length === 1 ? '' : 's')
+        + (r.kept ? ' · kept ' + r.kept + ' from this panel' : ''), failed.length ? 'warn' : 'success',
+        failed.length ? { detail: 'still alive: pid ' + failed.map(x => x.pid).join(', '), duration: 10000 } : {});
+    }
+  } catch(e){ toast('Disconnect failed: ' + e.message, 'error', { duration: 9000 }); }
+  sshSessRender(true);
 }

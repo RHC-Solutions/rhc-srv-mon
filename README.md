@@ -69,7 +69,10 @@ closes or either process exits; a failed connection keeps its log, so the viewer
 `freerdp3-x11` on the panel host — `GET /api/ssh/rdp` reports whether they are installed.
 
 **👥 Sessions** lists this panel's open terminals (closable) and, per host, who is logged in over SSH right now —
-from logind, falling back to `who`/`ss` — with a disconnect that only ever signals a pid from that live list.
+from logind, falling back to `who`/`ss` — with **Disconnect** per login and **Disconnect all other sessions**, which
+the server resolves itself so the panel's own logins (its probe and open terminals) are always spared. A disconnect
+terminates the whole logind session rather than only signalling sshd: killing the leader alone leaves the login
+listed when a child outlives it. Only a pid present in the current listing is ever signalled.
 
 ## Events tab
 
