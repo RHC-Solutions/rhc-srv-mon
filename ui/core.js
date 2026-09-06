@@ -77,6 +77,13 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document
 function sshField(label, inner, hint){ return '<div class="upd-field"><label>' + label + '</label>' + inner + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</div>'; }
 // Each tab has its own URL (…/rhc-srv-mon/ssh, …/postgres, …). Slugs are single path
 // segments so every relative URL in this page (api/…, login, ws/ssh) keeps resolving.
+// Compact status pills on the subtitle line (right side). items: [{ level: ok|warn|bad|info, text, sub }].
+// Green/amber states never use the big banner any more; call showBanner() only for real outages.
+function setStatus(items){
+  const el = document.getElementById('statuses'); if (!el) return;
+  el.innerHTML = (items || []).map(i => '<span class="st ' + esc(i.level || 'info') + '">' + (i.icon ? i.icon + ' ' : '') + esc(i.text) + (i.sub ? ' <span class="sub">' + esc(i.sub) + '</span>' : '') + '</span>').join('');
+}
+function showBanner(html){ const b = document.getElementById('banner'); if (html) { b.style.display = 'flex'; b.className = 'banner bad'; b.innerHTML = html; } else b.style.display = 'none'; }
 // One entry per tab: URL slug, view element, render (on tab switch) and onRefresh (every 10 s
 // while the tab is active — omitted for tabs that fetch their own data on their own schedule).
 const TABS = {

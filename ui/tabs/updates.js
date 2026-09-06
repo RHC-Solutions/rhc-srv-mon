@@ -7,16 +7,10 @@ function renderUpdates(){
   const d = lastUpdates;
   document.getElementById('host').textContent = 'updates';
   document.getElementById('updated').textContent = 'Last checked: ' + (d.lastChecked ? new Date(d.lastChecked).toLocaleString() : 'never') + ' · hourly auto-check';
-  const banner = document.getElementById('banner');
-  banner.style.display='flex';
+  showBanner(null);
   const avail = (d.components||[]).filter(c => c.updateAvailable).length;
-  if (avail === 0) {
-    banner.className='banner ok';
-    banner.innerHTML = '<span class="ico">✅</span> All components up to date <span style="margin-left:auto;font-size:13px;font-weight:400;color:#9fd9b6">' + d.components.length + ' components tracked</span>';
-  } else {
-    banner.className='banner bad';
-    banner.innerHTML = '<span class="ico">🔄</span> ' + avail + ' update' + (avail>1?'s':'') + ' available <span style="margin-left:auto;font-size:13px;font-weight:400">' + d.components.filter(c => !c.updateAvailable).length + '/' + d.components.length + ' up to date</span>';
-  }
+  if (avail === 0) setStatus([{ level:'ok', icon:'✅', text:'All components up to date', sub: d.components.length + ' tracked' }]);
+  else setStatus([{ level:'warn', icon:'🔄', text: avail + ' update' + (avail>1?'s':'') + ' available', sub: d.components.filter(c => !c.updateAvailable).length + '/' + d.components.length + ' up to date' }]);
 
   let html = '<div class="upd-grid">';
 

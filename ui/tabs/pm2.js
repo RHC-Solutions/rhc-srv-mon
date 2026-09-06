@@ -50,14 +50,12 @@ function render(){
   document.title = (d.summary.down ? '🔴 ' : '🟢 ') + d.summary.online + '/' + d.summary.total + ' · RHC SRV Manager · ' + d.hostname;
   document.getElementById('updated').textContent = 'Last updated: ' + new Date(d.generated_at).toLocaleString();
   if (state.tab !== 'pm2') return;
-  const banner = document.getElementById('banner');
-  banner.style.display='flex';
   if (d.summary.down === 0) {
-    banner.className='banner ok';
-    banner.innerHTML = '<span class="ico">✅</span> All Systems Operational <span style="margin-left:auto;font-size:13px;font-weight:400;color:#9fd9b6">'+d.summary.total+' services · '+fmtMem(d.summary.memory)+'</span>';
+    showBanner(null);
+    setStatus([{ level:'ok', icon:'✅', text:'All systems operational', sub: d.summary.total + ' services · ' + fmtMem(d.summary.memory) }]);
   } else {
-    banner.className='banner bad';
-    banner.innerHTML = '<span class="ico">🔴</span> ' + d.summary.down + ' service' + (d.summary.down>1?'s':'') + ' down <span style="margin-left:auto;font-size:13px;font-weight:400">'+d.summary.online+'/'+d.summary.total+' up</span>';
+    showBanner('<span class="ico">🔴</span> ' + d.summary.down + ' service' + (d.summary.down>1?'s':'') + ' down <span style="margin-left:auto;font-size:13px;font-weight:400">'+d.summary.online+'/'+d.summary.total+' up</span>');
+    setStatus([{ level:'bad', icon:'🔴', text: d.summary.down + ' down', sub: d.summary.online + '/' + d.summary.total + ' up' }]);
   }
   // chip labels with live counts
   document.querySelectorAll('.chip[data-f]').forEach(c => {

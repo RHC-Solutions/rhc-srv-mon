@@ -9,6 +9,12 @@ function renderBackup(){
   // don't clobber a field the user is mid-edit on during the 10s auto-refresh
   if (view.contains(document.activeElement) && ['INPUT','SELECT','TEXTAREA'].includes((document.activeElement.tagName||''))) return;
   const d = lastBackup, sc = d.scope||{}, sch = d.schedule||{}, lr = d.lastRun;
+  document.getElementById('host').textContent = 'backups';
+  document.getElementById('updated').textContent = 'Wasabi · ' + (sch.enabled ? 'daily at ' + String(sch.hour).padStart(2,'0') + ':' + String(sch.minute).padStart(2,'0') : 'schedule off') + ' · keep ' + (d.retentionDays||14) + ' days';
+  showBanner(null);
+  setStatus(d.running ? [{ level:'info', icon:'⏳', text:'Backup running' }]
+    : lr ? [{ level: lr.success ? 'ok' : 'bad', icon: lr.success ? '✅' : '🔴', text: lr.success ? 'Last backup ok' : 'Last backup failed', sub: new Date(lr.finishedAt).toLocaleString() + ' · ' + bkBytes(lr.bytes) }]
+    : [{ level:'info', text:'No backup yet' }]);
   let html = '';
 
   html += '<div class="upd-card" style="grid-column:1/-1">';
@@ -71,19 +77,36 @@ function renderBackup(){
   html += '<button class="btn update" id="bkSave" style="margin-left:auto">Save</button>';
   html += '</div></div>';
 
+  // per-site backups: one row per site, last ad-hoc run, "Back up now" (files only; DB dumps come with the Databases slice)
+  {
+    const sites = (d.available && d.available.sites) || [];
+    const lastFor = (dom) => (d.log || []).slice().reverse().find(e => e.site === dom);
+    html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><div class="site-card-hd"><h3 style="margin:0">Back up a single site</h3><span class="dim" style="font-size:12px">files under htdocs (node_modules, .next, cache… excluded) → Wasabi <code>' + esc((d.lastRun && d.lastRun.stamp ? '' : '') + 'web01-backups/&lt;stamp&gt;-&lt;domain&gt;') + '</code>, same retention</span></div>'
+      + '<table class="upd-table bk-sites"><tr><th>Site</th><th>Type</th><th>Last site backup</th><th></th></tr>';
+    for (const st of sites.slice().sort((a, b) => a.domain.localeCompare(b.domain))) {
+      const l = lastFor(st.domain);
+      html += '<tr><td><b>' + esc(st.domain) + '</b> <span class="dim">' + esc(st.user || '') + '</span></td><td>' + esc(st.type || '') + '</td><td>'
+        + (l ? new Date(l.finishedAt).toLocaleString() + ' · ' + bkBytes(l.bytes) + ' · ' + (l.success ? '<span class="upd-badge ok">ok</span>' : '<span class="upd-badge err" title="' + esc((l.errors||[]).join('; ')) + '">failed</span>') : '<span class="dim">never</span>') + '</td>'
+        + '<td style="text-align:right"><button class="btn small bk-site-run" data-domain="' + esc(st.domain) + '"' + (d.running ? ' disabled' : '') + '>' + (d.running ? '⏳' : '▶ Back up now') + '</button></td></tr>';
+    }
+    if (!sites.length) html += '<tr><td colspan="4" class="dim">No sites</td></tr>';
+    html += '</table></div>';
+  }
+
   if (window._bkRemote){
     html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><h3 style="margin:0 0 8px">In Wasabi ('+window._bkRemote.length+')</h3>';
     html += '<div style="font-size:12.5px;color:#cbd5e1;max-height:220px;overflow:auto">'+(window._bkRemote.length?window._bkRemote.map(n=>'<div>📁 '+esc(n)+'</div>').join(''):'<span style="color:#6b7280">none yet</span>')+'</div></div>';
   }
   if (d.log && d.log.length){
-    html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><h3 style="margin:0 0 8px">Recent runs</h3><table class="upd-table"><tr><th>When</th><th>Trigger</th><th>Items</th><th>Size</th><th>Duration</th><th>Status</th></tr>';
+    html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><h3 style="margin:0 0 8px">Recent runs</h3><table class="upd-table"><tr><th>When</th><th>Trigger</th><th>Scope</th><th>Items</th><th>Size</th><th>Duration</th><th>Status</th></tr>';
     for (const e of d.log.slice().reverse().slice(0,20)){
-      html += '<tr><td>'+new Date(e.finishedAt||e.startedAt).toLocaleString()+'</td><td>'+esc(e.trigger)+'</td><td>'+e.itemCount+'</td><td>'+bkBytes(e.bytes)+'</td><td>'+Math.round((e.duration_ms||0)/1000)+'s</td><td>'+(e.success?'<span class="upd-badge ok">✓</span>':'<span class="upd-badge na" title="'+esc((e.errors||[]).join('; '))+'">⚠</span>')+'</td></tr>';
+      html += '<tr><td>'+new Date(e.finishedAt||e.startedAt).toLocaleString()+'</td><td>'+esc(e.trigger)+'</td><td>'+(e.site ? '<span class="mono">'+esc(e.site)+'</span>' : 'full')+'</td><td>'+e.itemCount+'</td><td>'+bkBytes(e.bytes)+'</td><td>'+Math.round((e.duration_ms||0)/1000)+'s</td><td>'+(e.success?'<span class="upd-badge ok">✓</span>':'<span class="upd-badge na" title="'+esc((e.errors||[]).join('; '))+'">⚠</span>')+'</td></tr>';
     }
     html += '</table></div>';
   }
 
   view.innerHTML = html;
+  document.querySelectorAll('.bk-site-run').forEach(b => b.addEventListener('click', () => armConfirm(b, '⚠ Click again to back up', () => runSiteBackupNow(b.dataset.domain))));
   const run = document.getElementById('bkRun');
   if (run) run.addEventListener('click', () => armConfirm(run, '⚠ Click again to start', runBackupNow));
   const save = document.getElementById('bkSave');
@@ -128,3 +151,11 @@ async function loadRemoteList(){
   try { const r = await fetch('api/backup/remote'); window._bkRemote = await r.json(); renderBackup(); } catch(e){ toast('Error: '+e,'error'); }
 }
 
+
+async function runSiteBackupNow(domain){
+  try {
+    const r = await fetch('api/backup/site/' + encodeURIComponent(domain), { method:'POST' });
+    const j = await r.json(); if (!r.ok) return toast(j.error || 'Failed', 'error');
+    toast('Site backup started: ' + domain, 'success'); setTimeout(refresh, 1500);
+  } catch(e){ toast('Error: ' + e, 'error'); }
+}

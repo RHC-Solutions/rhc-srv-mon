@@ -26,23 +26,17 @@ function renderModules(){
   }
   document.getElementById('updated').textContent = stamp;
 
-  const banner = document.getElementById('banner');
-  banner.style.display='flex';
+  showBanner(null);
   const s = d.summary || {};
   const totalOutdated = s.outdatedTotal || 0;
-  if (!d.generated_at) {
-    banner.className='banner ok';
-    banner.innerHTML = '<span class="ico">⏳</span> First module scan running in the background — versions hit the npm registry, this can take a few minutes.';
-  } else if (totalOutdated === 0) {
-    banner.className='banner ok';
-    banner.innerHTML = '<span class="ico">✅</span> All modules up to date <span style="margin-left:auto;font-size:13px;font-weight:400;color:#9fd9b6">'+(s.projects||0)+' projects scanned</span>';
-  } else {
-    banner.className='banner bad';
+  if (!d.generated_at) setStatus([{ level:'info', icon:'⏳', text:'First module scan running', sub:'versions come from the npm registry — a few minutes' }]);
+  else if (totalOutdated === 0) setStatus([{ level:'ok', icon:'✅', text:'All modules up to date', sub:(s.projects||0)+' projects scanned' }]);
+  else {
     const parts = [];
     if (s.major) parts.push(s.major + ' major');
     if (s.minor) parts.push(s.minor + ' minor');
     if (s.patch) parts.push(s.patch + ' patch');
-    banner.innerHTML = '<span class="ico">📦</span> ' + totalOutdated + ' outdated dependencies <span style="margin-left:auto;font-size:13px;font-weight:400">'+parts.join(' · ')+'</span>';
+    setStatus([{ level:'warn', icon:'📦', text: totalOutdated + ' outdated dependencies', sub: parts.join(' · ') }]);
   }
 
   // Summary stats grid (Observe)

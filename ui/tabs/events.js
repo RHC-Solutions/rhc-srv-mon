@@ -35,7 +35,7 @@ function evFmtTs(ts){ const d = new Date(ts); const now = Date.now(); const diff
 function renderEvents(){
   const view = document.getElementById('eventsview');
   document.getElementById('host').textContent = 'events';
-  const banner = document.getElementById('banner'); banner.style.display = 'none';
+  showBanner(null); setStatus([]);
   if (!evSummary && !evItems.length && !evLoading) { view.innerHTML = '<div class="upd-card">Loading…</div>'; refreshEvents(); return; }
   if (view.contains(document.activeElement) && ['INPUT','SELECT'].includes(document.activeElement.tagName)) return;   // don't clobber typing
   const s = evSummary || { last24h:{ info:0, warn:0, error:0, total:0 }, retentionDays: 90 };

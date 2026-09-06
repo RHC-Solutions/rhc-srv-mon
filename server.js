@@ -19,6 +19,7 @@ const db = require('./lib/db');
 const events = require('./lib/events');
 require('./lib/api/events');
 require('./lib/api/sites');
+require('./lib/api/backups');
 const clpImport = require('./lib/clp-import');
 const cloudpanel = require('./lib/cloudpanel');
 const page = require('./lib/page');

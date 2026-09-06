@@ -53,10 +53,9 @@ function renderSitesList(){
   document.getElementById('host').textContent = 'sites';
   document.getElementById('updated').textContent = 'Last checked: ' + (d.generated_at ? new Date(d.generated_at).toLocaleString() : 'never') + ' · auto-refresh 5 min';
   // no banner when everything is fine — problems show as a red banner, counts live in the toolbar pills
-  const banner = document.getElementById('banner');
   const down = d.sites.filter(s => s.status === 'down').length, degraded = d.sites.filter(s => s.status === 'degraded').length, total = d.sites.length, online = d.sites.filter(s => s.status === 'online').length;
-  if (down === 0 && degraded === 0) banner.style.display = 'none';
-  else { banner.style.display='flex'; banner.className='banner bad'; const parts = []; if (down) parts.push(down + ' down'); if (degraded) parts.push(degraded + ' degraded'); banner.innerHTML = '<span class="ico">🔴</span> ' + parts.join(', ') + ' <span style="margin-left:auto;font-size:13px;font-weight:400">'+(total-down-degraded)+'/'+total+' ok</span>'; }
+  if (down === 0 && degraded === 0) { showBanner(null); setStatus([{ level:'ok', icon:'✅', text:'All sites operational', sub: total + ' sites' }]); }
+  else { const parts = []; if (down) parts.push(down + ' down'); if (degraded) parts.push(degraded + ' degraded'); showBanner('<span class="ico">🔴</span> ' + parts.join(', ') + ' <span style="margin-left:auto;font-size:13px;font-weight:400">'+(total-down-degraded)+'/'+total+' ok</span>'); setStatus([{ level: down ? 'bad' : 'warn', icon: down ? '🔴' : '🟠', text: parts.join(', '), sub: (total-down-degraded)+'/'+total+' ok' }]); }
   const pill = (st, n) => n ? '<button class="chip' + (siteStatusFilter === st ? ' active' : '') + '" onclick="siteStatusFilter = siteStatusFilter === \'' + st + '\' ? \'\' : \'' + st + '\'; renderSitesList()" title="Show only ' + st + ' sites"><span class="dot ' + st + '"></span>' + n + ' ' + st + '</button>' : '';
 
   let html = '<div class="site-toolbar"><input id="siteQ" type="search" placeholder="Filter sites…" autocomplete="off" value="' + esc(siteQ) + '" oninput="siteQ=this.value; state.siteQ=siteQ; saveState(); renderSitesList()">'
@@ -149,7 +148,7 @@ function siteHeader(s){
 function renderSiteDetail(){
   const view = document.getElementById('sitesview');
   document.getElementById('host').textContent = siteView.domain;
-  document.getElementById('banner').style.display = 'none';
+  showBanner(null); setStatus([]);
   document.getElementById('updated').textContent = '';
   if (!siteView.data) {
     if (siteView.error) { view.innerHTML = '<div class="site-head"><a class="site-back" href="sites" onclick="event.preventDefault(); siteGo(null)">← Sites</a></div><div class="upd-card">⚠ ' + esc(siteView.error) + '</div>'; return; }

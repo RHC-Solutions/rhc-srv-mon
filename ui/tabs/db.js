@@ -22,17 +22,12 @@ function dbRow(db){
 function renderDb(){
   if (!lastDb) return;
   const d = lastDb;
-  const banner = document.getElementById('banner');
-  banner.style.display='flex';
   if (d.error) {
-    banner.className='banner bad';
-    banner.innerHTML = '<span class="ico">🔴</span> PostgreSQL unreachable <span style="margin-left:auto;font-size:13px;font-weight:400">'+esc(d.error)+'</span>';
+    showBanner('<span class="ico">🔴</span> PostgreSQL unreachable <span style="margin-left:auto;font-size:13px;font-weight:400">'+esc(d.error)+'</span>');
+    setStatus([{ level:'bad', icon:'🔴', text:'PostgreSQL unreachable' }]);
   } else {
-    banner.className='banner ok';
-    banner.innerHTML = '<span class="ico">✅</span> PostgreSQL '+esc(d.version||'')+' Online '
-      + '<span style="margin-left:auto;font-size:13px;font-weight:400;color:#9fd9b6">'
-      + d.summary.databases+' databases · '+fmtMem(d.summary.total_size)+' · '
-      + d.total_conns+'/'+d.max_connections+' conns</span>';
+    showBanner(null);
+    setStatus([{ level:'ok', icon:'✅', text:'PostgreSQL ' + String(d.version||'').split(' ')[0] + ' online', sub: d.summary.databases+' databases · '+fmtMem(d.summary.total_size)+' · '+d.total_conns+'/'+d.max_connections+' conns' }]);
   }
   let html = '<div class="group"><h2>🐘 PostgreSQL <span class="dim">/var/run/postgresql/.s.PGSQL.5432</span></h2>';
   if (d.error) {
