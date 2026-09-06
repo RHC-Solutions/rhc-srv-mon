@@ -116,8 +116,8 @@ async function testChannel(which){
   try {
     const r = await stApi('POST', 'api/settings/' + which + '/test', body);
     toast(which === 'cloudflare'
-      ? 'Token ' + r.status + (r.saved ? '' : ' (not saved yet — press Save to keep it)') + ' · ' + r.zones + ' zone' + (r.zones === 1 ? '' : 's') + (r.zoneNames && r.zoneNames.length ? ': ' + r.zoneNames.join(', ') : '')
-      : 'Test message sent — check ' + which, 'success', { duration: 9000 });
+      ? 'Token ' + r.status + (r.kind === 'account' ? ' (account-owned)' : '') + (r.saved ? '' : ' (not saved yet — press Save to keep it)') + ' · ' + r.zones + ' zone' + (r.zones === 1 ? '' : 's') + (r.zoneNames && r.zoneNames.length ? ': ' + r.zoneNames.join(', ') : '')
+      : 'Test message sent — check ' + which, 'success', Object.assign({ duration: 9000 }, which === 'cloudflare' && r.note ? { detail: r.note } : {}));
   } catch(e){ stErr(e, which); }
 }
 

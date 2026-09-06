@@ -56,7 +56,13 @@ with the next slices. `scripts/ui-smoke.js` drives every tab and sub-tab against
 General (panel domain, IP, timezone, event retention, ACME e-mail), **Telegram** and **Slack** notifications (every alert —
 update results, backups, cleanup, login attempts, "updates available" — fans out through `lib/notify.js` `send(text, kind)` to
 each enabled channel; the Telegram block was migrated out of `updates.json` into the kv table), **Cloudflare** API token
-(verified on save, stored encrypted; the Domains card shows every site's DNS record / proxy state per zone; DNS management and
+(verified on save, stored encrypted; a rejected token is diagnosed rather than parroted —
+Cloudflare answers the *same* dead-token question differently per endpoint, so `verify()` re-asks `/zones` and
+`/accounts`, prints what each said, and explains the code: 1000 also means "account-owned `cfat_` token sent to the
+user-token endpoint", and 9109 means either "unknown token" or "this token is IP-restricted and this server is not on
+the list", told apart by the message. An account-owned token that `/user/tokens/verify` refuses is accepted when a
+zone listing works. Probing stops at the first success or a 10502 rate-limit so a bad token is not retried into a
+temporary auth block; the Domains card shows every site's DNS record / proxy state per zone; DNS management and
 origin certificates are next), and the **Cleanup** card that used to sit on the Modules tab.
 
 ## Remote desktops (VNC) and SSH sessions
