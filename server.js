@@ -1879,6 +1879,8 @@ function safeCleanupPath(p) {
   if (typeof p !== 'string' || !path.isAbsolute(p) || p.split('/').includes('..')) return false;
   if (!/^\/home\/[^/]+\/.+/.test(p) && !/^\/root\/.+/.test(p)) return false;
   const base = path.basename(p);
+  // <project>/node_modules/.cache (projectCaches target) — only when it really sits inside node_modules
+  if (base === '.cache') return path.basename(path.dirname(p)) === 'node_modules';
   return ['_cacache', '_logs', 'pnpm', 'cache', 'pip'].includes(base) || CLEANUP_LEFTOVER_RE.test(base);
 }
 
