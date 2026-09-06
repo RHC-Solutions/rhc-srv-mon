@@ -89,6 +89,7 @@ const call = (label, fn) => { try { const r = fn(); log('  ok  ' + label); retur
   for (const tab of ['pm2', 'db', 'updates', 'sites', 'modules', 'backup', 'events']) {
     call('setTab(' + tab + ')', () => sandbox.setTab(tab)); await sleep(800);
     const v = byId.get(G('TABS')[tab].view); log('       ' + tab + ' view: ' + (v._html || '').length + ' chars');
+    if (tab === 'sites') { call('siteSetView(table)', () => sandbox.siteSetView('table')); log('       sites table: ' + byId.get('sitesview')._html.length + ' chars'); call('siteSetSort(domain)', () => sandbox.siteSetSort('domain')); call('siteSetView(cards)', () => sandbox.siteSetView('cards')); }
   }
   // Sites detail
   const sites = (G('lastSites') || {}).sites || [];

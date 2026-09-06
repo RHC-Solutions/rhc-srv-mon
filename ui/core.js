@@ -104,7 +104,6 @@ function setTab(tab, opts){
   }
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===tab));
   for (const [k, t] of Object.entries(TABS)) { const el = document.getElementById(t.view); if (el) el.style.display = k===tab ? '' : 'none'; }
-  document.body.classList.toggle('tab-ssh', tab==='ssh');
   TABS[tab].render();
 }
 

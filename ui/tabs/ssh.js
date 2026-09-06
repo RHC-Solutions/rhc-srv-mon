@@ -21,6 +21,9 @@ function sshLoadLib(){
 
 async function renderSsh(){
   try { sshData = await fetch('api/ssh').then(r => r.json()); } catch(e){ return; }
+  document.getElementById('host').textContent = 'ssh';
+  document.getElementById('banner').style.display = 'none';
+  document.getElementById('updated').textContent = sshData.hosts.length + ' host' + (sshData.hosts.length===1?'':'s') + ' · ' + (sshData.sessions||[]).length + ' running session' + ((sshData.sessions||[]).length===1?'':'s') + ' · sessions survive refresh and restarts, close them with ×';
   sshRenderHosts();
   sshRenderInstalls();
   sshAdoptServerSessions();
