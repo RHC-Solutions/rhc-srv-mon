@@ -2685,6 +2685,15 @@ const PAGE = `<!doctype html>
   .ssh-modal .box { background:#12141d; border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:12.5px; color:#9ca3af; line-height:1.6; }
   .ssh-modal .box b { color:#e9e9e9; }
   @media (max-width:820px){ .ssh-layout { flex-direction:column; height:auto; } .ssh-side { flex:0 0 auto; max-height:240px; } .ssh-main { height:60vh; } }
+  /* SSH tab: the terminal area fills the browser window exactly — nothing on the page scrolls, only xterm's own buffer */
+  html:has(body.tab-ssh), body.tab-ssh { height:100%; overflow:hidden; }
+  body.tab-ssh .wrap { max-width:none; height:100vh; height:100dvh; box-sizing:border-box; display:flex; flex-direction:column; padding:12px 16px 8px; }
+  body.tab-ssh .hdr-row, body.tab-ssh #updated, body.tab-ssh .tabs, body.tab-ssh footer { flex-shrink:0; }
+  body.tab-ssh .tabs { margin-bottom:10px; }
+  body.tab-ssh #sshview { display:flex !important; flex-direction:column; flex:1; min-height:0; }
+  body.tab-ssh .ssh-layout { flex:1; height:auto; min-height:0; }
+  body.tab-ssh footer { margin-top:6px; }
+  @media (max-width:820px){ html:has(body.tab-ssh), body.tab-ssh { height:auto; overflow:auto; } body.tab-ssh .wrap { height:auto; display:block; } body.tab-ssh .ssh-layout { height:auto; } }
   body.tab-ssh .wrap { max-width:1640px; }
   .hdr-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
   .userbar { display:flex; gap:6px; align-items:center; font-size:12.5px; color:#9ca3af; margin-top:8px; }
