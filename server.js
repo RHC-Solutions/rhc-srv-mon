@@ -3179,6 +3179,7 @@ function renderUpdates(){
   html += '<div class="upd-chk-grid">'
     + '<label><input type="checkbox" id="telNotifyUpd" ' + (tel.notifyOnUpdate!==false?'checked':'') + ' onchange="saveUpdatesConfig()"> Notify when updates available</label>'
     + '<label><input type="checkbox" id="telNotifyDone" ' + (tel.notifyOnComplete!==false?'checked':'') + ' onchange="saveUpdatesConfig()"> Notify on update completion</label>'
+    + '<label><input type="checkbox" id="telNotifyAuth" ' + (tel.notifyOnAuth!==false?'checked':'') + ' onchange="saveUpdatesConfig()"> Notify on web login attempts (failed / successful / lockout)</label>'
     + '</div>';
   html += '<button class="upd-test-btn" onclick="testTelegram()">📨 Test Telegram</button>';
   html += '</div>';
@@ -3979,6 +3980,7 @@ function saveUpdatesConfig(){
     chatId: document.getElementById('telChatId').value,
     notifyOnUpdate: document.getElementById('telNotifyUpd').checked,
     notifyOnComplete: document.getElementById('telNotifyDone').checked,
+    notifyOnAuth: document.getElementById('telNotifyAuth').checked,
   };
   fetch('api/updates/config', {
     method: 'POST',
@@ -4296,8 +4298,22 @@ function sshWsConnect(s, query){
     // Abnormal close (1006: Cloudflare/proxy cut, laptop sleep, wifi change) and we know our
     // server-side session id -> the pty is still alive on the server; re-attach to it.
     if (!ev.wasClean && s.sid) return sshLostTransport(s, ev.code);
+    if (!s.sid && ev.code === 1006) return sshDiagnoseHandshake(s, query, ev.code);
     sshSessionEnded(s, null, ev.code === 1006 ? 'connection lost (WebSocket ' + ev.code + ')' : null);
   };
+}
+// The WebSocket never opened (no 'hello'): ask the same URL over plain HTTP so the server can
+// tell us why (proxy not forwarding the upgrade, unknown host, session expired, …).
+async function sshDiagnoseHandshake(s, query, code){
+  let why = 'connection failed (WebSocket ' + code + ')';
+  try {
+    const r = await fetch(new URL('ws/ssh', location.href).pathname + '?' + query, { cache: 'no-store', headers: { 'X-Diag': '1' } });
+    if (r.status === 401) { location.reload(); return; }
+    const j = await r.json().catch(() => null);
+    if (j && j.error && r.status !== 200) why += ' — ' + j.error;
+    else if (r.status === 200) why += ' — the server is reachable but the WebSocket upgrade did not get through (proxy / Cloudflare in between?)';
+  } catch(e){ why += ' — server unreachable (' + e.message + ')'; }
+  sshSessionEnded(s, null, why);
 }
 function sshLostTransport(s, code){
   s.status = 'reconnecting'; s.retry = (s.retry || 0) + 1; sshRenderTabs(); sshRenderHosts();
@@ -5287,6 +5303,29 @@ function saveAuth() {
 }
 function authLog(ev, req, extra) {
   authCache.log.push(Object.assign({ t: new Date().toISOString(), ev, ip: clientIp(req), ua: String(req.headers['user-agent'] || '').slice(0, 120) }, extra || {}));
+  authAlert(ev, req, extra || {});
+}
+// Telegram alert for web login activity (like the fail2ban sshd alerts). Enabled via the Telegram
+// settings (Updates tab, "Notify on web login attempts", default on). Bursts from one IP are
+// collapsed: at most one message per IP+event per minute, with a suppressed-count on the next one.
+const AUTH_ALERT_EVENTS = { login_fail: '🔐❌ Web login failed', totp_fail: '🔐❌ Web login: wrong authenticator code', login: '🔐✅ Web login', lockout: '🔐🚫 Web login lockout', setup: '🔐🆕 First admin account created', password_change: '🔐 Password changed', mfa_reset: '🔐 Authenticator reset' };
+const authAlertLast = new Map();   // ip|ev -> { t, n }
+function authAlert(ev, req, extra) {
+  const title = AUTH_ALERT_EVENTS[ev]; if (!title) return;
+  const tel = updatesCache ? updatesCache.telegram : null;
+  if (!tel || !tel.enabled || tel.notifyOnAuth === false) return;
+  const ip = clientIp(req), key = ip + '|' + ev, now = Date.now(), last = authAlertLast.get(key);
+  if (last && now - last.t < 60_000) { last.n++; return; }
+  const suppressed = last ? last.n : 0;
+  authAlertLast.set(key, { t: now, n: 0 });
+  if (authAlertLast.size > 500) for (const [k, v] of authAlertLast) if (now - v.t > 3600_000) authAlertLast.delete(k);
+  const md = (s) => String(s || '').replace(/([_*`\[])/g, '\\$1');
+  const lines = ['*' + title + ' on ' + md(os.hostname()) + '*',
+    'user: `' + md(extra.user || '?') + '`', 'ip: `' + md(ip) + '`' + (req.headers['cf-ipcountry'] ? ' (' + md(req.headers['cf-ipcountry']) + ')' : ''),
+    'ua: ' + md(String(req.headers['user-agent'] || '-').slice(0, 90))];
+  if (ev === 'lockout') lines.push('locked for ' + Math.round(AUTH_LOCK_MS / 60000) + ' min after ' + AUTH_MAX_FAILS + ' failures');
+  if (suppressed) lines.push('_(+' + suppressed + ' similar in the last minute)_');
+  sendTelegram(lines.join('\n'));
 }
 function clientIp(req) {
   return String(req.headers['x-real-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0] || (req.socket && req.socket.remoteAddress) || '').trim();
@@ -5386,7 +5425,7 @@ function authTouch(s) { const now = Date.now(); if (now - (s.seen || 0) > 3600_0
 function authLocked(req) { const f = authFails.get(clientIp(req)); return !!(f && f.until && f.until > Date.now()); }
 function authFail(req) {
   const ip = clientIp(req); const f = authFails.get(ip) || { n: 0, until: 0 };
-  f.n += 1; if (f.n >= AUTH_MAX_FAILS) { f.until = Date.now() + AUTH_LOCK_MS; f.n = 0; }
+  f.n += 1; if (f.n >= AUTH_MAX_FAILS) { f.until = Date.now() + AUTH_LOCK_MS; f.n = 0; authLog('lockout', req); }
   authFails.set(ip, f);
 }
 function authOk(req) { authFails.delete(clientIp(req)); }
@@ -5410,6 +5449,18 @@ function authGate(req, res, url) {
   res.writeHead(302, { Location: 'login' + (TAB_ROUTES.has(slug) ? '?next=' + slug : ''), 'Cache-Control': 'no-store' });
   res.end();
   return false;
+}
+// A /ws/ URL arriving here (instead of the 'upgrade' event) means the reverse proxy did not forward
+// the handshake as an upgrade — typically nginx sending "Connection: websocket" ($http_upgrade)
+// instead of "Connection: Upgrade". The browser only sees close code 1006, so say it out loud.
+let wsMisconfigWarnedAt = 0;
+function wsNotUpgraded(req, res, url) {
+  const up = String(req.headers.upgrade || '').toLowerCase(), conn = String(req.headers.connection || '');
+  const why = up === 'websocket'
+    ? 'the reverse proxy forwarded "Connection: ' + conn + '" instead of "Connection: Upgrade" — fix its WebSocket config (nginx: proxy_set_header Connection "Upgrade" when $http_upgrade is set)'
+    : (req.headers['x-diag'] ? 'WebSocket endpoint reachable' : 'no WebSocket upgrade in the request' + (req.headers['x-forwarded-for'] || req.headers['x-real-ip'] ? ' — the reverse proxy is not forwarding Upgrade/Connection headers' : ''));
+  if (up === 'websocket' && Date.now() - wsMisconfigWarnedAt > 60_000) { wsMisconfigWarnedAt = Date.now(); console.error('ws ' + url + ': ' + why); }
+  authJson(res, req.headers['x-diag'] && up !== 'websocket' ? 200 : 426, { error: why, upgrade: up || null, connection: conn || null });
 }
 function authJson(res, code, obj) { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); }
 
@@ -5631,6 +5682,7 @@ const server = http.createServer((req, res) => {
   const url = (req.url || '/').split('?')[0];
   if (!authGate(req, res, url)) return;
   if (url === '/login' || url.startsWith('/api/auth/')) { if (handleAuthRoute(req, res, url)) return; }
+  if (url.startsWith('/ws/')) return wsNotUpgraded(req, res, url);   // upgrade was not forwarded by the proxy
   if (url === '/' || url === '/index.html' || TAB_ROUTES.has(url.slice(1).toLowerCase())) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end(PAGE);
