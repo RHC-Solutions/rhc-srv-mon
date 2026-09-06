@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RHC SRV Manager</title>
+<style>
+{{css}}</style></head>
+<body>
+<div class="wrap">
+  <div class="hdr-row"><h1>📊 RHC SRV Manager <span id="host" class="sub" style="margin:0"></span></h1><div class="userbar" id="userbar"></div></div>
+  <div class="sub" id="updated">loading…</div>
+  <div class="tabs">
+    <a class="tab active" href="pm2" data-tab="pm2">⚙️ PM2 Services</a>
+    <a class="tab" href="postgres" data-tab="db">🐘 PostgreSQL</a>
+    <a class="tab" href="updates" data-tab="updates">🔄 Updates</a>
+    <a class="tab" href="sites" data-tab="sites">🌐 Sites</a>
+    <a class="tab" href="modules" data-tab="modules">📦 Modules</a>
+    <a class="tab" href="backups" data-tab="backup">💾 Backups</a>
+    <a class="tab" href="ssh" data-tab="ssh">🖥️ SSH</a>
+  </div>
+  <div id="banner" class="banner ok" style="display:none"></div>
+  <div id="pm2view">
+  <div class="toolbar">
+    <input id="q" type="search" placeholder="Filter services or users…" autocomplete="off">
+    <button class="chip" data-f="all">All</button>
+    <button class="chip" data-f="up">Up</button>
+    <button class="chip down-chip" data-f="down">Down</button>
+    <button class="chip toggle" id="sharedToggle" title="Show only apps that run on multiple users">🔗 Shared</button>
+    <select id="sort" title="Sort">
+      <option value="group">Group by user</option>
+      <option value="name">Name A→Z</option>
+      <option value="cpu">CPU high→low</option>
+      <option value="mem">Memory high→low</option>
+      <option value="restarts">Restarts high→low</option>
+      <option value="uptime">Uptime % worst first</option>
+    </select>
+  </div>
+  <div id="main"></div>
+  </div>
+  <div id="dbview" style="display:none"></div>
+  <div id="updatesview" style="display:none"></div>
+  <div id="sitesview" style="display:none"></div>
+  <div id="modulesview" style="display:none"></div>
+  <div id="backupview" style="display:none"></div>
+  <div id="sshview" style="display:none">
+    <div class="ssh-layout">
+      <aside class="ssh-side">
+        <div class="ssh-side-hd"><span onclick="sshSideToggle()">🖥️ Hosts <span class="ssh-side-toggle">▾</span></span><span style="display:flex;gap:6px"><button class="upd-test-btn" id="ssh-inst-btn" style="padding:4px 10px" onclick="sshInstallsDialog()" title="rhc-srv-mon install history / running installs">📦</button><button class="upd-test-btn" style="padding:4px 10px" onclick="sshEditHost()">＋ Add host</button></span></div>
+        <input class="q" id="ssh-q" type="search" placeholder="Filter hosts…" autocomplete="off" oninput="sshRenderHosts()">
+        <div class="ssh-hostlist" id="ssh-hostlist"><div class="ssh-grp">loading…</div></div>
+        <div class="ssh-side-ft" id="ssh-side-ft"></div>
+      </aside>
+      <section class="ssh-main">
+        <div class="ssh-tabbar" id="ssh-tabbar"></div>
+        <div class="ssh-terms" id="ssh-terms">
+          <div class="ssh-empty" id="ssh-empty"><b>No open sessions</b><span>Click a host on the left to open a terminal tab. Each click opens a new tab — like mRemoteNG.</span><span><kbd>＋</kbd> in the tab bar connects ad hoc to any user@host · <kbd>⚙</kbd> font, colors, keys · <kbd>▭▭</kbd> / <kbd>⊞</kbd> show 2–4 terminals side by side.</span><span>Sessions keep running on the server across refreshes and closed browsers — only the tab's × ends them.</span></div>
+        </div>
+      </section>
+    </div>
+  </div>
+  <footer>auto-refresh 10s · heartbeat = <span id="ivl">60</span>s samples · 🟩 up · 🟥 down · 🟧 restarted</footer>
+</div>
+<div id="toast-host"></div>
+<script>
+{{js}}</script>
+</body></html>

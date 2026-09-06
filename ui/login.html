@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in · RHC SRV Manager</title>
+<style>
+  :root { color-scheme: dark; } * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background:#161823; color:#e9e9e9; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; padding:20px; }
+  .card { width:100%; max-width:400px; background:#1e2230; border-radius:16px; padding:28px 28px 24px; box-shadow:0 10px 40px rgba(0,0,0,.45); border:1px solid #2a2f40; }
+  h1 { font-size:20px; margin:0 0 4px; } .sub { color:#6b7280; font-size:13px; margin-bottom:20px; }
+  label { display:block; font-size:11.5px; font-weight:700; color:#9ca3af; text-transform:uppercase; letter-spacing:.5px; margin:14px 0 6px; }
+  input { width:100%; background:#12141d; border:1px solid #2a2f40; color:#e9e9e9; border-radius:9px; padding:11px 13px; font-size:15px; outline:none; }
+  input:focus { border-color:#5cdd8b88; } input.code { font-size:24px; letter-spacing:8px; text-align:center; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  button { width:100%; margin-top:20px; background:#5cdd8b; color:#0b2818; border:none; border-radius:9px; padding:12px; font-size:15px; font-weight:700; cursor:pointer; }
+  button:hover { background:#6fee9c; } button:disabled { opacity:.5; cursor:not-allowed; } button.sec { background:#2a2f40; color:#e9e9e9; margin-top:10px; }
+  .err { margin-top:14px; background:#5a1f25; color:#ff8088; border-radius:9px; padding:10px 12px; font-size:13px; display:none; }
+  .ok { margin-top:14px; background:#1f4e34; color:#5cdd8b; border-radius:9px; padding:10px 12px; font-size:13px; }
+  .hint { font-size:12px; color:#6b7280; margin-top:8px; line-height:1.5; }
+  .qr { display:flex; justify-content:center; margin:14px 0 6px; } .qr canvas, .qr img { border-radius:10px; background:#fff; padding:10px; }
+  .secret { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px; letter-spacing:1px; background:#12141d; border-radius:8px; padding:8px 10px; word-break:break-all; text-align:center; color:#cbd5e1; }
+  .step { display:none; } .step.on { display:block; }
+  footer { text-align:center; color:#4b5563; font-size:11px; margin-top:18px; }
+</style></head><body>
+<div class="card">
+  <h1>📊 RHC SRV Manager</h1>
+  <div class="sub" id="sub">Sign in</div>
+
+  <form class="step" id="s-login" autocomplete="on">
+    <label>Username</label><input id="l-user" autocomplete="username" required autofocus>
+    <label>Password</label><input id="l-pass" type="password" autocomplete="current-password" required>
+    <button type="submit" id="l-btn">Continue</button>
+  </form>
+
+  <form class="step" id="s-totp">
+    <label>Authenticator code</label><input id="t-code" class="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="••••••">
+    <div class="hint">Open your authenticator app (Google Authenticator, 1Password, Authy…) and enter the 6-digit code for <b>rhc-srv-mon</b>.</div>
+    <button type="submit" id="t-btn">Sign in</button>
+    <button type="button" class="sec" onclick="show('s-login')">← Back</button>
+  </form>
+
+  <form class="step" id="s-setup1">
+    <div class="ok">First run — create the administrator account. Two-factor authentication is mandatory; you will scan a QR code in the next step.</div>
+    <label>Username</label><input id="u-user" autocomplete="username" value="roman" required>
+    <label>Password</label><input id="u-pass" type="password" autocomplete="new-password" required minlength="10">
+    <label>Repeat password</label><input id="u-pass2" type="password" autocomplete="new-password" required minlength="10">
+    <div class="hint">At least 10 characters. Stored as scrypt hash in auth.json (mode 600) on the server.</div>
+    <button type="submit">Create account →</button>
+  </form>
+
+  <form class="step" id="s-setup2">
+    <div class="hint" style="margin-top:0">Scan this QR code with your authenticator app, or type the secret manually, then enter the code it shows.</div>
+    <div class="qr" id="qr"></div>
+    <div class="secret" id="secret"></div>
+    <label>Code from the app</label><input id="u-code" class="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="••••••">
+    <button type="submit">Verify &amp; finish</button>
+  </form>
+
+  <div class="err" id="err"></div>
+  <footer>rhc-srv-mon · sessions last 30 days · <span id="lock"></span></footer>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<script>
+const $ = (i) => document.getElementById(i);
+let pending = null, setupToken = null;
+function show(id){ document.querySelectorAll('.step').forEach(s => s.classList.toggle('on', s.id === id)); $('err').style.display='none';
+  const f = document.querySelector('#' + id + ' input:not([value]), #' + id + ' input'); if (f) setTimeout(() => f.focus(), 30);
+  $('sub').textContent = id === 's-login' ? 'Sign in' : id === 's-totp' ? 'Two-factor authentication' : id === 's-setup1' ? 'Initial setup (1/2)' : 'Set up authenticator (2/2)'; }
+function err(m){ $('err').textContent = m; $('err').style.display = ''; }
+// after sign-in go back to the tab that was requested (login?next=ssh), else the root
+const NEXT = (function(){ const n = new URLSearchParams(location.search).get('next') || ''; return /^[a-z0-9-]{1,20}$/.test(n) ? './' + n : './'; })();
+async function post(url, body){ const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{}) }); let d = {}; try { d = await r.json(); } catch(e){} if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }
+function busy(b, on){ b.disabled = on; }
+fetch('api/auth/state').then(r => r.json()).then(s => { if (s.setupRequired) show('s-setup1'); else show('s-login'); if (s.locked) $('lock').textContent = 'too many attempts — locked'; }).catch(() => show('s-login'));
+
+$('s-login').addEventListener('submit', async (e) => { e.preventDefault(); const b = $('l-btn'); busy(b, true);
+  try { const d = await post('api/auth/login', { username: $('l-user').value.trim(), password: $('l-pass').value });
+    if (d.ok) return location.replace(NEXT); pending = d.pending; $('t-code').value=''; show('s-totp'); }
+  catch(x){ if (/setup/.test(x.message)) return show('s-setup1'); err(x.message); } finally { busy(b, false); } });
+$('s-totp').addEventListener('submit', async (e) => { e.preventDefault(); const b = $('t-btn'); busy(b, true);
+  try { await post('api/auth/totp', { pending, code: $('t-code').value.trim() }); location.replace(NEXT); }
+  catch(x){ err(x.message); $('t-code').select(); } finally { busy(b, false); } });
+$('t-code').addEventListener('input', () => { if ($('t-code').value.replace(/\D/g,'').length === 6) $('s-totp').requestSubmit(); });
+$('s-setup1').addEventListener('submit', async (e) => { e.preventDefault();
+  if ($('u-pass').value !== $('u-pass2').value) return err('Passwords do not match');
+  try { const d = await post('api/auth/setup', { username: $('u-user').value.trim(), password: $('u-pass').value });
+    setupToken = d.setupToken; $('secret').textContent = d.secret.replace(/(.{4})/g, '$1 ').trim();
+    $('qr').innerHTML = ''; try { const q = qrcode(0, 'M'); q.addData(d.uri); q.make(); $('qr').innerHTML = q.createImgTag(5, 8); } catch(x){ $('qr').innerHTML = '<div class="hint">(QR unavailable — enter the secret manually)</div>'; }
+    show('s-setup2'); } catch(x){ err(x.message); } });
+$('s-setup2').addEventListener('submit', async (e) => { e.preventDefault();
+  try { await post('api/auth/setup/verify', { setupToken, code: $('u-code').value.trim() }); location.replace(NEXT); } catch(x){ err(x.message); } });
+$('u-code').addEventListener('input', () => { if ($('u-code').value.replace(/\D/g,'').length === 6) $('s-setup2').requestSubmit(); });
+</script></body></html>
