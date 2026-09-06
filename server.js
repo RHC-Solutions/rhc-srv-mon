@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execFile, execFileSync, spawn } = require('child_process');
+const net = require('net');
 const crypto = require('crypto');
 
 const PORT = process.env.PORT || 8899;
@@ -4248,7 +4249,7 @@ function sshDuplicateTab(){ const s = sshSess.get(sshActive); if (!s) return; if
 function sshCloseAll(){ for (const id of [...sshSess.keys()]) sshCloseTab(id); }
 function sshCloseTab(id){
   const s = sshSess.get(id); if (!s) return;
-  const wasLive = s.status !== 'dead';
+  const wasLive = s.status !== 'dead' && !s.superseded;
   s.status = 'dead'; clearTimeout(s.retryTimer);
   // × ends the session on the server (a refresh / closed browser only detaches it)
   try { if (wasLive && s.ws && s.ws.readyState === 1) s.ws.send(JSON.stringify({ t:'close' })); else if (wasLive && s.sid) fetch('api/ssh/sessions/' + encodeURIComponent(s.sid), { method:'DELETE' }).catch(() => {}); } catch(e){}
@@ -4313,10 +4314,11 @@ function sshWsConnect(s, query){
     if (typeof ev.data === 'string') {
       let m = null; try { m = JSON.parse(ev.data); } catch(e){ return; }
       if (m.t === 'hello') { s.sid = m.id; s.target = m.target || s.target; if (m.reattach) s.replaying = true; }
+      else if (m.t === 'superseded') { s.superseded = true; sshSessionEnded(s, null, 'this session was taken over by another browser window'); }
       else if (m.t === 'replayed') { s.replaying = false; try { s.fit.fit(); ws.send(JSON.stringify({ t:'resize', cols: s.term.cols, rows: s.term.rows })); } catch(e){} }
       else if (m.t === 'hb') { try { ws.send('{"t":"hb"}'); } catch(e){} }
       else if (m.t === 'note') { try { s.term.write('\\r\\n\\x1b[90m── ' + m.msg + ' ──\\x1b[0m\\r\\n'); } catch(e){} }
-      else if (m.t === 'exit') sshSessionEnded(s, m.code, m.error);
+      else if (m.t === 'exit') { s.exited = true; sshSessionEnded(s, m.code, m.error); }
       return;
     }
     s.term.write(new Uint8Array(ev.data));
@@ -4378,8 +4380,13 @@ function sshSessionEnded(s, code, error){
   const msg = error ? error : ('session closed' + (code != null ? ', exit code ' + code : ''));
   try { s.term.write('\\r\\n\\x1b[90m── ' + msg + ' ──\\x1b[0m\\r\\n'); } catch(e){}
   const bar = document.createElement('div'); bar.className = 'ssh-deadbar';
-  bar.innerHTML = '<span>⏹ ' + esc(msg) + '</span><span style="flex:1"></span><button class="re" onclick="sshReconnect(\\'' + s.id + '\\')">↻ Reconnect</button><button onclick="sshCloseTab(\\'' + s.id + '\\')">Close tab</button>';
+  bar.innerHTML = '<span>⏹ ' + esc(msg) + '</span><span style="flex:1"></span>' + (s.sid && !s.exited ? '<button class="re" onclick="sshReattach(\\'' + s.id + '\\')">↻ Re-attach</button>' : '') + '<button class="' + (s.sid && !s.exited ? '' : 're') + '" onclick="sshReconnect(\\'' + s.id + '\\')">' + (s.sid && !s.exited ? 'New session' : '↻ Reconnect') + '</button><button onclick="sshCloseTab(\\'' + s.id + '\\')">Close tab</button>';
   s.el.appendChild(bar);
+}
+function sshReattach(id){
+  const s = sshSess.get(id); if (!s || !s.sid) return;
+  const dead = s.el.querySelector('.ssh-deadbar'); if (dead) dead.remove();
+  s.status = 'connecting'; s.exited = false; sshWsConnect(s, 'attach=' + encodeURIComponent(s.sid)); s.term.focus();
 }
 function sshReconnect(id){
   const s = sshSess.get(id); if (!s) return;
@@ -4391,12 +4398,15 @@ function sshReconnect(id){
 // keep the active terminal sized to its pane
 new ResizeObserver(() => { const s = sshSess.get(sshActive); if (s && state.tab === 'ssh') { try { s.fit.fit(); } catch(e){} } }).observe(document.getElementById('ssh-terms'));
 // Re-open tabs for sessions that are still running on the server (after F5, a new browser, …).
-const sshAdopting = new Set();
+const sshAdopting = new Set(); let sshAdoptedOnce = false;
 async function sshAdoptServerSessions(){
   const list = (sshData && sshData.sessions) || [];
+  const first = !sshAdoptedOnce; sshAdoptedOnce = true;
   const have = new Set([...sshSess.values()].map(s => s.sid).filter(Boolean));
   for (const srv of list) {
-    if (have.has(srv.id) || sshAdopting.has(srv.id) || srv.attached) continue;   // attached = open in another window
+    // first render after a page load takes everything back (the previous page's sockets may still look
+    // attached for a moment); later renders only pick up sessions nobody is attached to
+    if (have.has(srv.id) || sshAdopting.has(srv.id) || (srv.attached && sshAdoptedOnce)) continue;
     sshAdopting.add(srv.id);
     try { await sshOpenTab({ hostId: srv.hostId, adhoc: srv.hostId ? null : sshAdhocFromTarget(srv.target), label: srv.label, target: srv.target, sid: srv.id, query: 'attach=' + encodeURIComponent(srv.id) }); } catch(e){}
     sshAdopting.delete(srv.id);
@@ -4767,86 +4777,146 @@ const sshSessions = new Map();     // sessionId -> { id, hostId, label, startedA
 const sshInstallJobs = new Map();  // jobId -> job (in-memory, full log)
 
 const SSH_PTY_HELPER_SRC = `#!/usr/bin/env python3
-# rhc-srv-mon pty helper: runs argv[1:] (ssh ...) under a pty.
-#   stdin  -> pty (keystrokes)      stdout <- pty (terminal output)
-#   fd 3   <- JSON lines: {"resize":[cols,rows]}
-# RHC_SSH_PASSWORD (env, removed before exec) is typed at the first ssh
-# password prompt, only until the user types something themselves.
-import os, sys, pty, select, termios, struct, fcntl, json, time, signal
+# rhc-srv-mon pty daemon: runs argv[2:] (ssh ...) under a pty and serves it on the unix socket
+# argv[1]. Double-forks into its own session so it survives restarts of the manager (pm2 tree-kill
+# never sees it); the manager re-adopts it from .sessions/<id>.json. Keeps a rolling output history
+# that is replayed to every new manager connection.
+# Frames both ways: 1 byte type + 4 byte big-endian length + payload
+#   manager -> daemon: 0 keystrokes, 2 control JSON ({"resize":[cols,rows]} | {"close":1})
+#   daemon -> manager: 4 history (on connect), 1 live output, 3 exit JSON ({"code":n})
+import os, sys, pty, select, termios, struct, fcntl, json, time, signal, socket
 
-def set_size(fd, rows, cols):
-    try: fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
-    except OSError: pass
-
+sock_path = sys.argv[1]
+meta_path = sock_path[:-5] + '.json'
 cols = int(os.environ.get('RHC_PTY_COLS', '120') or 120)
 rows = int(os.environ.get('RHC_PTY_ROWS', '32') or 32)
 password = os.environ.pop('RHC_SSH_PASSWORD', None)
+HIST_MAX = 512 * 1024
+
+if os.fork() != 0: os._exit(0)
+os.setsid()
+if os.fork() != 0: os._exit(0)
+signal.signal(signal.SIGHUP, signal.SIG_IGN)
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+try: os.chdir('/')
+except OSError: pass
+devnull = os.open(os.devnull, os.O_RDWR)
+for fd in (0, 1, 2): os.dup2(devnull, fd)
+
+try: os.unlink(sock_path)
+except OSError: pass
+srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+srv.bind(sock_path); os.chmod(sock_path, 0o600); srv.listen(1); srv.setblocking(False)
+
+def set_size(fd, r, c):
+    try: fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', r, c, 0, 0))
+    except OSError: pass
+
 pid, master = pty.fork()
 if pid == 0:
-    try: os.execvp(sys.argv[1], sys.argv[1:])
+    try: os.execvp(sys.argv[2], sys.argv[2:])
     except Exception as e:
         sys.stderr.write('exec failed: %s\\n' % e); os._exit(127)
 set_size(master, rows, cols)
-try: fcntl.fcntl(3, fcntl.F_GETFD); ctl = 3
-except OSError: ctl = None
-ctl_buf = b''; recent = b''; pw_tries = 0; user_typed = False; t0 = time.time()
-fds = [master, 0] + ([ctl] if ctl is not None else [])
-status = 0
+try:
+    m = json.load(open(meta_path)) if os.path.exists(meta_path) else {}
+    m.update({'pid': os.getpid(), 'sshPid': pid})
+    json.dump(m, open(meta_path, 'w'))
+except Exception: pass
+
+hist = bytearray(); client = None; cbuf = b''
+recent = b''; pw_tries = 0; user_typed = False; t0 = time.time(); status = 0; closing_t0 = None
+
+def frame(t, payload): return bytes([t]) + struct.pack('>I', len(payload)) + payload
+def send(t, payload):
+    global client
+    if client is None: return
+    try: client.sendall(frame(t, payload))
+    except OSError:
+        try: client.close()
+        except OSError: pass
+        client = None
+
 while True:
+    fds = [master, srv] + ([client] if client is not None else [])
     try: r, _, _ = select.select(fds, [], [], 0.5)
     except InterruptedError: continue
+    if srv in r:
+        try:
+            c, _ = srv.accept(); c.setblocking(True)
+            if client is not None:
+                try: client.close()
+                except OSError: pass
+            client = c; cbuf = b''
+            send(4, bytes(hist))
+        except OSError: pass
     if master in r:
         try: data = os.read(master, 65536)
         except OSError: data = b''
         if not data: break
-        os.write(1, data)
+        hist += data
+        if len(hist) > HIST_MAX: del hist[:len(hist) - HIST_MAX]
+        send(1, data)
         if password and not user_typed and pw_tries < 2 and time.time() - t0 < 90:
             recent = (recent + data)[-256:]
-            if b'assword:' in recent or b'assword: ' in recent:
+            if b'assword:' in recent:
                 os.write(master, password.encode() + b'\\n'); pw_tries += 1; recent = b''
-    if 0 in r:
-        try: data = os.read(0, 65536)
-        except OSError: data = b''
-        if not data:
-            try: os.kill(pid, signal.SIGHUP)
-            except OSError: pass
-            break
-        user_typed = True
-        os.write(master, data)
-    if ctl is not None and ctl in r:
-        try: d = os.read(ctl, 4096)
+    if client is not None and client in r:
+        try: d = client.recv(65536)
         except OSError: d = b''
-        if not d: fds.remove(ctl); ctl = None
+        if not d:
+            try: client.close()
+            except OSError: pass
+            client = None
         else:
-            ctl_buf += d
-            while b'\\n' in ctl_buf:
-                line, ctl_buf = ctl_buf.split(b'\\n', 1)
-                try:
-                    m = json.loads(line.decode() or '{}')
+            cbuf += d
+            while len(cbuf) >= 5:
+                t = cbuf[0]; n = struct.unpack('>I', cbuf[1:5])[0]
+                if len(cbuf) < 5 + n: break
+                payload = cbuf[5:5 + n]; cbuf = cbuf[5 + n:]
+                if t == 0:
+                    user_typed = True
+                    try: os.write(master, payload)
+                    except OSError: pass
+                elif t == 2:
+                    try: m = json.loads(payload.decode() or '{}')
+                    except Exception: m = {}
                     if 'resize' in m:
-                        c, rw = int(m['resize'][0]), int(m['resize'][1])
-                        set_size(master, rw, c)
-                        try: os.kill(pid, signal.SIGWINCH)
+                        try:
+                            set_size(master, int(m['resize'][1]), int(m['resize'][0])); os.kill(pid, signal.SIGWINCH)
+                        except Exception: pass
+                    if m.get('close'):
+                        closing_t0 = closing_t0 or time.time()
+                        try: os.kill(pid, signal.SIGHUP)
                         except OSError: pass
-                except Exception: pass
+    if closing_t0 and time.time() - closing_t0 > 3:
+        try: os.kill(pid, signal.SIGKILL)
+        except OSError: pass
     try:
         wpid, st = os.waitpid(pid, os.WNOHANG)
         if wpid:
             status = st
-            # drain whatever is left in the pty
             while True:
                 try:
                     rr, _, _ = select.select([master], [], [], 0.05)
                     if master not in rr: break
                     data = os.read(master, 65536)
                     if not data: break
-                    os.write(1, data)
+                    hist += data; send(1, data)
                 except OSError: break
             break
     except ChildProcessError: break
 try: os.close(master)
 except OSError: pass
 code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else (128 + os.WTERMSIG(status) if os.WIFSIGNALED(status) else 0)
+send(3, json.dumps({'code': code}).encode())
+time.sleep(0.2)
+try:
+    if client is not None: client.close()
+except OSError: pass
+for pth in (sock_path, meta_path):
+    try: os.unlink(pth)
+    except OSError: pass
 sys.exit(code)
 `;
 
@@ -5057,10 +5127,95 @@ function wsAttach(socket, head, onMessage, onClose) {
 }
 
 /* ---- interactive terminal session over WebSocket ---- */
-// A session = one pty helper (python3 + ssh). The WebSocket is only its transport. Sessions live
-// server-side until closed from the UI (tab ×, or DELETE /api/ssh/sessions/:id) — a refresh, a
-// closed browser, a Cloudflare cut or a laptop sleep only *detaches* them. The page re-attaches
-// with ?attach=<sessionId> and gets the rolling output history replayed (tmux-like).
+// A session = one detached pty daemon (python3 + ssh, see SSH_PTY_HELPER_SRC) reached over a unix
+// socket in .sessions/. The WebSocket is only the browser transport. Sessions live until closed from
+// the UI (tab ×) or DELETE /api/ssh/sessions/:id — a refresh, a closed browser, a Cloudflare cut, a
+// laptop sleep AND a restart of this manager only detach them: at startup the manager re-adopts every
+// daemon listed in .sessions/*.json, and the page re-attaches with ?attach=<id> (history replayed).
+const SSH_SESS_DIR = path.join(__dirname, '.sessions');
+function sshFrame(t, payload) { const b = Buffer.isBuffer(payload) ? payload : Buffer.from(String(payload)); const h = Buffer.alloc(5); h[0] = t; h.writeUInt32BE(b.length, 1); return Buffer.concat([h, b]); }
+function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }
+function sshHelperConnect(sockPath, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const t0 = Date.now();
+    const tryOnce = () => {
+      const c = net.connect(sockPath);
+      c.once('connect', () => { c.removeAllListeners('error'); resolve(c); });
+      c.once('error', () => { c.destroy(); if (Date.now() - t0 > (timeoutMs || 4000)) reject(new Error('pty daemon did not come up')); else setTimeout(tryOnce, 60); });
+    };
+    tryOnce();
+  });
+}
+// Build the in-memory session object around a daemon (new or re-adopted) and register it.
+function sshMakeSession(meta, host) {
+  const sess = { id: meta.id, hostId: meta.hostId || null, host, label: meta.label, target: meta.target, startedAt: meta.startedAt, pid: meta.pid || null, sshPid: meta.sshPid || null,
+    sockPath: path.join(SSH_SESS_DIR, meta.id + '.sock'), metaPath: path.join(SSH_SESS_DIR, meta.id + '.json'),
+    conn: null, socket: null, ended: false, closeRequested: false, hist: [], histBytes: 0, detachedAt: null, attaches: 0 };
+  sess.out = (d) => {
+    sess.hist.push(d); sess.histBytes += d.length;
+    while (sess.histBytes > SSH_SCROLLBACK_BYTES && sess.hist.length > 1) { const x = sess.hist.shift(); sess.histBytes -= x.length; }
+    if (sess.socket && !sess.socket.destroyed) wsSendBinary(sess.socket, d);
+  };
+  sess.write = (d) => { if (sess.conn && !sess.conn.destroyed) sess.conn.write(sshFrame(0, d)); };
+  sess.control = (o) => { if (sess.conn && !sess.conn.destroyed) sess.conn.write(sshFrame(2, JSON.stringify(o))); };
+  sess.hangup = () => {
+    sess.closeRequested = true; sess.control({ close: 1 });
+    setTimeout(() => { if (!sess.ended) { try { if (sess.sshPid) process.kill(sess.sshPid, 'SIGKILL'); } catch (_) {} try { if (sess.pid) process.kill(sess.pid, 'SIGKILL'); } catch (_) {} sess.end(137, 'killed'); } }, 6000);
+  };
+  sess.end = (code, error) => {
+    if (sess.ended) return; sess.ended = true;
+    sshSessions.delete(sess.id);
+    if (sess.socket) { try { wsSendText(sess.socket, JSON.stringify({ t: 'exit', code, error: error || null })); } catch (_) {} wsClose(sess.socket, 1000, 'session ended'); }
+    try { if (sess.conn) sess.conn.destroy(); } catch (_) {}
+    for (const f of [sess.sockPath, sess.metaPath]) { try { fs.unlinkSync(f); } catch (_) {} }
+    console.log(`ssh session ${sess.id} (${sess.target}) ended, code ${code}${error ? ' (' + error + ')' : ''}`);
+  };
+  sshSessions.set(sess.id, sess);
+  return sess;
+}
+// Attach the manager side to the daemon's unix socket and parse its frames.
+function sshBindHelper(sess, conn) {
+  sess.conn = conn; let buf = Buffer.alloc(0);
+  conn.on('data', (d) => {
+    buf = buf.length ? Buffer.concat([buf, d]) : d;
+    for (;;) {
+      if (buf.length < 5) break;
+      const t = buf[0], n = buf.readUInt32BE(1);
+      if (buf.length < 5 + n) break;
+      const payload = Buffer.from(buf.subarray(5, 5 + n)); buf = buf.subarray(5 + n);
+      if (t === 4) { sess.hist = payload.length ? [payload] : []; sess.histBytes = payload.length; sess.ready = true; }
+      else if (t === 1) sess.out(payload);
+      else if (t === 3) { let code = 0; try { code = JSON.parse(payload.toString()).code; } catch (_) {} sess.end(code); }
+    }
+  });
+  conn.on('error', () => {});
+  conn.on('close', () => {
+    if (sess.conn !== conn || sess.ended) return;
+    sess.conn = null;
+    // daemon connection dropped without an exit frame: reconnect if it is still alive, else end
+    if (sess.pid && pidAlive(sess.pid) && fs.existsSync(sess.sockPath)) {
+      sshHelperConnect(sess.sockPath, 3000).then((c) => sshBindHelper(sess, c)).catch(() => sess.end(255, 'pty daemon unreachable'));
+    } else sess.end(255, 'pty daemon gone');
+  });
+}
+// Re-adopt daemons left running by a previous instance of this manager.
+function sshAdoptDaemons() {
+  let files = [];
+  try { fs.mkdirSync(SSH_SESS_DIR, { recursive: true, mode: 0o700 }); files = fs.readdirSync(SSH_SESS_DIR).filter((f) => f.endsWith('.json')); } catch (_) { return; }
+  for (const f of files) {
+    const metaPath = path.join(SSH_SESS_DIR, f);
+    let meta = null; try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch (_) {}
+    const sock = meta && meta.id ? path.join(SSH_SESS_DIR, meta.id + '.sock') : null;
+    const cleanup = () => { for (const x of [metaPath, sock]) { try { if (x) fs.unlinkSync(x); } catch (_) {} } };
+    if (!meta || !meta.id || !meta.pid || !pidAlive(meta.pid) || !fs.existsSync(sock)) { cleanup(); continue; }
+    sshHelperConnect(sock, 1500).then((conn) => {
+      const live = meta.hostId ? sshFindHost(meta.hostId) : null;
+      const sess = sshMakeSession(meta, live || meta.host || null);
+      sshBindHelper(sess, conn);
+      console.log(`ssh session ${sess.id} (${sess.target}) re-adopted after manager restart (daemon pid ${meta.pid})`);
+    }).catch(() => cleanup());
+  }
+}
 function sshOpenTerminal(req, socket, head, query) {
   const cols = Math.max(20, Math.min(500, parseInt(query.get('cols')) || 120));
   const rows = Math.max(5, Math.min(200, parseInt(query.get('rows')) || 32));
@@ -5069,7 +5224,7 @@ function sshOpenTerminal(req, socket, head, query) {
     if (!sess || sess.ended) { socket.write('HTTP/1.1 410 Gone\r\nConnection: close\r\n\r\nsession gone\n'); return socket.destroy(); }
     if (!wsHandshake(req, socket)) return;
     socket.setNoDelay(true);
-    if (sess.socket && !sess.socket.destroyed) { const old = sess.socket; sess.socket = null; wsClose(old, 1000, 'superseded'); }
+    if (sess.socket && !sess.socket.destroyed) { const old = sess.socket; sess.socket = null; try { wsSendText(old, JSON.stringify({ t: 'superseded' })); } catch (_) {} wsClose(old, 1000, 'superseded'); }
     console.log(`ssh session ${sess.id} (${sess.target}) re-attached from ${clientIp(req)}`);
     sshAttachSocket(sess, socket, head, true, cols, rows);
     return;
@@ -5085,89 +5240,68 @@ function sshOpenTerminal(req, socket, head, query) {
   if (!wsHandshake(req, socket)) return;
   socket.setNoDelay(true);
   const id = crypto.randomBytes(6).toString('hex');
+  const root = !!(h.becomeRoot && h.user !== 'root');
+  const meta = { id, hostId: h.id || null, label: h.name || sshTarget(h), target: sshTarget(h) + (root ? ' (root)' : ''), startedAt: new Date().toISOString(), cols, rows,
+    host: h.id ? null : Object.assign(sshPublicHost(h), { hasPassword: undefined }) };
+  try { fs.mkdirSync(SSH_SESS_DIR, { recursive: true, mode: 0o700 }); fs.writeFileSync(path.join(SSH_SESS_DIR, id + '.json'), JSON.stringify(meta), { mode: 0o600 }); } catch (e) { wsSendText(socket, JSON.stringify({ t: 'exit', code: 127, error: e.message })); return wsClose(socket, 1011, 'session dir'); }
   const env = Object.assign({}, process.env, { TERM: 'xterm-256color', LANG: process.env.LANG || 'C.UTF-8', RHC_PTY_COLS: String(cols), RHC_PTY_ROWS: String(rows) });
   if (h.auth === 'password' && h.password) env.RHC_SSH_PASSWORD = h.password;
-  // becomeRoot: run `sudo -i` as the remote command (ssh -tt keeps the tty). A sudo password prompt
-  // is answered by the helper with the stored ssh password (same "assword:" match, 2 tries max).
-  const args = [SSH_PTY_HELPER, 'ssh', '-tt'].concat(sshBaseArgs(h, false), [sshTarget(h)], h.becomeRoot && h.user !== 'root' ? ['sudo', '-i'] : []);
-  let child;
-  try { child = spawn('python3', args, { env, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }); }
+  // becomeRoot: `sudo -i` as the remote command (ssh -tt keeps the tty); a sudo password prompt is
+  // answered by the daemon with the stored ssh password (same "assword:" match, 2 tries max).
+  const args = [SSH_PTY_HELPER, path.join(SSH_SESS_DIR, id + '.sock'), 'ssh', '-tt'].concat(sshBaseArgs(h, false), [sshTarget(h)], root ? ['sudo', '-i'] : []);
+  try { const launcher = spawn('python3', args, { env, stdio: 'ignore', detached: true }); launcher.on('error', () => {}); launcher.unref(); }
   catch (e) { wsSendText(socket, JSON.stringify({ t: 'exit', code: 127, error: e.message })); return wsClose(socket, 1011, 'spawn failed'); }
-  const sess = { id, hostId: h.id || null, host: h, label: h.name || sshTarget(h), target: sshTarget(h) + (h.becomeRoot && h.user !== 'root' ? ' (root)' : ''), startedAt: new Date().toISOString(), child,
-    socket: null, ended: false, closeRequested: false, hist: [], histBytes: 0, detachedAt: null, detachTimer: null, attaches: 0 };
-  sshSessions.set(id, sess);
-  console.log(`ssh session ${id} -> ${sess.target} opened from ${clientIp(req)}`);
-  const end = (code, error) => {
-    if (sess.ended) return; sess.ended = true;
-    if (sess.detachTimer) { clearTimeout(sess.detachTimer); sess.detachTimer = null; }
-    sshSessions.delete(id);
-    if (sess.socket) { try { wsSendText(sess.socket, JSON.stringify({ t: 'exit', code, error: error || null })); } catch (_) {} wsClose(sess.socket, 1000, 'session ended'); }
-    console.log(`ssh session ${id} (${sess.target}) ended, code ${code}${error ? ' (' + error + ')' : ''}`);
-  };
-  const out = (d) => {
-    sess.hist.push(d); sess.histBytes += d.length;
-    while (sess.histBytes > SSH_SCROLLBACK_BYTES && sess.hist.length > 1) { const x = sess.hist.shift(); sess.histBytes -= x.length; }
-    if (sess.socket && !sess.socket.destroyed) wsSendBinary(sess.socket, d);
-  };
-  child.stdout.on('data', out);
-  child.stderr.on('data', out);
-  child.on('error', (e) => end(127, e.message));
-  child.on('close', (code) => end(code == null ? 0 : code));
-  child.stdin.on('error', () => {});
-  child.stdio[3].on('error', () => {});
-  sshAttachSocket(sess, socket, head, false, cols, rows);
-}
-function sshResize(sess, cols, rows) {
-  try { if (sess.child.stdio[3].writable) sess.child.stdio[3].write(JSON.stringify({ resize: [Math.max(20, Math.min(500, +cols || 80)), Math.max(5, Math.min(200, +rows || 24))] }) + '\n'); } catch (_) {}
+  sshHelperConnect(path.join(SSH_SESS_DIR, id + '.sock'), 5000).then((conn) => {
+    try { Object.assign(meta, JSON.parse(fs.readFileSync(path.join(SSH_SESS_DIR, id + '.json'), 'utf8'))); } catch (_) {}
+    const sess = sshMakeSession(meta, h);
+    sshBindHelper(sess, conn);
+    console.log(`ssh session ${id} -> ${sess.target} opened from ${clientIp(req)} (daemon pid ${meta.pid || '?'})`);
+    if (socket.destroyed) { sess.detachedAt = Date.now(); return; }
+    sshAttachSocket(sess, socket, head, false, cols, rows);
+  }).catch((e) => {
+    for (const f of [id + '.json', id + '.sock']) { try { fs.unlinkSync(path.join(SSH_SESS_DIR, f)); } catch (_) {} }
+    wsSendText(socket, JSON.stringify({ t: 'exit', code: 127, error: 'could not start the terminal: ' + e.message }));
+    wsClose(socket, 1011, 'daemon failed');
+  });
 }
 // Bind a (new) WebSocket to a session: greet, replay history, wire keystrokes/resizes/close.
 function sshAttachSocket(sess, socket, head, reattach, cols, rows) {
-  const child = sess.child;
   sess.socket = socket; sess.attaches++;
-  if (sess.detachTimer) { clearTimeout(sess.detachTimer); sess.detachTimer = null; }
   sess.detachedAt = null;
   wsSendText(socket, JSON.stringify({ t: 'hello', id: sess.id, target: sess.target, reattach: !!reattach }));
   if (reattach) {
-    if (cols && rows) sshResize(sess, cols, rows);
+    if (cols && rows) sess.control({ resize: [cols, rows] });
     if (sess.histBytes) wsSendBinary(socket, Buffer.concat(sess.hist));
     wsSendText(socket, JSON.stringify({ t: 'replayed', bytes: sess.histBytes }));
   }
   wsAttach(socket, head, (op, payload) => {
-    if (op === 2) { if (!child.stdin.destroyed) child.stdin.write(payload); return; }
+    if (op === 2) return sess.write(payload);
     if (op === 1) {
       const s = payload.toString('utf8');
       if (s[0] === '{') {
         try {
           const m = JSON.parse(s);
-          if (m.t === 'resize') sshResize(sess, m.cols, m.rows);
-          else if (m.t === 'input' && typeof m.data === 'string' && !child.stdin.destroyed) child.stdin.write(m.data);
-          else if (m.t === 'close') { sess.closeRequested = true; console.log(`ssh session ${sess.id} closed from the UI -> hangup`); sshHangup(sess); }
-          // m.t === 'hb' -> heartbeat reply, nothing to do (wsAttach already refreshed lastSeen)
+          if (m.t === 'resize') sess.control({ resize: [Math.max(20, Math.min(500, +m.cols || 80)), Math.max(5, Math.min(200, +m.rows || 24))] });
+          else if (m.t === 'input' && typeof m.data === 'string') sess.write(m.data);
+          else if (m.t === 'close') { console.log(`ssh session ${sess.id} closed from the UI -> hangup`); sess.hangup(); }
+          // m.t === 'hb' -> heartbeat reply, nothing to do
         } catch (_) {}
-      } else if (!child.stdin.destroyed) child.stdin.write(s);
+      } else sess.write(s);
     }
   }, (clientClosed) => {
-    if (sess.socket !== socket) return;      // this transport was already superseded by a newer attach
+    if (sess.socket !== socket) return;      // superseded by a newer attach
     sess.socket = null;
     if (sess.ended || sess.closeRequested) return;
-    // Browser gone (refresh, closed window, Cloudflare cut, sleep) -> detach, keep the pty running.
     sess.detachedAt = Date.now();
-    if (SSH_DETACH_GRACE_MS > 0) {
-      console.log(`ssh session ${sess.id} (${sess.target}) detached (${clientClosed ? 'browser closed' : 'transport lost'}), keeping pty for ${SSH_DETACH_GRACE_MS / 1000}s`);
-      sess.detachTimer = setTimeout(() => { sess.detachTimer = null; if (!sess.ended && !sess.socket) { console.log(`ssh session ${sess.id} not re-attached within grace period -> hangup`); sshHangup(sess); } }, SSH_DETACH_GRACE_MS);
-    } else console.log(`ssh session ${sess.id} (${sess.target}) detached (${clientClosed ? 'browser closed' : 'transport lost'}), kept until closed from the UI`);
+    console.log(`ssh session ${sess.id} (${sess.target}) detached (${clientClosed ? 'browser closed' : 'transport lost'}), kept until closed from the UI`);
   });
 }
-function sshHangup(sess) {
-  const child = sess.child;
-  try { child.stdin.end(); } catch (_) {}
-  setTimeout(() => { try { child.kill('SIGHUP'); } catch (_) {} }, 200);
-  setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 3000);
-}
+function sshHangup(sess) { sess.hangup(); }
 // POST /api/ssh/sessions/:id/upload?name=<file> (raw body) — drop/paste a file or image into a
 // terminal: it is written to ~/rhc-uploads/ on the remote host over a second ssh connection (same
 // key / stored password) and the path is returned so the page can type it into the terminal.
 function sshUploadToSession(req, res, sess) {
+  if (!sess.host) { authJson(res, 400, { error: 'host record no longer available for this session' }); return req.destroy(); }
   const q = new URL(req.url || '/', 'http://localhost').searchParams;
   const name = (String(q.get('name') || 'upload.bin').replace(/[\/\\\0]/g, '_').replace(/[^\w.\- ()\[\]@+,]/g, '_').replace(/^\.+/, '_').slice(0, 120)) || 'upload.bin';
   const declared = parseInt(req.headers['content-length'] || '0', 10);
@@ -5280,7 +5414,7 @@ log "pm2 $(pm2 -v 2>/dev/null | tail -1)"
 cd "$APP_DIR" || { log "app dir $APP_DIR missing"; exit 4; }
 chmod 700 "$APP_DIR"
 chmod 600 "$APP_DIR"/*.json 2>/dev/null || true
-[ -f .gitignore ] || printf 'db-credentials.json\\nhistory.json\\nupdates.json\\nbackups.json\\nssh-hosts.json\\nauth.json\\n.helpers/\\n' > .gitignore
+[ -f .gitignore ] || printf 'db-credentials.json\\nhistory.json\\nupdates.json\\nbackups.json\\nssh-hosts.json\\nauth.json\\n.helpers/\\n.sessions/\\n' > .gitignore
 if [ ! -d .git ] && have git; then git init -q . 2>/dev/null && git add -A >/dev/null 2>&1 && git -c user.name=rhc-srv-mon -c user.email=rhc-srv-mon@localhost commit -q -m "rhc-srv-mon installed from $SOURCE_HOST ($SOURCE_GIT)" >/dev/null 2>&1 || true; fi
 # --- start / restart under pm2
 if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
@@ -6243,12 +6377,13 @@ const server = http.createServer((req, res) => {
     if (m && req.method === 'GET') {
       // used by the page to check whether a detached session is still alive before re-attaching
       const s = sshSessions.get(m[1]);
+      if ((!s || s.ended) && fs.existsSync(path.join(SSH_SESS_DIR, m[1] + '.json'))) { return authJson(res, 200, { id: m[1], attached: false, adopting: true }); }
       res.writeHead(s && !s.ended ? 200 : 404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
       return res.end(JSON.stringify(s && !s.ended ? { id: s.id, target: s.target, startedAt: s.startedAt, attached: !!s.socket, detachedAt: s.detachedAt } : { error: 'session gone' }));
     }
     if (m && req.method === 'DELETE') {
       const s = sshSessions.get(m[1]);
-      if (s) { sshHangup(s); if (s.socket) wsClose(s.socket, 1000, 'closed by admin'); }
+      if (s) { s.hangup(); if (s.socket) wsClose(s.socket, 1000, 'closed by admin'); }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ok: !!s }));
     }
@@ -6281,6 +6416,7 @@ server.on('upgrade', (req, socket, head) => {
 });
 ensureSshHelpers();
 loadSsh();
+sshAdoptDaemons();
 loadAuth();
 
 loadHistory();

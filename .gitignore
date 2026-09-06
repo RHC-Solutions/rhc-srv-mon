@@ -5,3 +5,4 @@ backups.json
 ssh-hosts.json
 .helpers/
 auth.json
+.sessions/
