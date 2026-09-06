@@ -1,5 +1,38 @@
 # rhc-srv-mon
 
+Zero-dependency Node.js (>= 22) server-management panel, on the road to replacing CloudPanel on this host.
+Runs as root under pm2 (`rhc-srv-mon`, cwd `/root`), binds 127.0.0.1:8899, exposed by nginx at `/rhc-srv-mon/`.
+
+## Layout
+
+- `server.js` — entry point: HTTP dispatcher (legacy if/else routes + `lib/http.js` router), `/ws/ssh` upgrade, boot.
+- `lib/` — one module per feature: `auth` (login + TOTP + sessions), `history`/`collect` (PM2 heartbeats), `postgres`,
+  `updates`, `sites` (health), `modules` (scan / auto-update / cleanup), `backups`, `ssh` (terminal + remote installer),
+  `notify` (Telegram), `cloudpanel` (read-only CLP SQLite), `http` (helpers + router), `page` (UI assembly), `util`, `config`.
+- `ui/` — the browser app: `index.html` shell, `app.css`, `core.js` (helpers, state, tabs, refresh), `tabs/*.js`, `boot.js`,
+  `login.html`. `lib/page.js` concatenates all JS into one `<script>` (shared scope) and syntax-checks it at boot.
+- `scripts/check-page.js` (UI assembly + duplicate top-level identifiers), `scripts/check-refs.js` (no dangling references
+  after moving code between modules). Run both before landing.
+- State files stay next to `server.js`: `auth.json`, `updates.json`, `modules.json`, `backups.json`, `ssh-hosts.json`,
+  `history.json`, `.helpers/`, `.sessions/` (all gitignored).
+
+## Development
+
+Work in the `v2` worktree, never in the live checkout (an auto-commit cron pushes `main` every 15 minutes):
+
+```sh
+git worktree add /opt/rhc-srv-mon-v2 v2          # once
+cd /root && PORT=8898 RHC_NO_JOBS=1 RHC_DEV=1 node /opt/rhc-srv-mon-v2/server.js
+```
+
+`RHC_NO_JOBS=1` disables every scheduler (update checks, module scans, auto-update, cleanup, backups) — request-triggered
+actions still run against the real box. `RHC_DEV=1` rebuilds the page from `ui/` on every request. Landing:
+
+```sh
+flock /var/lock/rhc-autocommit sh -c 'git merge --no-edit v2 && pm2 restart rhc-srv-mon'
+pm2 logs rhc-srv-mon --lines 30      # expect "re-adopted" lines for open SSH sessions
+```
+
 ## Reverse proxy: WebSocket for the SSH tab
 
 The 🖥️ SSH tab uses a WebSocket at `/ws/ssh`. Behind nginx the `Connection` header must be the literal

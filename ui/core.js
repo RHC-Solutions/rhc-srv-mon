@@ -52,7 +52,7 @@ function armConfirm(btn, armedLabel, onConfirm){
 
 let lastData = null, lastDb = null;
 const state = Object.assign({
-  q:'', f:'all', sort:'group', tab:'pm2',
+  q:'', f:'all', sort:'group', tab:'sites',
   sharedOnly:false,
   modSort:'severity', modFilter:'all', modQ:'', modShowDetailLog:false
 }, JSON.parse(localStorage.getItem('pm2ui') || '{}'));
@@ -77,13 +77,13 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document
 function sshField(label, inner, hint){ return '<div class="upd-field"><label>' + label + '</label>' + inner + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</div>'; }
 // Each tab has its own URL (…/rhc-srv-mon/ssh, …/postgres, …). Slugs are single path
 // segments so every relative URL in this page (api/…, login, ws/ssh) keeps resolving.
-const TAB_SLUG = { pm2:'pm2', db:'postgres', updates:'updates', sites:'sites', modules:'modules', backup:'backups', ssh:'ssh' };
+const TAB_SLUG = { pm2:'monitor', db:'postgres', updates:'updates', sites:'sites', modules:'modules', backup:'backups', ssh:'ssh' };
 const SLUG_TAB = Object.assign(Object.fromEntries(Object.entries(TAB_SLUG).map(([k,v]) => [v,k])),
-  { services:'pm2', postgresql:'db', db:'db', backup:'backup', terminal:'ssh' });
+  { pm2:'pm2', services:'pm2', postgresql:'db', db:'db', backup:'backup', terminal:'ssh' });
 function tabFromPath(){ const seg = (location.pathname.split('/').filter(Boolean).pop() || '').toLowerCase(); return SLUG_TAB[seg] || null; }
 function setTab(tab, opts){
   opts = opts || {};
-  if (!TAB_SLUG[tab]) tab = 'pm2';
+  if (!TAB_SLUG[tab]) tab = 'sites';
   state.tab = tab; saveState();
   if (!opts.noHistory && tabFromPath() !== tab) {
     try { history[opts.replace ? 'replaceState' : 'pushState']({ tab }, '', TAB_SLUG[tab] + location.search); } catch(e){}
