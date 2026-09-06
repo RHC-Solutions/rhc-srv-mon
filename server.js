@@ -2783,8 +2783,11 @@ const PAGE = `<!doctype html>
     .ssh-hostlist { max-height:150px; }
     .ssh-side.collapsed .ssh-hostlist, .ssh-side.collapsed input.q, .ssh-side.collapsed .ssh-side-ft { display:none; }
     .ssh-side.collapsed .ssh-side-toggle { transform:rotate(-90deg); display:inline-block; }
-    .ssh-main { height:calc(100dvh - 120px); min-height:320px; }
-    body.tab-ssh .ssh-main { height:calc(100dvh - 210px); }
+    .ssh-main { flex:0 0 auto; height:calc(100dvh - 120px); min-height:320px; }
+    body.tab-ssh .ssh-main { flex:0 0 auto; height:calc(100dvh - 205px); }
+    body.tab-ssh #updated { display:none; }
+    body.tab-ssh .hdr-row { flex-direction:row; align-items:center; }
+    body.tab-ssh .tabs { margin-bottom:8px; }
     .ssh-tabbar .tools .lay { display:none; }
     .ssh-tab { max-width:150px; padding:0 8px 0 10px; }
   }
@@ -2796,6 +2799,7 @@ const PAGE = `<!doctype html>
   body.tab-ssh #sshview { display:flex !important; flex-direction:column; flex:1; min-height:0; }
   body.tab-ssh .ssh-layout { flex:1; height:auto; min-height:0; }
   body.tab-ssh footer { margin-top:6px; }
+  body.tab-ssh #updated { display:none; }
   @media (max-width:820px){ html:has(body.tab-ssh), body.tab-ssh { height:auto; overflow:auto; } body.tab-ssh .wrap { height:auto; display:block; } body.tab-ssh .ssh-layout { height:auto; } }
   .hdr-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
   .userbar { display:flex; gap:6px; align-items:center; font-size:12.5px; color:#9ca3af; margin-top:8px; }
