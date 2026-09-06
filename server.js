@@ -2745,7 +2745,11 @@ const PAGE = `<!doctype html>
   .ssh-deadbar { position:absolute; left:0; right:0; bottom:0; background:#5a1f25e6; color:#ffb4b8; font-size:12.5px; padding:7px 14px; display:flex; align-items:center; gap:12px; z-index:2; }
   .ssh-deadbar button { background:#2a2f40; border:none; color:#e9e9e9; border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; }
   .ssh-deadbar button.re { background:#5cdd8b; color:#0b2818; font-weight:700; }
-  .ssh-installs { margin-top:16px; display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:14px; }
+  .ssh-installs { display:grid; grid-template-columns:1fr; gap:12px; max-height:min(70vh, 640px); overflow:auto; padding-right:2px; }
+  .ssh-modal.wide { width:min(960px, 96vw); max-width:none; }
+  #ssh-inst-btn .bd { font-size:10.5px; margin-left:3px; }
+  .ssh-side-toggle { display:none; font-size:11px; color:#6b7280; margin-left:4px; }
+  .ssh-terms, .ssh-term .pane-body { overflow:hidden; }
   .ssh-inst { background:#1e2230; border-radius:14px; padding:14px 16px; box-shadow:0 2px 8px rgba(0,0,0,.25); }
   .ssh-inst .top { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; }
   .ssh-inst .top b { font-size:13.5px; }
@@ -2769,7 +2773,21 @@ const PAGE = `<!doctype html>
   .ssh-modal .test-out.ok { border-left:2px solid #5cdd8b; } .ssh-modal .test-out.bad { border-left:2px solid #dc3545; }
   .ssh-modal .box { background:#12141d; border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:12.5px; color:#9ca3af; line-height:1.6; }
   .ssh-modal .box b { color:#e9e9e9; }
-  @media (max-width:820px){ .ssh-layout { flex-direction:column; height:auto; } .ssh-side { flex:0 0 auto; max-height:240px; } .ssh-main { height:60vh; } }
+  @media (max-width:820px){
+    /* phones: hosts panel collapses to its header once a terminal is open, terminal fills the rest, no split layouts */
+    html, body { overflow-x:hidden; }
+    .ssh-layout { flex-direction:column; height:auto; gap:8px; }
+    .ssh-side { flex:0 0 auto; max-height:none; }
+    .ssh-side-toggle { display:inline; }
+    .ssh-side-hd { padding:10px 12px 6px; cursor:pointer; }
+    .ssh-hostlist { max-height:150px; }
+    .ssh-side.collapsed .ssh-hostlist, .ssh-side.collapsed input.q, .ssh-side.collapsed .ssh-side-ft { display:none; }
+    .ssh-side.collapsed .ssh-side-toggle { transform:rotate(-90deg); display:inline-block; }
+    .ssh-main { height:calc(100dvh - 120px); min-height:320px; }
+    body.tab-ssh .ssh-main { height:calc(100dvh - 210px); }
+    .ssh-tabbar .tools .lay { display:none; }
+    .ssh-tab { max-width:150px; padding:0 8px 0 10px; }
+  }
   /* SSH tab: the terminal area fills the browser window exactly — nothing on the page scrolls, only xterm's own buffer */
   html:has(body.tab-ssh), body.tab-ssh { height:100%; overflow:hidden; }
   body.tab-ssh .wrap { max-width:none; height:100vh; height:100dvh; box-sizing:border-box; display:flex; flex-direction:column; padding:12px 16px 8px; }
@@ -2823,7 +2841,7 @@ const PAGE = `<!doctype html>
   <div id="sshview" style="display:none">
     <div class="ssh-layout">
       <aside class="ssh-side">
-        <div class="ssh-side-hd"><span>🖥️ Hosts</span><button class="upd-test-btn" style="padding:4px 10px" onclick="sshEditHost()">＋ Add host</button></div>
+        <div class="ssh-side-hd"><span onclick="sshSideToggle()">🖥️ Hosts <span class="ssh-side-toggle">▾</span></span><span style="display:flex;gap:6px"><button class="upd-test-btn" id="ssh-inst-btn" style="padding:4px 10px" onclick="sshInstallsDialog()" title="rhc-srv-mon install history / running installs">📦</button><button class="upd-test-btn" style="padding:4px 10px" onclick="sshEditHost()">＋ Add host</button></span></div>
         <input class="q" id="ssh-q" type="search" placeholder="Filter hosts…" autocomplete="off" oninput="sshRenderHosts()">
         <div class="ssh-hostlist" id="ssh-hostlist"><div class="ssh-grp">loading…</div></div>
         <div class="ssh-side-ft" id="ssh-side-ft"></div>
@@ -2835,7 +2853,6 @@ const PAGE = `<!doctype html>
         </div>
       </section>
     </div>
-    <div class="ssh-installs" id="ssh-installs"></div>
   </div>
   <footer>auto-refresh 10s · heartbeat = <span id="ivl">60</span>s samples · 🟩 up · 🟥 down · 🟧 restarted</footer>
 </div>
@@ -4322,7 +4339,10 @@ function sshRenderTabs(){
 }
 /* ---- split layouts: sshPanes[i] = session id shown in pane i (layout 1 = classic tabs) ---- */
 let sshPanes = [], sshFocusPane = 0;
-function sshLayout(){ try { const n = parseInt(localStorage.getItem('rhc-ssh-layout') || '1'); return [1,2,3,4].includes(n) ? n : 1; } catch(e){ return 1; } }
+function sshLayout(){ if (window.innerWidth < 820) return 1; try { const n = parseInt(localStorage.getItem('rhc-ssh-layout') || '1'); return [1,2,3,4].includes(n) ? n : 1; } catch(e){ return 1; } }
+let sshResizeT = null;
+window.addEventListener('resize', () => { clearTimeout(sshResizeT); sshResizeT = setTimeout(() => { if (sshSess.size) { sshRenderPanes(); sshRenderTabs(); } }, 150); });
+function sshSideToggle(){ const s = document.querySelector('.ssh-side'); if (s && window.innerWidth < 820) s.classList.toggle('collapsed'); }
 function sshSetLayout(n){
   try { localStorage.setItem('rhc-ssh-layout', String(n)); } catch(e){}
   const ids = [...sshSess.keys()];
@@ -4408,6 +4428,7 @@ async function sshOpenTab(o){
   const s = { id, hostId: o.hostId, adhoc: o.adhoc || null, label: o.label, target: o.target, term, fit, el, ws: null, status: 'connecting', sid: o.sid || null };
   el.addEventListener('contextmenu', (e) => { e.preventDefault(); sshPasteText(s); });
   sshSess.set(id, s);
+  if (window.innerWidth < 820) { const side = document.querySelector('.ssh-side'); if (side) side.classList.add('collapsed'); }
   sshActivate(id);
   try { fit.fit(); } catch(e){}
   sshWsConnect(s, o.query);
@@ -4725,15 +4746,26 @@ async function sshInstallGo(id){
     const r = await fetch('api/ssh/install', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ hostId: id, opts }) });
     const d = await r.json();
     if (!r.ok || d.error) return toast(d.error || 'Install failed to start', 'error');
-    sshModalClose(); toast('Install started', 'success'); window._sshOpenJob = d.jobId; renderSsh();
-    document.getElementById('ssh-installs').scrollIntoView({ behavior:'smooth', block:'start' });
+    sshModalClose(); toast('Install started', 'success'); window._sshOpenJob = d.jobId; await renderSsh(); sshInstallsDialog();
   } catch(e){ toast('Error: ' + e, 'error'); }
 }
 const sshJobLogs = new Map();
+function sshInstallsDialog(){
+  const bg = sshModal('<h3>📦 rhc-srv-mon installs</h3><div class="ssh-installs" id="ssh-installs"><div class="mod-empty">No installs yet — use 📦 on a host to install rhc-srv-mon there.</div></div><div class="foot"><button class="btn pri" onclick="sshModalClose()">Close</button></div>');
+  const m = bg && bg.querySelector('.ssh-modal'); if (m) m.classList.add('wide');
+  sshRenderInstalls();
+}
+function sshInstallsBadge(){
+  const b = document.getElementById('ssh-inst-btn'); if (!b || !sshData) return;
+  const jobs = sshData.installs || [], running = jobs.filter(j => j.status === 'running').length, failed = jobs.filter(j => j.status === 'failed').length;
+  b.innerHTML = '📦' + (running ? '<span class="bd">⏳' + running + '</span>' : '') + (!running && failed ? '<span class="bd" style="color:#ff8088">✖' + failed + '</span>' : '') + (!running && !failed && jobs.length ? '<span class="bd">' + jobs.length + '</span>' : '');
+  b.title = jobs.length ? jobs.length + ' install' + (jobs.length === 1 ? '' : 's') + (running ? ' · ' + running + ' running' : '') + (failed ? ' · ' + failed + ' failed' : '') + ' — click to open' : 'rhc-srv-mon install history / running installs';
+}
 async function sshRenderInstalls(){
+  sshInstallsBadge();
   const box = document.getElementById('ssh-installs'); if (!box || !sshData) return;
-  const jobs = (sshData.installs || []).slice(0, 6);
-  if (!jobs.length) { box.innerHTML = ''; return; }
+  const jobs = (sshData.installs || []).slice(0, 12);
+  if (!jobs.length) return;
   // fetch logs for running + expanded jobs
   await Promise.all(jobs.filter(j => j.status === 'running' || window._sshOpenJob === j.id || sshJobLogs.has(j.id)).map(async j => {
     try { const d = await fetch('api/ssh/install/' + j.id).then(r => r.json()); if (d && d.log) sshJobLogs.set(j.id, d.log); } catch(e){}
