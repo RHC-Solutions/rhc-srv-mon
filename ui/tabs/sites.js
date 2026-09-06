@@ -457,7 +457,8 @@ async function siteFmUpload(fileList){
     toast('Uploading ' + f.name + '…');
     try {
       const r = await fetch(siteUrl('/files/upload?path=' + encodeURIComponent(siteFmPath()) + '&name=' + encodeURIComponent(f.name)), { method: 'POST', body: f });
-      const j = await r.json(); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+      let j = {}; try { j = await r.json(); } catch(_) {}
+      if (!r.ok) throw new Error(j.error || (r.status === 413 ? 'file too large for the proxy (nginx client_max_body_size)' : 'HTTP ' + r.status));
       toast('Uploaded ' + f.name + ' (' + bkBytes(j.size) + ')', 'success');
     } catch(e){ siteErr(e, 'Upload ' + f.name); }
   }
