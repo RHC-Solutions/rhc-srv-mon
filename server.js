@@ -18,6 +18,9 @@ const { readJsonBody, authJson, actorOf } = httpu;
 const db = require('./lib/db');
 const events = require('./lib/events');
 require('./lib/api/events');
+require('./lib/api/sites');
+const clpImport = require('./lib/clp-import');
+const cloudpanel = require('./lib/cloudpanel');
 const page = require('./lib/page');
 const auth = require('./lib/auth');
 const history = require('./lib/history');
@@ -457,6 +460,10 @@ server.on('upgrade', (req, socket, head) => {
 /* ------------------------------------------------------------------- boot */
 page.page();                               // assemble + syntax-check the UI before anything else
 db.open();                                 // SQLite (runs pending migrations)
+if (cloudpanel.exists()) {                 // coexistence: pull CloudPanel's sites in (ours are never overwritten)
+  try { const r = clpImport.run(); console.log('cloudpanel import: ' + r.sites + ' new, ' + r.updated + ' refreshed, ' + r.skipped + ' ours' + (r.errors.length ? ', errors: ' + r.errors.join('; ') : '')); }
+  catch (e) { console.error('cloudpanel import failed:', e.message); }
+}
 ssh.ensureSshHelpers();
 ssh.loadSsh();
 ssh.sshAdoptDaemons();

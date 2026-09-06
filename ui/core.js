@@ -80,7 +80,7 @@ function sshField(label, inner, hint){ return '<div class="upd-field"><label>' +
 // One entry per tab: URL slug, view element, render (on tab switch) and onRefresh (every 10 s
 // while the tab is active — omitted for tabs that fetch their own data on their own schedule).
 const TABS = {
-  sites:   { slug:'sites',    view:'sitesview',   render: () => renderSites(),   onRefresh: () => renderSites() },
+  sites:   { slug:'sites',    view:'sitesview',   render: () => renderSites(),   onRefresh: () => { if (!siteView.domain) renderSitesList(); } },
   pm2:     { slug:'monitor',  view:'pm2view',     render: () => render(),        onRefresh: () => render() },
   db:      { slug:'postgres', view:'dbview',      render: () => renderDb(),      onRefresh: () => renderDb() },
   updates: { slug:'updates',  view:'updatesview', render: () => renderUpdates(), onRefresh: () => renderUpdates() },
@@ -99,6 +99,8 @@ function setTab(tab, opts){
   state.tab = tab; saveState();
   if (!opts.noHistory && tabFromPath() !== tab) {
     try { history[opts.replace ? 'replaceState' : 'pushState']({ tab }, '', TAB_SLUG[tab] + location.search); } catch(e){}
+  } else if (opts.fromBar && location.search) {
+    try { history.pushState({ tab }, '', TAB_SLUG[tab]); } catch(e){}   // clicking the tab again leaves any sub-view (site detail)
   }
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===tab));
   for (const [k, t] of Object.entries(TABS)) { const el = document.getElementById(t.view); if (el) el.style.display = k===tab ? '' : 'none'; }
@@ -108,7 +110,7 @@ function setTab(tab, opts){
 
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', (e) => {
   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;   // let "open in new tab" use the real href
-  e.preventDefault(); setTab(t.dataset.tab);
+  e.preventDefault(); setTab(t.dataset.tab, { fromBar: true });
 }));
 
 async function refresh(){

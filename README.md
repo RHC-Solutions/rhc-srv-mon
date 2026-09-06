@@ -19,6 +19,24 @@ Runs as root under pm2 (`rhc-srv-mon`, cwd `/root`), binds 127.0.0.1:8899, expos
   `lib/migrations/` applied at boot. `secret.key` (AES-256-GCM, 0600) encrypts stored credentials — it is excluded from
   git *and* from the config backup on purpose: **back it up out of band**, a restored DB without it cannot decrypt anything.
 
+## Sites tab (CloudPanel replacement, phase 1)
+
+Sites live in `rhc.sqlite` (`sites`, `site_php`, `site_nodejs`, `certificates`, `ssh_users`, `cron_jobs`, …). While CloudPanel is
+still installed, `lib/clp-import.js` runs at boot and on "Sync from CloudPanel": it copies CLP's sites/templates/SSH users and
+**re-templates the vhost file nginx actually serves** (CLP's stored copy drops blank lines and misses hand edits) so that our
+`render()` reproduces the file byte for byte while `{{ssl_certificate}} {{root}} {{settings}} {{app_port}} {{php_settings}}…`
+stay editable. Imported sites are `managed_by = 'clp'`; the first change made here flips them to `rhc` — **after that, do not
+touch the site in CloudPanel** (it would overwrite the vhost / pool from its stale copy). The active certificate is whatever is
+in `/etc/nginx/ssl-certificates/<domain>.crt` (all current sites: Cloudflare Origin CA, valid to 2040+).
+
+Per-site tabs: Settings (root dir, site-user password + authorized_keys, PHP version/limits or Node version/port), Vhost
+(template editor — save runs `nginx -t`, reloads, restores the previous file on failure; backups in
+`/var/lib/rhc-srv-mon/vhost-bak/`), SSL/TLS (stored certificates, upload PEM, self-signed, activate), Security (basic auth,
+blocked IPs/bots, Cloudflare-only → `{{settings}}`), SSH/FTP (SSH users: own uid, site group, symlinked htdocs/logs/backups),
+File Manager (`bin/fileop.js` runs **as the site user**, so the kernel enforces what can be read/written; uploads/downloads
+stream through it), Cron Jobs (`/etc/cron.d/<siteUser>`), Logs (tail with filter/follow). Databases and New Site/Delete come
+with the next slices. `scripts/ui-smoke.js` drives every tab and sub-tab against a dev instance with a DOM stub.
+
 ## Events tab
 
 Every user action and scheduler run is written to the `events` table (`lib/events.js` → `emit(type, {…})`): logins and
