@@ -37,6 +37,14 @@ File Manager (`bin/fileop.js` runs **as the site user**, so the kernel enforces 
 stream through it), Cron Jobs (`/etc/cron.d/<siteUser>`), Logs (tail with filter/follow). Databases and New Site/Delete come
 with the next slices. `scripts/ui-smoke.js` drives every tab and sub-tab against a dev instance with a DOM stub.
 
+## Settings tab
+
+General (panel domain, IP, timezone, event retention, ACME e-mail), **Telegram** and **Slack** notifications (every alert —
+update results, backups, cleanup, login attempts, "updates available" — fans out through `lib/notify.js` `send(text, kind)` to
+each enabled channel; the Telegram block was migrated out of `updates.json` into the kv table), **Cloudflare** API token
+(verified on save, stored encrypted; the Domains card shows every site's DNS record / proxy state per zone; DNS management and
+origin certificates are next), and the **Cleanup** card that used to sit on the Modules tab.
+
 ## Events tab
 
 Every user action and scheduler run is written to the `events` table (`lib/events.js` → `emit(type, {…})`): logins and

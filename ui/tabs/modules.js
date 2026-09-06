@@ -111,46 +111,6 @@ function renderModules(){
   html += '<span class="hint" id="auRunHint" style="margin-left:auto"></span></div>';
   html += '</div>';
 
-  // Cleanup card (disk hygiene: regenerable caches + build leftovers)
-  const cu = d.cleanup || { config: {}, preview: null, running: false, log: [] };
-  const cuCfg = cu.config || {};
-  const cuPrev = cu.preview;
-  const cuLast = (cu.log && cu.log.length) ? cu.log[cu.log.length-1] : null;
-  const cuKeys = ['npmCache','pnpmCache','pnpmStore','bunCache','pipCache','projectCaches','nextCache','leftovers'];
-  const cuLabels = { npmCache:'npm caches', pnpmCache:'pnpm metadata caches', pnpmStore:'pnpm store prune', bunCache:'bun caches', pipCache:'pip caches', projectCaches:'project tool caches (node_modules/.cache)', nextCache:'Next.js build caches (.next/cache)', leftovers:'leftover node_modules copies (node_modules.pre-*, .bak, .old)' };
-  const cuHints = { npmCache:'~/.npm/_cacache + _logs for every user and root', pnpmCache:'~/.cache/pnpm — metadata only, the content store is untouched', pnpmStore:'/var/lib/pnpm-store: removes packages no project references any more (shows store size, not the reclaimable amount)', bunCache:'~/.bun/install/cache', pipCache:'~/.cache/pip', projectCaches:'babel/eslint/webpack/turbo caches, rebuilt on the next build', nextCache:'the next Next.js build is slower once after removal', leftovers:'copies left behind by the npm → pnpm migration; safe to drop once the site runs fine on pnpm' };
-  let cuSel = 0;
-  html += '<div class="auto-card" style="margin-top:14px">';
-  html += '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px">';
-  html += '<h3 style="margin:0;font-size:15px;font-weight:700">🧹 Cleanup</h3>';
-  html += '<span class="hint" style="font-size:12px">regenerable caches + build leftovers · only under /home/*/ and /root · refuses to run while an install is active</span>';
-  if (cuLast) html += '<span class="auto-stat" style="margin-left:auto" title="Last run">last run <span class="v">'+new Date(cuLast.timestamp).toLocaleString()+'</span> · freed <span class="v">'+bkBytes(cuLast.freedBytes||0)+'</span>'+((cuLast.errors||[]).length?' · ⚠ <span class="v">'+cuLast.errors.length+'</span> errors':'')+'</span>';
-  else html += '<span class="auto-stat" style="margin-left:auto">never run</span>';
-  html += '</div>';
-  html += '<div class="auto-projlist" style="grid-template-columns:repeat(auto-fill,minmax(360px,1fr))">';
-  for (const k of cuKeys) {
-    const t = cuPrev ? (cuPrev.targets||[]).find(x => x.key===k) : null;
-    const on = !!cuCfg[k];
-    if (on && t && !t.prune) cuSel += (t.bytes||0);
-    const size = t ? (t.count ? bkBytes(t.bytes)+(t.prune?' in store':'')+' · '+t.count+(t.count===1?' path':' paths') : 'nothing found') : '';
-    html += '<label title="'+esc(cuHints[k])+'" style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="cuOpt" data-key="'+k+'" '+(on?'checked':'')+'><span>'+esc(cuLabels[k])+'</span><span style="margin-left:auto;color:#9ca3af;font-size:11.5px;font-family:ui-monospace,Menlo,Consolas,monospace;white-space:nowrap">'+esc(size)+'</span></label>';
-  }
-  html += '</div>';
-  if (cuPrev && cuPrev.targets) {
-    const lo = cuPrev.targets.find(x => x.key==='leftovers');
-    if (lo && lo.items && lo.items.length) html += '<div class="hint" style="font-size:11.5px;margin-top:8px;line-height:1.7">leftovers: '+lo.items.map(i => '<code style="background:#12141d;padding:1px 6px;border-radius:4px">'+esc(i.path.replace(/^\/home\//,'~'))+'</code> '+bkBytes(i.bytes)).join(' · ')+'</div>';
-  }
-  html += '<div class="auto-row" style="margin-top:10px"><label class="switch"><input type="checkbox" id="cuAfterAuto" '+(cuCfg.afterAutoUpdate?'checked':'')+'><span class="slider"></span></label>';
-  html += '<label for="cuAfterAuto">Run after the nightly auto-update pass</label>';
-  html += '<span class="hint" style="margin-left:auto">'+(cuPrev?('measured '+new Date(cuPrev.measuredAt).toLocaleString()+' · selected ≈ '+bkBytes(cuSel)):'not measured yet — click Measure')+'</span></div>';
-  html += '<div class="auto-row"><button class="btn" id="cuSave" style="background:#5cdd8b;color:#0b2818;padding:8px 16px;font-size:12px">💾 Save</button>';
-  html += '<button class="btn" id="cuMeasure" style="padding:8px 16px;font-size:12px">📏 Measure</button>';
-  html += '<button class="btn" id="cuRun" '+(cu.running?'disabled':'')+' style="padding:8px 16px;font-size:12px">'+(cu.running?'⏳ cleaning…':'🧹 Clean now')+'</button>';
-  if (cuLast && cuLast.results && cuLast.results.length) html += '<span class="hint" style="margin-left:auto">'+cuLast.results.map(r => esc(cuLabels[r.key]||r.key)+': '+bkBytes(r.freed||0)).join(' · ')+'</span>';
-  html += '</div>';
-  if (cuLast && cuLast.errors && cuLast.errors.length) html += '<div class="hint" style="color:#ff8088;font-size:11.5px;margin-top:6px">'+cuLast.errors.slice(0,5).map(esc).join('<br>')+'</div>';
-  html += '</div>';
-
   // Toolbar (Orient): filter chips + search + refresh
   html += '<div class="mod-card"><div class="head">';
   html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1">';
@@ -426,59 +386,8 @@ function renderModules(){
     toast('Auto-update log cleared', 'info');
   }));
 
-  // Cleanup wiring
-  const cuSaveBtn = document.getElementById('cuSave');
-  if (cuSaveBtn) cuSaveBtn.addEventListener('click', () => saveCleanupConfig(false));
-  const cuMeasureBtn = document.getElementById('cuMeasure');
-  if (cuMeasureBtn) cuMeasureBtn.addEventListener('click', () => measureCleanupNow());
-  const cuRunBtn = document.getElementById('cuRun');
-  if (cuRunBtn) cuRunBtn.addEventListener('click', () => armConfirm(cuRunBtn, '⚠ Click again to delete', () => runCleanupNow()));
 }
 
-function readCleanupForm() {
-  const view = document.getElementById('modulesview');
-  const cfg = {};
-  for (const c of view.querySelectorAll('.cuOpt')) cfg[c.dataset.key] = c.checked;
-  const aa = view.querySelector('#cuAfterAuto');
-  cfg.afterAutoUpdate = aa ? aa.checked : false;
-  return cfg;
-}
-async function saveCleanupConfig(silent) {
-  try {
-    const res = await fetch('api/modules/cleanup/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(readCleanupForm()) });
-    const j = await res.json();
-    if (!res.ok) { toast('Save failed: ' + (j.error || res.status), 'error'); return false; }
-    if (lastModules) lastModules.cleanup = j.cleanup;
-    if (!silent) { renderModules(); toast('Cleanup settings saved', 'success'); }
-    return true;
-  } catch (e) { toast('Error: ' + e.message, 'error'); return false; }
-}
-async function measureCleanupNow() {
-  toast('Measuring caches… this can take a minute', 'info');
-  try {
-    const res = await fetch('api/modules/cleanup/measure', { method:'POST' });
-    const j = await res.json();
-    if (!res.ok) { toast('Measure failed: ' + (j.error || res.status), 'error'); return; }
-    if (lastModules) lastModules.cleanup = j.cleanup;
-    if (state.tab === 'modules') renderModules();
-    const p = j.cleanup && j.cleanup.preview;
-    toast('Measured · ' + bkBytes(p ? p.totalBytes : 0) + ' in regenerable caches/leftovers', 'success');
-  } catch (e) { toast('Error: ' + e.message, 'error'); }
-}
-async function runCleanupNow() {
-  if (!(await saveCleanupConfig(true))) return;
-  toast('Cleanup started…', 'info');
-  if (lastModules && lastModules.cleanup) lastModules.cleanup.running = true;
-  if (state.tab === 'modules') renderModules();
-  try {
-    const res = await fetch('api/modules/cleanup/run', { method:'POST', headers:{'Content-Type':'application/json'}, body: '{}' });
-    const j = await res.json();
-    if (!res.ok) toast('Cleanup not run: ' + (j.error || j.reason || res.status), 'error');
-    else toast('Cleanup done · freed ' + bkBytes(j.freedBytes||0) + ((j.errors||[]).length ? ' · ' + j.errors.length + ' errors' : ''), (j.errors||[]).length ? 'warn' : 'success');
-    if (j.cleanup && lastModules) lastModules.cleanup = j.cleanup;
-    if (state.tab === 'modules') renderModules();
-  } catch (e) { toast('Error: ' + e.message, 'error'); }
-}
 
 function readAutoUpdateForm() {
   const view = document.getElementById('modulesview');

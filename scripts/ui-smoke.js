@@ -56,7 +56,7 @@ const document = {
 };
 document.body.appendChild = (c) => { document.body.children.push(c); if (c._html) registerIds(c, c._html); return c; };
 for (const id of ['host', 'updated', 'banner', 'userbar', 'q', 'sort', 'sharedToggle', 'main', 'toast-host', 'ivl', 'ssh-hostlist', 'ssh-tabbar', 'ssh-terms', 'ssh-empty', 'ssh-side-ft',
-  'pm2view', 'dbview', 'updatesview', 'sitesview', 'modulesview', 'backupview', 'sshview', 'eventsview']) byId.set(id, makeEl(id.endsWith('view') ? 'div' : id === 'q' ? 'input' : 'div', id));
+  'pm2view', 'dbview', 'updatesview', 'sitesview', 'modulesview', 'backupview', 'sshview', 'eventsview', 'settingsview']) byId.set(id, makeEl(id.endsWith('view') ? 'div' : id === 'q' ? 'input' : 'div', id));
 
 const storage = new Map();
 const sandbox = {
@@ -86,7 +86,7 @@ const call = (label, fn) => { try { const r = fn(); log('  ok  ' + label); retur
   log('loaded ' + pageLib.jsFiles().length + ' files, base ' + BASE);
   await sleep(1500);                                   // boot's refresh() fetches
   call('refresh()', () => sandbox.refresh()); await sleep(1500);
-  for (const tab of ['pm2', 'db', 'updates', 'sites', 'modules', 'backup', 'events']) {
+  for (const tab of ['pm2', 'db', 'updates', 'sites', 'modules', 'backup', 'events', 'settings']) {
     call('setTab(' + tab + ')', () => sandbox.setTab(tab)); await sleep(800);
     const v = byId.get(G('TABS')[tab].view); log('       ' + tab + ' view: ' + (v._html || '').length + ' chars');
     if (tab === 'sites') { call('siteSetView(table)', () => sandbox.siteSetView('table')); log('       sites table: ' + byId.get('sitesview')._html.length + ' chars'); call('siteSetSort(domain)', () => sandbox.siteSetSort('domain')); call('siteSetView(cards)', () => sandbox.siteSetView('cards')); }

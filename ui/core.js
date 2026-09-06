@@ -95,6 +95,7 @@ const TABS = {
   backup:  { slug:'backups',  view:'backupview',  render: () => renderBackup(),  onRefresh: () => renderBackup() },
   ssh:     { slug:'ssh',      view:'sshview',     render: () => renderSsh() },
   events:  { slug:'events',   view:'eventsview',  render: () => renderEvents(),  onRefresh: () => refreshEvents() },
+  settings:{ slug:'settings', view:'settingsview',render: () => renderSettings() },
 };
 const TAB_SLUG = Object.fromEntries(Object.entries(TABS).map(([k, v]) => [k, v.slug]));
 const SLUG_TAB = Object.assign(Object.fromEntries(Object.entries(TAB_SLUG).map(([k,v]) => [v,k])),

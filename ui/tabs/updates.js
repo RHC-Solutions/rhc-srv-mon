@@ -133,22 +133,7 @@ function renderUpdates(){
   }
   html += '</div></div></div>';
 
-  // Telegram card
-  html += '<div class="upd-card">';
-  html += '<h3>Telegram Notifications</h3>';
-  const tel = d.telegram || {};
-  html += '<div class="upd-toggle">'
-    + '<label class="switch"><input type="checkbox" id="telEnable" ' + (tel.enabled?'checked':'') + ' onchange="saveUpdatesConfig()"><span class="slider"></span></label>'
-    + '<label>Enabled</label></div>';
-  html += '<div class="upd-field"><label>Bot Token</label><input type="password" id="telToken" value="' + esc(tel.botToken||'') + '" placeholder="123456:ABC-DEF1234ghIkl" onchange="saveUpdatesConfig()"></div>';
-  html += '<div class="upd-field"><label>Chat ID</label><input type="text" id="telChatId" value="' + esc(tel.chatId||'') + '" placeholder="-123456789" onchange="saveUpdatesConfig()"></div>';
-  html += '<div class="upd-chk-grid">'
-    + '<label><input type="checkbox" id="telNotifyUpd" ' + (tel.notifyOnUpdate!==false?'checked':'') + ' onchange="saveUpdatesConfig()"> Notify when updates available</label>'
-    + '<label><input type="checkbox" id="telNotifyDone" ' + (tel.notifyOnComplete!==false?'checked':'') + ' onchange="saveUpdatesConfig()"> Notify on update completion</label>'
-    + '<label><input type="checkbox" id="telNotifyAuth" ' + (tel.notifyOnAuth!==false?'checked':'') + ' onchange="saveUpdatesConfig()"> Notify on web login attempts (failed / successful / lockout)</label>'
-    + '</div>';
-  html += '<button class="upd-test-btn" onclick="testTelegram()">📨 Test Telegram</button>';
-  html += '</div>';
+  html += '<div class="upd-card"><h3>Notifications</h3><p class="dim" style="margin:0">Telegram and Slack settings moved to the <a href="settings" onclick="event.preventDefault(); setTab(\'settings\', { fromBar: true })">⚙️ Settings</a> tab.</p></div>';
 
   // Update log
   html += '<div class="upd-card" style="grid-column:1/-1">';
@@ -239,22 +224,13 @@ function saveUpdatesConfig(){
     minute: parseInt(document.getElementById('schedMin').value) || 0,
     components: Array.from(document.querySelectorAll('.sched-comp:checked')).map(el => el.dataset.key),
   };
-  const tel = {
-    enabled: document.getElementById('telEnable').checked,
-    botToken: document.getElementById('telToken').value,
-    chatId: document.getElementById('telChatId').value,
-    notifyOnUpdate: document.getElementById('telNotifyUpd').checked,
-    notifyOnComplete: document.getElementById('telNotifyDone').checked,
-    notifyOnAuth: document.getElementById('telNotifyAuth').checked,
-  };
   fetch('api/updates/config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ schedule: sched, telegram: tel }),
+    body: JSON.stringify({ schedule: sched }),
   });
   if (lastUpdates) {
     lastUpdates.schedule = sched;
-    lastUpdates.telegram = tel;
   }
 }
 
@@ -265,18 +241,4 @@ async function clearUpdateLog(){
   } catch(_){}
 }
 
-async function testTelegram(){
-  if (!lastUpdates || !lastUpdates.telegram) return;
-  const tel = lastUpdates.telegram;
-  if (!tel.botToken || !tel.chatId) { toast('Save bot token and chat ID first', 'warn'); return; }
-  try {
-    const res = await fetch('https://api.telegram.org/bot' + tel.botToken + '/sendMessage', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: tel.chatId, text: '🔔 *RHC SRV Manager* — Telegram notification is working!', parse_mode: 'Markdown' }),
-    });
-    if (res.ok) toast('Test message sent — check your Telegram.', 'success');
-    else { const j = await res.json(); toast('Telegram error: ' + (j.description || res.status), 'error'); }
-  } catch(e){ toast('Telegram failed: ' + e.message, 'error'); }
-}
 
