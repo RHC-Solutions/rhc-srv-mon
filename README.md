@@ -46,3 +46,11 @@ are collapsed to one message per minute.
 Owned `root:pnpmstore`, dirs 2775, files g+rw; every site user is in `pnpmstore`. Projects set
 `packageImportMethod: copy` in `pnpm-workspace.yaml` (and the updater passes `--config.package-import-method=copy`)
 so node_modules are copies, not hard links into the shared store. The fix-perms auto-fix skips files with >1 link.
+
+## SSH tab: split layouts · installer on appliances
+
+- Tab bar buttons ▭ / ▭▭ / ▭▭▭ / ⊞ show 1, 2, 3 or 4 (2×2) terminals at once; tabs still list every session,
+  the green-bordered pane is the focused one and receives the next host you click. ⤢ on a pane goes back to single view.
+- Installer option "Private Node.js inside the install dir" (default on) downloads the official Node tarball into
+  `<appDir>/.node` and installs pm2 into that prefix, so the target's system Node.js (FreePBX, appliances) is untouched.
+  Non-root targets need the sudo password typed in the dialog (SUDO_ASKPASS, never stored).
