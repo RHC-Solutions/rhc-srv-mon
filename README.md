@@ -70,10 +70,14 @@ closes or either process exits; a failed connection keeps its log, so the viewer
 
 **👥 Sessions** lists this panel's open terminals (closable) and, per host, who is logged in over SSH right now —
 from logind, falling back to `who`/`ss` — with **Disconnect** per login and **Disconnect all other sessions**, which
-the server resolves itself so the panel's own logins (its probe and open terminals) are always spared. Disconnecting escalates
+the server resolves itself so the panel's own logins (its probe and open terminals) are always spared. Disconnecting has two modes, because a login's session scope holds everything it started — on a box where
+nobody enabled lingering, that includes pm2 daemons and the sites they run. **Disconnect** hangs up the login only
+and leaves those running; **Kill** terminates the whole session scope. The list shows, per session, whether the
+login is still live and which services its scope holds, and the bulk action only ever hangs up live logins.
+Killing escalates
 (`resources/disconnect-sessions.sh`): `loginctl terminate-session`, then `kill-session --signal=KILL --kill-whom=all`,
-then stopping the session scope — because hanging up sshd alone does nothing to a login whose leader is already dead
-while a child (an editor server, a stray daemon) keeps the logind session in state `closing` for ever. A session only
+then stopping the session scope — the only way to clear a login whose leader is already dead while a child keeps the
+logind session in state `closing` for ever. A session only
 counts as gone when it has left `loginctl list-sessions` and its leader pid is dead. Only a pid present in the current
 listing is ever signalled.
 

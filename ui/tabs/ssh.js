@@ -706,12 +706,19 @@ function sshSessHtml(){
   else if (sshSessView.data) {
     const d = sshSessView.data;
     const others = d.sessions.filter(x => !x.fromPanel && x.pid > 1);
+    const live = others.filter(x => x.leaderAlive !== false);
+    const withSvc = others.filter(x => x.hasServices);
     h += '<p class="dim" style="margin:0 0 8px;font-size:12.5px">' + esc(d.target) + ' · checked ' + esc(String(d.checkedAt).slice(11, 19))
-      + (others.length ? ' <button class="upd-test-btn" style="margin-left:8px" id="sess-killall">⏻ Disconnect all ' + others.length + ' other session' + (others.length === 1 ? '' : 's') + '</button>' : '') + '</p>';
+      + (live.length ? ' <button class="upd-test-btn" style="margin-left:8px" id="sess-killall">⏻ Disconnect all ' + live.length + ' other login' + (live.length === 1 ? '' : 's') + '</button>' : '')
+      + (others.length && !live.length ? ' <span style="color:#f8a306">the other ' + others.length + ' entries are ended logins whose processes are still running</span>' : '') + '</p>';
+    if (withSvc.length) h += '<div class="box" style="border-color:#f8a30666;margin-bottom:10px;font-size:12.5px">⚠ ' + withSvc.length + ' of these sessions still run services (' + esc([...new Set(withSvc.flatMap(x => x.services))].slice(0, 6).join(', ')) + '). <b>Disconnect</b> ends the login and leaves them running; <b>kill</b> stops them too.</div>';
     h += '<table class="upd-table"><tr><th>User</th><th>TTY</th><th>From</th><th>Since</th><th>Idle</th><th>PID</th><th></th></tr>';
     for (const s of d.sessions) {
-      h += '<tr><td><b>' + esc(s.user) + '</b>' + (s.fromPanel ? ' <span class="upd-badge na" title="connected from this server — probably this panel">this panel</span>' : '') + '</td><td class="mono">' + esc(s.tty || s.type || '—') + '</td><td class="mono">' + esc(s.from || '') + '</td><td class="dim">' + esc(s.since) + '</td><td class="dim">' + esc(s.idle || '') + '</td><td class="mono dim">' + (s.pid || '') + '</td>'
-        + '<td style="text-align:right">' + (s.pid ? '<button class="upd-test-btn" onclick="armConfirm(this, \'⚠ Disconnect?\', () => sshDisconnectRemote(' + s.pid + '))">Disconnect</button>' : '') + '</td></tr>';
+      const svc = s.hasServices ? ' <span class="upd-badge na" title="' + esc(s.procCount + ' processes: ' + s.services.join(', ')) + '">' + esc(s.services.slice(0, 2).join(', ')) + (s.services.length > 2 ? '…' : '') + '</span>' : '';
+      const ended = s.leaderAlive === false ? ' <span class="upd-badge err" title="the sshd process is gone; only leftovers keep this session listed">ended</span>' : '';
+      h += '<tr><td><b>' + esc(s.user) + '</b>' + (s.fromPanel ? ' <span class="upd-badge na" title="connected from this server — probably this panel">this panel</span>' : '') + ended + svc + '</td><td class="mono">' + esc(s.tty || s.type || '—') + '</td><td class="mono">' + esc(s.from || '') + '</td><td class="dim">' + esc(s.since) + '</td><td class="dim">' + esc(s.idle || '') + '</td><td class="mono dim">' + (s.pid || '') + '</td>'
+        + '<td style="text-align:right;white-space:nowrap">' + (s.pid ? (s.leaderAlive === false ? '' : '<button class="upd-test-btn" onclick="armConfirm(this, \'⚠ Disconnect?\', () => sshDisconnectRemote(' + s.pid + '))">Disconnect</button> ')
+          + '<button class="upd-test-btn" title="' + (s.hasServices ? 'also stops ' + esc(s.services.join(', ')) : 'terminate the whole session') + '" onclick="armConfirm(this, \'⚠ Kill' + (s.hasServices ? ' + its services' : '') + '?\', () => sshDisconnectRemote(' + s.pid + ', \'kill\'))">Kill</button>' : '') + '</td></tr>';
     }
     if (!d.sessions.length) h += '<tr><td colspan="7" class="dim">No interactive logins.</td></tr>';
     h += '</table>';
@@ -721,7 +728,7 @@ function sshSessHtml(){
       for (const c of extra) h += '<tr><td class="mono">' + esc(c.peer) + '</td><td class="mono dim">' + c.pid + '</td><td style="text-align:right"><button class="upd-test-btn" onclick="armConfirm(this, \'⚠ Disconnect?\', () => sshDisconnectRemote(' + c.pid + '))">Disconnect</button></td></tr>';
       h += '</table>';
     }
-    h += '<div class="dim" style="font-size:11.5px;margin-top:8px">Disconnecting hangs up that login\'s sshd process. Your own session shows up here too — closing it drops you.</div>';
+    h += '<div class="dim" style="font-size:11.5px;margin-top:8px"><b>Disconnect</b> hangs up the login and leaves whatever it started running. <b>Kill</b> terminates the whole session, stopping those processes too — on a host where nobody enabled lingering, that includes pm2 daemons and the sites they run. Sessions from this panel are never touched by the bulk action.</div>';
   }
   return h + '</div>';
 }
@@ -729,11 +736,11 @@ async function sshCloseSessionFromDialog(id){
   try { await fetch('api/ssh/sessions/' + id, { method:'DELETE' }); sshCloseTab(id); await renderSsh(); sshSessRender(false); toast('Terminal closed', 'success'); }
   catch(e){ toast('Error: ' + e, 'error'); }
 }
-async function sshDisconnectRemote(pid){
+async function sshDisconnectRemote(pid, mode){
   try {
-    const r = await siteApi('POST', 'api/ssh/hosts/' + sshSessView.hostId + '/sessions/' + pid + '/disconnect');
-    toast('Disconnected pid ' + r.pid, 'success');
-  } catch(e){ toast('Disconnect failed: ' + e.message, 'error', { duration: 9000 }); }
+    const r = await siteApi('POST', 'api/ssh/hosts/' + sshSessView.hostId + '/sessions/' + pid + '/disconnect' + (mode === 'kill' ? '?mode=kill' : ''));
+    toast((mode === 'kill' ? 'Killed session ' : 'Disconnected ') + r.pid + (r.kept ? ' · still running: ' + r.kept.join(', ') : ''), 'success', { duration: 8000 });
+  } catch(e){ toast((mode === 'kill' ? 'Kill' : 'Disconnect') + ' failed: ' + e.message, 'error', { duration: 12000 }); }
   sshSessRender(true);
 }
 
@@ -829,11 +836,12 @@ async function sshDisconnectOthers(){
   toast('Disconnecting…');
   try {
     const r = await siteApi('POST', 'api/ssh/hosts/' + sshSessView.hostId + '/sessions/disconnect-all');
-    if (r.none) toast('Nothing to disconnect — every login here is from this panel', 'info');
+    if (r.none) toast('No live login to disconnect' + ((r.skippedEnded || []).length ? ' — ' + r.skippedEnded.length + ' entries are ended logins with leftover processes (use Kill per row)' : ''), 'info', { duration: 9000 });
     else {
       const done = (r.results || []).filter(x => x.ok).length, failed = (r.results || []).filter(x => !x.ok);
-      toast('Disconnected ' + done + ' of ' + (r.targets || []).length + ' session' + ((r.targets||[]).length === 1 ? '' : 's')
-        + (r.kept ? ' · kept ' + r.kept + ' from this panel' : ''), failed.length ? 'warn' : 'success',
+      toast('Disconnected ' + done + ' of ' + (r.targets || []).length + ' login' + ((r.targets||[]).length === 1 ? '' : 's')
+        + (r.kept ? ' · kept ' + r.kept + ' from this panel' : '') + ((r.skippedEnded||[]).length ? ' · skipped ' + r.skippedEnded.length + ' already ended' : '')
+        + ' · services left running', failed.length ? 'warn' : 'success',
         failed.length ? { detail: 'still alive: pid ' + failed.map(x => x.pid).join(', '), duration: 10000 } : {});
     }
   } catch(e){ toast('Disconnect failed: ' + e.message, 'error', { duration: 9000 }); }
