@@ -131,6 +131,7 @@ const section = (s) => console.log('\n### ' + s);
   const sites = (await req('GET', '/api/sites')).json.sites;
   const php = sites.find((s) => s.type === 'php') || sites[0];
   const node = sites.find((s) => s.type === 'nodejs');
+  const procSite = sites.find((s) => s.canControl) || node;      // a site whose apps this panel can actually control
   await check('GET /api/sites/templates', async () => { const r = await req('GET', '/api/sites/templates'); eq(r.status, 200); ok(r.json.length > 10); return r.json.length + ' templates'; });
   await check('GET /api/sites/runtimes', async () => { const r = await req('GET', '/api/sites/runtimes'); eq(r.status, 200); ok(r.json.php.length && r.json.nextPoolPort > 20000, 'shape'); return r.json.php.length + ' php versions, next pool port ' + r.json.nextPoolPort; });
   await check('GET /api/sites/:domain', async () => { const r = await req('GET', '/api/sites/' + php.domain); eq(r.status, 200); ok(r.json.domain === php.domain && r.json.unix, 'shape'); ok(!('user_password_enc' in r.json), 'leaked the encrypted password'); });
@@ -249,6 +250,33 @@ const section = (s) => console.log('\n### ' + s);
     const f = await req('GET', '/api/sites/' + php.domain + '/logs/nginx-error?lines=50&q=zzz-no-such-line');
     eq(f.status, 200); eq(f.json.lines.length, 0, 'filter matched something impossible');
     return k.length + ' kinds';
+  });
+  await check('health is measured against the origin, not through Cloudflare', async () => {
+    for (const s of sites) {
+      ok('originStatus' in s && 'statusReason' in s, s.domain + ': no origin probe in the payload');
+      if (s.status === 'online') ok(s.originUp, s.domain + ' is online but nginx on this host did not answer');
+      else ok(s.statusReason, s.domain + ' is ' + s.status + ' with no reason given');
+      if (s.type === 'nodejs' && s.status === 'online') ok(s.appUp, s.domain + ' is online but its app port did not answer');
+    }
+    const notOk = sites.filter((s) => s.status !== 'online');
+    return sites.length + ' sites probed' + (notOk.length ? ' · ' + notOk.map((s) => s.domain + ' ' + s.status).join(', ') : '');
+  });
+  await check('GET site processes lists pm2 homes and apps', async () => {
+    const r = await req('GET', '/api/sites/' + procSite.domain + '/processes');
+    eq(r.status, 200); ok(Array.isArray(r.json.homes) && Array.isArray(r.json.processes), 'shape');
+    for (const h of r.json.homes) ok(typeof h.running === 'boolean' && Array.isArray(h.dump), 'home shape');
+    for (const p of r.json.processes) ok(p.name && p.pm2User, 'process shape');
+    return r.json.homes.length + ' daemon(s), ' + r.json.processes.length + ' process(es)';
+  });
+  await check('processes of an unknown site → 404', async () => eq((await req('GET', '/api/sites/nope.example/processes')).status, 404));
+  await check('unknown pm2 action → 400', async () => eq((await req('POST', '/api/sites/' + procSite.domain + '/processes/blowup')).status, 400));
+  await check('pm2 action with an illegal process name → 400', async () => eq((await req('POST', '/api/sites/' + procSite.domain + '/processes/restart?app=a;rm%20-rf%20/')).status, 400));
+  await check('pm2 action for a user that does not own this site → 404', async () => eq((await req('POST', '/api/sites/' + procSite.domain + '/processes/restart?user=root')).status, 404));
+  await check('pm2 restart of an unknown process reports the failure', async () => {
+    const r = await req('POST', '/api/sites/' + procSite.domain + '/processes/restart?app=qa-no-such-process');
+    if (!(await req('GET', '/api/sites/' + procSite.domain + '/processes')).json.homes.length) return 'skip';
+    eq(r.status, 200); eq(r.json.ok, false);
+    ok(/not found/i.test(r.json.results.map((x) => x.output).join(' ')), 'pm2 did not say the process is unknown');
   });
   await check('GET unknown log kind → 404', async () => eq((await req('GET', '/api/sites/' + php.domain + '/logs/nope')).status, 404));
   await check('file manager: list, mkdir, write, read, download, chmod, rename, delete', async () => {

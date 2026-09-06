@@ -32,7 +32,18 @@ stay editable. Imported sites are `managed_by = 'clp'`; the first change made he
 touch the site in CloudPanel** (it would overwrite the vhost / pool from its stale copy). The active certificate is whatever is
 in `/etc/nginx/ssl-certificates/<domain>.crt` (all current sites: Cloudflare Origin CA, valid to 2040+).
 
-Per-site tabs: Settings (root dir, site-user password + authorized_keys, PHP version/limits or Node version/port), Vhost
+**Health is measured against the origin.** Every check is a request to `127.0.0.1:443` carrying the site's SNI and `Host:`
+header, plus — for a Node site — a second one straight to the app's own port. Resolving the public name instead would ask
+Cloudflare, which serves a cached page for a site whose origin is dead: that is why every site read "online" during the
+outage on 2026-09-06 while nothing was listening. A Cloudflare-only vhost answers the panel with 403; that is recorded as
+"unknown", never as a failure, and the app port decides. Each site carries `originStatus` / `appStatus` and a plain-language
+`statusReason`, shown on the card and in the site's Processes tab.
+
+Per-site tabs: Settings (root dir, site-user password + authorized_keys, PHP version/limits or Node version/port), **Processes**
+(the site's PM2 apps with start / restart / stop, and `pm2 resurrect` for a daemon that is down — a site's apps usually run
+under one of its SSH users, discovered through the `htdocs` symlink, and when that user's daemon is dead the apps are only
+visible in its `dump.pm2`, which is exactly the state a downed site is in; every pm2 command runs as the owning user with `-H`
+and a cwd inside that home, because pm2 spawns the app from its own cwd and the panel's `/root` is unreadable to it), Vhost
 (template editor — save runs `nginx -t`, reloads, restores the previous file on failure; backups in
 `/var/lib/rhc-srv-mon/vhost-bak/`), SSL/TLS (stored certificates, upload PEM, self-signed, activate), Security (basic auth,
 blocked IPs/bots, Cloudflare-only → `{{settings}}`), SSH/FTP (SSH users: own uid, site group, symlinked htdocs/logs/backups),

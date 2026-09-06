@@ -149,8 +149,10 @@ const server = http.createServer((req, res) => {
     const appName = parts[2];
     const pm2Home = `/home/${targetUser}/.pm2`;
     const cmd = action === 'start' ? 'start' : action === 'stop' ? 'stop' : 'restart';
-    execFile('sudo', ['-n', '-u', targetUser, 'sh', '-c',
-      `PM2_HOME=${pm2Home} pm2 ${cmd} ${appName} 2>&1`],
+    // -H and an accessible cwd matter: pm2 spawns the app from its own cwd, and this process runs
+    // from /root (0700), so an inherited cwd makes the app's `spawn node` fail with EACCES.
+    execFile('sudo', ['-n', '-H', '-u', targetUser, 'sh', '-c',
+      `cd /home/${targetUser} && PM2_HOME=${pm2Home} pm2 ${cmd} ${appName} 2>&1`],
       { timeout: 30000 },
       (err, stdout) => {
         const result = { action, user: targetUser, app: appName, success: !err, output: stdout.trim() };

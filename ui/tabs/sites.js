@@ -2,7 +2,7 @@
 // List (cards with health) → detail with CloudPanel-style sub-tabs. Sub-navigation lives in the
 // query string (sites?d=<domain>&t=<tab>) so every relative api/ URL keeps working behind nginx.
 let lastSites = null;
-const SITE_TABS = [['settings', 'Settings'], ['vhost', 'Vhost'], ['databases', 'Databases'], ['ssl', 'SSL/TLS'], ['security', 'Security'], ['ssh', 'SSH/FTP'], ['files', 'File Manager'], ['cron', 'Cron Jobs'], ['logs', 'Logs']];
+const SITE_TABS = [['settings', 'Settings'], ['procs', 'Processes'], ['vhost', 'Vhost'], ['databases', 'Databases'], ['ssl', 'SSL/TLS'], ['security', 'Security'], ['ssh', 'SSH/FTP'], ['files', 'File Manager'], ['cron', 'Cron Jobs'], ['logs', 'Logs']];
 let siteView = { domain: null, tab: 'settings', data: null, loading: false, sub: {} };   // sub: per-tab fetched data
 let siteQ = state.siteQ || '';
 let siteViewMode = state.siteViewMode || 'cards';      // cards | table
@@ -79,17 +79,47 @@ function renderSitesList(){
     html += '<div class="top"><div class="domain">' + esc(s.domain) + '<span class="hint">' + esc(siteTypeLabel(s.type)) + (s.managed_by === 'clp' ? ' · CLP' : '') + '</span></div>';
     html += '<span class="badge ' + s.status + '">' + s.statusLabel + '</span></div>';
     html += '<div class="meta"><span>Port: <span class="val">' + (portInfo || 'n/a') + '</span></span><span>HTTP: <span class="val">' + healthIcon + '</span></span><span>' + esc(appVer) + '</span><span>Disk: <span class="val">' + esc(s.disk || '?') + '</span></span></div>';
+    if (s.statusReason) html += '<div class="site-why">' + esc(s.statusReason) + '</div>';
     if (s.pm2 && s.pm2.length) {
       html += '<div class="procs">';
       for (const p of s.pm2) { const pUp = p.status === 'online'; html += '<div class="prow"><span class="pname">' + esc(p.name) + '</span><span class="pstat ' + (pUp?'up':'down') + '">' + (pUp?'🟢':'🔴') + ' ' + esc(p.status) + ' <span class="dim">CPU ' + p.cpu + '% · ' + fmtMem(p.memory) + '</span></span></div>'; }
       html += '</div>';
     }
+    if (s.canControl) html += siteCtlHtml(s.domain, null, null, 'card');
     html += '</div>';
   }
   if (!sorted.length) html += '<div class="upd-card dim">No sites match.</div>';
   html += '</div>';
   view.innerHTML = html;
 }
+// Start/stop/restart for a site's PM2 apps. Rendered on the list (whole site) and per process in the
+// Processes tab; clicks never bubble into the card/row navigation.
+function siteCtlHtml(domain, app, user, kind){
+  const a = (act, label, title, cls) => '<button class="btn small' + (cls ? ' ' + cls : '') + '" title="' + esc(title) + '" onclick="event.stopPropagation(); siteCtl(this, \'' + esc(domain) + '\', \'' + act + '\'' + (app ? ', ' + JSON.stringify(app) : ', null') + (user ? ', ' + JSON.stringify(user) : ', null') + ')">' + label + '</button>';
+  const what = app ? 'this process' : 'every PM2 app of this site';
+  return '<div class="site-ctl' + (kind === 'card' ? ' on-card' : '') + '" onclick="event.stopPropagation()">'
+    + a('start', '▶', 'Start ' + what + ' (resurrects a pm2 daemon that is down)')
+    + a('restart', '⟳', 'Restart ' + what)
+    + a('stop', '⏹', 'Stop ' + what, 'danger')
+    + '</div>';
+}
+async function siteCtl(btn, domain, action, app, user){
+  if (action === 'stop' && btn && !btn._armed) { armConfirm(btn, 'stop?', () => { btn._armed = true; siteCtl(btn, domain, action, app, user); }); return; }
+  if (btn) { btn._armed = false; btn.disabled = true; }
+  const label = (app || 'all') + ' · ' + domain;
+  try {
+    const q = [];
+    if (app) q.push('app=' + encodeURIComponent(app));
+    if (user) q.push('user=' + encodeURIComponent(user));
+    const r = await siteApi('POST', 'api/sites/' + encodeURIComponent(domain) + '/processes/' + action + (q.length ? '?' + q.join('&') : ''));
+    const out = r.results.map(x => x.user + ': ' + (x.command || '') + '\n' + (x.output || '')).join('\n\n');
+    if (r.ok) toast('pm2 ' + action + ' · ' + label, 'success', { detail: out, duration: 6000 });
+    else toast('pm2 ' + action + ' did not fully succeed · ' + label, 'warn', { detail: out, duration: 14000 });
+    setTimeout(() => { if (siteView.domain) siteSubReload('procs'); refresh(); }, 1200);
+  } catch(e){ siteErr(e, 'pm2 ' + action); }
+  finally { if (btn) btn.disabled = false; }
+}
+
 function siteSetView(m){ siteViewMode = m; state.siteViewMode = m; saveState(); renderSitesList(); }
 function siteSetSort(col){ if (siteSort === col) siteSortDir = -siteSortDir; else { siteSort = col; siteSortDir = 1; } state.siteSort = siteSort; state.siteSortDir = siteSortDir; saveState(); renderSitesList(); }
 // Compact table: one row per site, sortable columns, whole row opens the site.
@@ -102,7 +132,7 @@ function siteTableHtml(list, byStatus){
     const port = s.nodePort || s.poolPort || '';
     const pm2 = s.pm2 && s.pm2.length ? '<span class="' + (s.pm2.every(p => p.status === 'online') ? 'up' : 'down') + '">' + s.pm2.filter(p => p.status === 'online').length + '/' + s.pm2.length + '</span> <span class="dim" title="' + esc(s.pm2.map(p => p.name + ' ' + p.status).join('\n')) + '">' + esc(s.pm2.map(p => p.name).join(', ')).slice(0, 60) + '</span>' : '<span class="dim">–</span>';
     h += '<tr class="site-row" onclick="siteGo(\'' + esc(s.domain) + '\', state.siteTab || \'settings\')">'
-      + '<td><span class="badge ' + s.status + '">' + esc(s.statusLabel) + '</span></td>'
+      + '<td><span class="badge ' + s.status + '"' + (s.statusReason ? ' title="' + esc(s.statusReason) + '"' : '') + '>' + esc(s.statusLabel) + '</span></td>'
       + '<td class="site-td-domain"><b>' + esc(s.domain) + '</b></td>'
       + '<td>' + esc(siteTypeLabel(s.type)) + (s.application && !['Nodejs','Static','ReverseProxy','Python','Generic'].includes(s.application) ? ' <span class="dim">' + esc(s.application) + '</span>' : '') + '</td>'
       + '<td class="mono">' + esc(s.user || '') + '</td>'
@@ -112,7 +142,7 @@ function siteTableHtml(list, byStatus){
       + '<td>' + pm2 + '</td>'
       + '<td class="mono">' + esc(s.disk || '?') + '</td>'
       + '<td>' + (s.managed_by === 'clp' ? '<span class="badge type">CloudPanel</span>' : '<span class="badge online">this panel</span>') + '</td>'
-      + '<td style="text-align:right"><a class="btn small" href="sites?d=' + esc(encodeURIComponent(s.domain)) + '&t=settings" onclick="event.stopPropagation(); event.preventDefault(); siteGo(\'' + esc(s.domain) + '\', \'settings\')">Open</a> <a class="btn small" href="https://' + esc(s.domain) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">↗</a></td></tr>';
+      + '<td style="text-align:right;white-space:nowrap">' + (s.canControl ? siteCtlHtml(s.domain, null, null, 'row') : '') + '<a class="btn small" href="sites?d=' + esc(encodeURIComponent(s.domain)) + '&t=settings" onclick="event.stopPropagation(); event.preventDefault(); siteGo(\'' + esc(s.domain) + '\', \'settings\')">Open</a> <a class="btn small" href="https://' + esc(s.domain) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">↗</a></td></tr>';
   }
   if (!rows.length) h += '<tr><td colspan="11" class="dim">No sites match.</td></tr>';
   return h + '</tbody></table></div>';
@@ -157,7 +187,7 @@ function renderSiteDetail(){
   // do not clobber a form the user is typing in (10 s refresh)
   if (view.contains(document.activeElement) && ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;
   const s = siteView.data;
-  const body = ({ settings: siteTabSettings, vhost: siteTabVhost, databases: siteTabDatabases, ssl: siteTabSsl, security: siteTabSecurity, ssh: siteTabSsh, files: siteTabFiles, cron: siteTabCron, logs: siteTabLogs }[siteView.tab] || siteTabSettings)(s);
+  const body = ({ settings: siteTabSettings, procs: siteTabProcs, vhost: siteTabVhost, databases: siteTabDatabases, ssl: siteTabSsl, security: siteTabSecurity, ssh: siteTabSsh, files: siteTabFiles, cron: siteTabCron, logs: siteTabLogs }[siteView.tab] || siteTabSettings)(s);
   view.innerHTML = siteHeader(s) + '<div class="site-body">' + body + '</div>';
   if (typeof siteView.afterRender === 'function') { const f = siteView.afterRender; siteView.afterRender = null; f(); }
 }
@@ -173,6 +203,58 @@ function siteSubReload(key){ delete siteView.sub[key]; renderSiteDetail(); }
 function siteReloadAll(){ const keep = { fmPath: siteView.sub.fmPath, logKind: siteView.sub.logKind }; siteView.sub = keep; siteView.data = null; renderSiteDetail(); }
 const siteField = (label, inner, hint) => sshField(label, inner, hint);
 const siteCard = (title, inner, right) => '<div class="upd-card"><div class="site-card-hd"><h3>' + title + '</h3>' + (right || '') + '</div>' + inner + '</div>';
+
+/* ---- Processes ---- */
+// PM2 apps of this site. A site's apps often run under one of its SSH users, and when that user's
+// pm2 daemon is down the apps are only visible in its dump.pm2 — which is exactly when this page
+// matters, so daemons are listed separately from processes.
+function siteTabProcs(s){
+  const h = s.health || {};
+  let head = '';
+  if (h.status) {
+    const bits = [];
+    if (h.originStatus != null) bits.push('nginx on this host answered <b>' + h.originStatus + '</b>' + (h.cfOnly && h.originStatus === 403 ? ' <span class="dim">(Cloudflare-only vhost — it refuses the panel, not the app)</span>' : ''));
+    else if (h.originError) bits.push('nginx on this host did not answer <span class="dim">(' + esc(h.originError) + ')</span>');
+    if (h.appStatus != null) bits.push('the app answered <b>' + h.appStatus + '</b> on its own port');
+    else if (h.appError) bits.push('the app did not answer on its own port <span class="dim">(' + esc(h.appError) + ')</span>');
+    head = siteCard('Health', '<div class="site-health"><span class="badge ' + h.status + '">' + esc(h.statusLabel) + '</span>'
+      + (h.statusReason ? '<div class="site-why">' + esc(h.statusReason) + '</div>' : '')
+      + '<ul class="site-probe">' + bits.map(b => '<li>' + b + '</li>').join('') + '</ul></div>',
+      '<button class="btn small" onclick="siteRecheck(this)">Re-check now</button>');
+  }
+  return head + siteSub('procs', siteUrl('/processes'), (d) => {
+    let h2 = '';
+    for (const home of d.homes) {
+      h2 += '<div class="site-daemon"><span class="' + (home.running ? 'up' : 'down') + '">' + (home.running ? '🟢' : '🔴') + '</span> <b class="mono">' + esc(home.user) + '</b> · pm2 daemon ' + (home.running ? 'running' : 'not running')
+        + ' <span class="dim">' + home.dump.length + ' app(s) saved in dump.pm2</span>'
+        + (!home.running && home.dump.length ? ' <button class="btn small pri" onclick="siteCtl(this, \'' + esc(s.domain) + '\', \'resurrect\', null, ' + JSON.stringify(home.user) + ')" title="pm2 resurrect — start every app in this user\'s dump.pm2">Resurrect</button>' : '') + '</div>';
+    }
+    if (!d.homes.length) h2 += '<p class="dim">No pm2 daemon belongs to this site (no <span class="mono">~/.pm2</span> for ' + esc(s.user) + ' or any of its SSH users).</p>';
+    if (d.processes.length) {
+      h2 += '<table class="upd-table"><thead><tr><th>Process</th><th>Status</th><th>CPU</th><th>Memory</th><th>Restarts</th><th>Uptime</th><th>Runs as</th><th></th></tr></thead><tbody>';
+      for (const p of d.processes) {
+        const up = p.status === 'online';
+        h2 += '<tr><td class="mono"><b>' + esc(p.name) + '</b></td>'
+          + '<td><span class="' + (up ? 'up' : 'down') + '">' + (up ? '🟢' : '🔴') + ' ' + esc(p.status) + '</span></td>'
+          + '<td>' + (p.fromDump ? '<span class="dim">–</span>' : p.cpu + '%') + '</td>'
+          + '<td>' + (p.fromDump ? '<span class="dim">–</span>' : fmtMem(p.memory)) + '</td>'
+          + '<td>' + (p.fromDump ? '<span class="dim">–</span>' : p.restarts) + '</td>'
+          + '<td>' + (p.uptime_ms ? esc(fmtUp(p.uptime_ms)) : '<span class="dim">–</span>') + '</td>'
+          + '<td class="mono dim">' + esc(p.pm2User) + '</td>'
+          + '<td style="text-align:right;white-space:nowrap">' + siteCtlHtml(s.domain, p.name, p.pm2User, 'row') + '</td></tr>';
+      }
+      h2 += '</tbody></table>';
+    } else h2 += '<p class="dim">No processes.</p>';
+    return siteCard('PM2 Processes', h2,
+      '<div class="site-ctl">' + (d.homes.length ? '<button class="btn small" onclick="siteCtl(this, \'' + esc(s.domain) + '\', \'start\')">▶ Start all</button><button class="btn small" onclick="siteCtl(this, \'' + esc(s.domain) + '\', \'restart\')">⟳ Restart all</button><button class="btn small danger" onclick="siteCtl(this, \'' + esc(s.domain) + '\', \'stop\')">⏹ Stop all</button>' : '') + '<button class="btn small" onclick="siteSubReload(\'procs\')">↻</button></div>');
+  });
+}
+async function siteRecheck(btn){
+  if (btn) btn.disabled = true;
+  try { await siteApi('POST', 'api/sites/check'); siteView.data = null; siteSubReload('procs'); toast('Re-checked', 'success'); }
+  catch(e){ siteErr(e, 'Re-check'); }
+  finally { if (btn) btn.disabled = false; }
+}
 
 /* ---- Settings ---- */
 function siteTabSettings(s){

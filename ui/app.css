@@ -157,6 +157,17 @@
   .site-card .procs .prow .pstat.up { color:#5cdd8b; }
   .site-card .procs .prow .pstat.down { color:#dc3545; }
   .site-card .procs .prow .pstat .dim { color:#6b7280; }
+  /* why a site is not online, and the start/stop/restart controls (list + Processes tab) */
+  .site-why { font-size:11.5px; color:#f8a306; background:#2a2416; border-radius:8px; padding:6px 9px; margin-top:8px; line-height:1.45; }
+  .site-ctl { display:inline-flex; gap:4px; align-items:center; }
+  .site-ctl.on-card { margin-top:10px; border-top:1px solid #2a2f40; padding-top:9px; display:flex; }
+  .site-ctl .btn { padding:3px 9px; }
+  .site-ctl .btn:disabled { opacity:.5; cursor:default; }
+  .site-daemon { font-size:12.5px; color:#9ca3af; padding:6px 0; display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+  .site-daemon .up { color:#5cdd8b; } .site-daemon .down { color:#ff8088; }
+  .site-health { display:flex; flex-direction:column; gap:8px; align-items:flex-start; }
+  .site-probe { margin:0; padding-left:18px; font-size:12px; color:#9ca3af; line-height:1.7; }
+  .site-probe b { color:#e9e9e9; }
   .btn { background:#2a2f40; border:none; color:#e9e9e9; border-radius:8px; padding:4px 10px; font-size:11px; font-weight:600; cursor:pointer; }
   .btn:hover { background:#3a4054; }
   /* Modules tab */
