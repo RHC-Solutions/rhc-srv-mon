@@ -917,6 +917,9 @@ function severityOf(current, latest) {
   const a = semverParts(current);
   const b = semverParts(latest);
   if (!a || !b) return null;
+  // Never treat a pre-release as "the update" for a stable install (e.g. prisma 7.10 -> 8.0.0-rc.13:
+  // the rc CLI has no `generate`, so the project's postinstall fails and the whole install exits 2).
+  if (/-/.test(String(latest)) && !/-/.test(String(current))) return null;
   if (a[0] !== b[0]) return 'major';
   if (a[1] !== b[1]) return 'minor';
   if (a[2] !== b[2]) return 'patch';
