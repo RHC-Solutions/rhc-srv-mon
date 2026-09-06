@@ -48,6 +48,22 @@ each enabled channel; the Telegram block was migrated out of `updates.json` into
 (verified on save, stored encrypted; the Domains card shows every site's DNS record / proxy state per zone; DNS management and
 origin certificates are next), and the **Cleanup** card that used to sit on the Modules tab.
 
+## Remote desktops (VNC) and SSH sessions
+
+An SSH host entry can open either a **terminal** or a **VNC viewer** (`protocol` on the host record).
+The viewer is noVNC in a pane next to the terminals; the byte stream goes through `/ws/vnc`, a WebSocket↔RFB
+bridge (`lib/vnc.js`) that reaches the server either directly or — the default — with `ssh -W` over the host's
+existing SSH credentials, so a VNC server bound to localhost needs nothing exposed. The target is probed before
+the viewer opens, so a wrong port or a stopped server is reported with its reason.
+
+**🖵 Deploy VNC** (in a host's edit dialog) installs a VNC server on that host over SSH: tigervnc via apt/dnf/yum,
+optionally XFCE, a password file generated locally (`lib/vnc-passwd.js` — Debian ships no `vncpasswd`), and one
+predictable `rhc-vnc@:N` systemd unit (`resources/deploy-vnc.sh`) listening on loopback only. On success the host
+entry is switched to VNC with the password stored, so it opens with a click.
+
+**👥 Sessions** lists this panel's open terminals (closable) and, per host, who is logged in over SSH right now —
+from logind, falling back to `who`/`ss` — with a disconnect that only ever signals a pid from that live list.
+
 ## Events tab
 
 Every user action and scheduler run is written to the `events` table (`lib/events.js` → `emit(type, {…})`): logins and

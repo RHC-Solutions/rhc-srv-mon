@@ -464,7 +464,7 @@ function sshEditHost(id){
       + '</div>'
     + sshField('After login', '<label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer"><input type="checkbox" id="shf-root"' + (h.becomeRoot ? ' checked' : '') + ' style="accent-color:#5cdd8b"> Become root (<code>sudo -i</code>) — for non-root users; a sudo password prompt is answered with the stored password, or type it</label>')
     + '<div id="shf-test"></div>'
-    + '<div class="foot"><div class="left">' + (id ? '<button class="btn danger" onclick="sshDeleteHost(\'' + id + '\')">Delete</button>' : '') + (id ? '<button class="btn" onclick="sshTestHost(\'' + id + '\')">🔌 Test connection</button>' : '') + '</div>'
+    + '<div class="foot"><div class="left">' + (id ? '<button class="btn danger" onclick="sshDeleteHost(\'' + id + '\')">Delete</button>' : '') + (id ? '<button class="btn" onclick="sshTestHost(\'' + id + '\')">🔌 Test connection</button>' : '') + (id ? '<button class="btn" onclick="sshDeployVncDialog(\'' + id + '\')" title="Install a VNC server on this host">🖵 Deploy VNC</button>' : '') + '</div>'
     + '<button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="sshSaveHost(' + (id ? '\'' + id + '\'' : 'null') + ')">' + (id ? 'Save' : 'Add host') + '</button></div>');
 }
 function sshReadHostForm(){
@@ -621,8 +621,8 @@ async function sshRenderInstalls(){
     const st = j.status === 'running' ? '<span class="upd-badge new">⏳ running' + (j.step ? ' · ' + esc(j.step) : '') + '</span>' : j.status === 'ok' ? '<span class="upd-badge ok">✅ installed</span>' : '<span class="upd-badge err">❌ failed</span>';
     const log = sshJobLogs.get(j.id);
     const open = j.status === 'running' || window._sshOpenJob === j.id;
-    return '<div class="ssh-inst"><div class="top"><b>📦 ' + esc(j.hostName || j.target) + '</b>' + st + '</div>'
-      + '<div class="meta">' + esc(j.target) + ' → ' + esc(j.opts ? j.opts.appDir + ' :' + j.opts.port : '') + ' · ' + esc((j.startedAt||'').slice(0,16).replace('T',' ')) + (j.finishedAt ? ' · ' + Math.round((new Date(j.finishedAt) - new Date(j.startedAt))/1000) + 's' : '') + (j.error ? '<br><span style="color:#ff8088">' + esc(j.error) + '</span>' : '') + '</div>'
+    return '<div class="ssh-inst"><div class="top"><b>' + (j.kind === 'vnc' ? '🖵' : '📦') + ' ' + esc(j.hostName || j.target) + '</b>' + st + '</div>'
+      + '<div class="meta">' + esc(j.target) + ' → ' + esc(j.kind === 'vnc' ? 'VNC :' + j.opts.display + ' (' + j.opts.geometry + ', ' + j.opts.desktop + ')' + (j.result ? ' → port ' + j.result.port : '') : (j.opts ? j.opts.appDir + ' :' + j.opts.port : '')) + ' · ' + esc((j.startedAt||'').slice(0,16).replace('T',' ')) + (j.finishedAt ? ' · ' + Math.round((new Date(j.finishedAt) - new Date(j.startedAt))/1000) + 's' : '') + (j.error ? '<br><span style="color:#ff8088">' + esc(j.error) + '</span>' : '') + '</div>'
       + (open && log ? '<pre id="ssh-log-' + j.id + '">' + log.map(l => '<span class="t">' + esc(l.t.slice(11,19)) + '</span> <span class="' + esc(l.k) + '">' + esc(l.m) + '</span>').join('\n') + '</pre>' : '')
       + '<div class="acts">'
       + (open ? (j.status === 'running' ? '' : '<button class="upd-test-btn" onclick="window._sshOpenJob=null;sshRenderInstalls()">Hide log</button>')
@@ -708,4 +708,37 @@ async function sshDisconnectRemote(pid){
     toast('Disconnected pid ' + r.pid, 'success');
   } catch(e){ toast('Disconnect failed: ' + e.message, 'error', { duration: 9000 }); }
   sshSessRender(true);
+}
+
+
+/* ---- deploy a VNC server on a host ---- */
+function sshDeployVncDialog(id){
+  const h = sshData && sshData.hosts.find(x => x.id === id); if (!h) return;
+  const used = (sshData.hosts || []).filter(x => x.vnc && x.id !== id).map(x => x.vnc.display);
+  let disp = h.vnc ? h.vnc.display : 1;
+  while (used.includes(disp)) disp++;
+  const bg = sshModal('<h3>🖵 Deploy a VNC server on ' + esc(h.name) + '</h3>'
+    + '<div class="box">Installs a VNC server (tigervnc) on <b>' + esc((h.user||'root') + '@' + h.host) + '</b>, writes a password file and a <code>rhc-vnc@:N</code> systemd service, and starts it <b>bound to localhost</b>. Nothing is exposed to the network — this panel reaches the desktop through the same SSH connection.'
+    + (h.vnc ? '<br>Already deployed here on ' + esc(String(h.vnc.deployedAt).slice(0,16).replace('T',' ')) + ' as display :' + h.vnc.display + ' — running this again re-deploys it.' : '') + '</div>'
+    + '<div class="row3">' + sshField('Display', '<input id="dv-disp" type="number" min="1" max="99" value="' + disp + '">', 'port ' + (5900 + disp) + ' on the target')
+    + sshField('Run as user', '<input id="dv-user" value="' + esc(h.vnc ? h.vnc.user : (h.user || 'root')) + '">', 'the desktop session owner')
+    + sshField('Screen size', '<input id="dv-geom" value="1280x800">') + '</div>'
+    + '<div class="row2">' + sshField('Desktop', '<select id="dv-desktop"><option value="xfce">XFCE (installs it if missing — several minutes)</option><option value="none">None — bare X (xterm if available)</option></select>')
+    + sshField('VNC password', '<input id="dv-pw" placeholder="leave empty to generate">', 'VNC passwords are truncated to 8 characters by the protocol') + '</div>'
+    + '<label class="upd-toggle"><input type="checkbox" id="dv-link" checked style="accent-color:#5cdd8b"> Make this host open as a VNC viewer afterwards</label>'
+    + ((h.user||'root') !== 'root' ? sshField('sudo password for ' + esc(h.user), '<input id="dv-sudo" type="password" autocomplete="new-password" placeholder="needed unless ' + esc(h.user) + ' has passwordless sudo">') : '')
+    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" id="dv-go">🚀 Deploy</button></div>');
+  bg.querySelector('#dv-disp').addEventListener('input', (e) => { const f = bg.querySelector('#dv-disp').parentElement.querySelector('.hint'); if (f) f.textContent = 'port ' + (5900 + (parseInt(e.target.value) || 1)) + ' on the target'; });
+  bg.querySelector('#dv-go').onclick = async () => {
+    const g = (i) => { const el = bg.querySelector('#' + i); return el ? el.value : ''; };
+    const body = { display: parseInt(g('dv-disp')) || 1, vncUser: g('dv-user').trim(), geometry: g('dv-geom').trim(), desktop: g('dv-desktop'),
+      password: g('dv-pw').trim() || undefined, createHost: bg.querySelector('#dv-link').checked, sudoPassword: g('dv-sudo') };
+    try {
+      const r = await siteApi('POST', 'api/ssh/hosts/' + id + '/deploy-vnc', body);
+      sshModalClose();
+      toast('Deploying — password ' + r.password + ' (also stored on the host entry)', 'success', { duration: 12000 });
+      window._sshOpenJob = r.jobId;
+      await renderSsh(); sshInstallsDialog();
+    } catch(e){ toast('Deploy failed to start: ' + e.message, 'error', { duration: 9000 }); }
+  };
 }
