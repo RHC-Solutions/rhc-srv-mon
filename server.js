@@ -2652,9 +2652,28 @@ const PAGE = `<!doctype html>
   .ssh-tabbar .tools button { background:transparent; border:1px solid #2a2f40; color:#9ca3af; border-radius:6px; padding:3px 9px; font-size:11.5px; cursor:pointer; white-space:nowrap; }
   .ssh-tabbar .tools button:hover { color:#e9e9e9; background:#262b3b; }
   .ssh-terms { flex:1; position:relative; min-height:0; }
-  .ssh-term { position:absolute; inset:0; padding:6px 0 4px 8px; display:none; }
-  .ssh-term.active { display:block; }
-  .ssh-term .xterm { height:100%; }
+  .ssh-term { position:absolute; inset:0; padding:6px 0 4px 8px; display:none; flex-direction:column; min-width:0; min-height:0; }
+  .ssh-term.active { display:flex; }
+  .ssh-term .pane-hd { display:none; align-items:center; gap:8px; font-size:11.5px; color:#9ca3af; padding:0 6px 4px 0; flex-shrink:0; user-select:none; }
+  .ssh-term .pane-hd b { color:#e9e9e9; font-weight:600; }
+  .ssh-term .pane-hd .sp { flex:1; }
+  .ssh-term .pane-hd button { background:transparent; border:1px solid #2a2f40; color:#9ca3af; border-radius:5px; padding:1px 7px; font-size:11px; cursor:pointer; }
+  .ssh-term .pane-hd button:hover { color:#e9e9e9; background:#262b3b; }
+  .ssh-term .pane-body { flex:1; min-height:0; position:relative; }
+  .ssh-term .pane-body .xterm { height:100%; }
+  /* split layouts: 2 / 3 columns or a 2×2 grid of terminals shown at once (tabs still list every session) */
+  .ssh-terms.multi { display:grid; gap:4px; padding:4px; background:#161823; }
+  .ssh-terms.layout-2 { grid-template-columns:repeat(2, minmax(0,1fr)); }
+  .ssh-terms.layout-3 { grid-template-columns:repeat(3, minmax(0,1fr)); }
+  .ssh-terms.layout-4 { grid-template-columns:repeat(2, minmax(0,1fr)); grid-template-rows:repeat(2, minmax(0,1fr)); }
+  .ssh-terms.multi .ssh-term { position:relative; inset:auto; display:none; border:1px solid #2a2f40; border-radius:8px; padding:4px 0 4px 8px; background:#0c0e16; }
+  .ssh-terms.multi .ssh-term.shown { display:flex; }
+  .ssh-terms.multi .ssh-term.focused { border-color:#5cdd8b; }
+  .ssh-terms.multi .ssh-term .pane-hd { display:flex; }
+  .ssh-terms.multi .ssh-empty-pane { border:1px dashed #2a2f40; border-radius:8px; display:flex; align-items:center; justify-content:center; color:#6b7280; font-size:12.5px; text-align:center; padding:12px; }
+  .ssh-tab.shown .tt::after { content:' ▣'; color:#5cdd8b; font-size:10px; }
+  .ssh-tabbar .tools .lay { padding:3px 7px; letter-spacing:-1px; }
+  .ssh-tabbar .tools .lay.on { color:#5cdd8b; border-color:#5cdd8b66; }
   .ssh-empty { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#6b7280; font-size:13.5px; gap:10px; text-align:center; padding:20px; }
   .ssh-empty b { color:#9ca3af; font-size:15px; }
   .ssh-empty kbd { background:#1e2230; border:1px solid #2a2f40; border-radius:4px; padding:1px 6px; font-size:11px; }
@@ -2748,7 +2767,7 @@ const PAGE = `<!doctype html>
       <section class="ssh-main">
         <div class="ssh-tabbar" id="ssh-tabbar"></div>
         <div class="ssh-terms" id="ssh-terms">
-          <div class="ssh-empty" id="ssh-empty"><b>No open sessions</b><span>Click a host on the left to open a terminal tab. Each click opens a new tab — like mRemoteNG.</span><span><kbd>＋</kbd> in the tab bar connects ad hoc to any user@host · <kbd>⚙</kbd> font, colors, keys.</span><span>Sessions keep running on the server across refreshes and closed browsers — only the tab's × ends them.</span></div>
+          <div class="ssh-empty" id="ssh-empty"><b>No open sessions</b><span>Click a host on the left to open a terminal tab. Each click opens a new tab — like mRemoteNG.</span><span><kbd>＋</kbd> in the tab bar connects ad hoc to any user@host · <kbd>⚙</kbd> font, colors, keys · <kbd>▭▭</kbd> / <kbd>⊞</kbd> show 2–4 terminals side by side.</span><span>Sessions keep running on the server across refreshes and closed browsers — only the tab's × ends them.</span></div>
         </div>
       </section>
     </div>
@@ -4225,25 +4244,65 @@ function sshRenderTabs(){
   const bar = document.getElementById('ssh-tabbar'); if (!bar) return;
   let html = '';
   for (const s of sshSess.values()) {
-    html += '<div class="ssh-tab' + (s.id === sshActive ? ' active' : '') + '" data-id="' + s.id + '" onclick="sshActivate(\\'' + s.id + '\\')" onauxclick="if(event.button===1){event.preventDefault();sshCloseTab(\\'' + s.id + '\\')}" ondblclick="sshRenameTab(\\'' + s.id + '\\')" title="' + esc(s.target || '') + '">'
+    html += '<div class="ssh-tab' + (s.id === sshActive ? ' active' : '') + (sshLayout() > 1 && sshPanes.includes(s.id) ? ' shown' : '') + '" data-id="' + s.id + '" onclick="sshActivate(\\'' + s.id + '\\')" onauxclick="if(event.button===1){event.preventDefault();sshCloseTab(\\'' + s.id + '\\')}" ondblclick="sshRenameTab(\\'' + s.id + '\\')" title="' + esc(s.target || '') + '">'
       + '<span class="st ' + s.status + '"></span><span class="tt">' + esc(s.label) + '</span>'
       + '<button class="x" title="Close tab" onclick="event.stopPropagation();sshCloseTab(\\'' + s.id + '\\')">×</button></div>';
   }
   html += '<div class="ssh-tab plus" title="Ad-hoc connection (user@host)" onclick="sshAdhocDialog()">＋</div><div class="sp"></div>';
-  html += '<div class="tools">' + (sshSess.size ? '<button onclick="sshDuplicateTab()" title="Open another tab to the same host">⧉ Duplicate</button><button onclick="sshCloseAll()" title="Close all tabs (ends the sessions)">Close all</button>' : '') + '<button onclick="sshSettingsDialog()" title="Terminal settings: font, size, colors, keys">⚙</button></div>';
+  const lay = sshLayout();
+  html += '<div class="tools">' + (sshSess.size ? '<button onclick="sshDuplicateTab()" title="Open another tab to the same host">⧉ Duplicate</button><button onclick="sshCloseAll()" title="Close all tabs (ends the sessions)">Close all</button>' : '')
+    + [[1,'▭','Single terminal (tabs)'],[2,'▭▭','2 side by side'],[3,'▭▭▭','3 side by side'],[4,'⊞','2 × 2 grid']].map(([n,ic,tt]) => '<button class="lay' + (lay===n?' on':'') + '" title="' + tt + '" onclick="sshSetLayout(' + n + ')">' + ic + '</button>').join('')
+    + '<button onclick="sshSettingsDialog()" title="Terminal settings: font, size, colors, keys">⚙</button></div>';
   bar.innerHTML = html;
   document.getElementById('ssh-empty').style.display = sshSess.size ? 'none' : '';
 }
-function sshActivate(id){
-  sshActive = id;
-  for (const s of sshSess.values()) s.el.classList.toggle('active', s.id === id);
-  sshRenderTabs();
-  const s = sshSess.get(id);
-  if (s) requestAnimationFrame(() => { try { s.fit.fit(); s.term.focus(); } catch(e){} });
+/* ---- split layouts: sshPanes[i] = session id shown in pane i (layout 1 = classic tabs) ---- */
+let sshPanes = [], sshFocusPane = 0;
+function sshLayout(){ try { const n = parseInt(localStorage.getItem('rhc-ssh-layout') || '1'); return [1,2,3,4].includes(n) ? n : 1; } catch(e){ return 1; } }
+function sshSetLayout(n){
+  try { localStorage.setItem('rhc-ssh-layout', String(n)); } catch(e){}
+  const ids = [...sshSess.keys()];
+  const order = [sshActive, ...sshPanes, ...ids].filter((v, i, a) => v && sshSess.has(v) && a.indexOf(v) === i);
+  sshPanes = order.slice(0, n); while (sshPanes.length < n) sshPanes.push(null);
+  sshFocusPane = Math.max(0, sshPanes.indexOf(sshActive));
+  sshRenderPanes(); sshRenderTabs();
 }
+function sshRenderPanes(){
+  const n = sshLayout(), box = document.getElementById('ssh-terms');
+  box.className = 'ssh-terms' + (n > 1 ? ' multi layout-' + n : '');
+  box.querySelectorAll('.ssh-empty-pane').forEach(e => e.remove());
+  if (n === 1) {
+    for (const s of sshSess.values()) { s.el.classList.toggle('active', s.id === sshActive); s.el.classList.remove('shown', 'focused'); s.el.style.order = ''; }
+  } else {
+    if (sshPanes.length !== n) sshSetLayout(n);
+    for (const s of sshSess.values()) {
+      const i = sshPanes.indexOf(s.id);
+      s.el.classList.remove('active'); s.el.classList.toggle('shown', i >= 0); s.el.classList.toggle('focused', i >= 0 && i === sshFocusPane);
+      s.el.style.order = i >= 0 ? String(i) : '';
+    }
+    sshPanes.forEach((id, i) => { if (!id || !sshSess.has(id)) { const e = document.createElement('div'); e.className = 'ssh-empty-pane'; e.style.order = String(i); e.textContent = 'empty pane ' + (i + 1) + ' — click here, then a host on the left'; e.onclick = () => { sshFocusPane = i; sshRenderPanes(); }; if (i === sshFocusPane) e.style.borderColor = '#5cdd8b'; box.appendChild(e); } });
+  }
+  document.getElementById('ssh-empty').style.display = sshSess.size ? 'none' : '';
+  requestAnimationFrame(() => { for (const s of sshSess.values()) if (s.el.classList.contains('active') || s.el.classList.contains('shown')) { try { s.fit.fit(); } catch(e){} } });
+}
+function sshActivate(id, opts){
+  opts = opts || {};
+  sshActive = id;
+  const n = sshLayout();
+  if (n > 1) {
+    if (sshPanes.length !== n) { sshPanes = sshPanes.slice(0, n); while (sshPanes.length < n) sshPanes.push(null); }
+    let i = sshPanes.indexOf(id);
+    if (i < 0) { i = sshPanes.indexOf(null); if (i < 0 || opts.replaceFocused) i = sshFocusPane; sshPanes[i] = id; }
+    sshFocusPane = i;
+  }
+  sshRenderPanes(); sshRenderTabs();
+  const s = sshSess.get(id);
+  if (s && !opts.noFocus) requestAnimationFrame(() => { try { s.fit.fit(); s.term.focus(); } catch(e){} });
+}
+function sshPaneSolo(id){ sshSetLayout(1); sshActivate(id); }
 function sshRenameTab(id){
   const s = sshSess.get(id); if (!s) return;
-  const n = prompt('Tab name', s.label); if (n && n.trim()) { s.label = n.trim().slice(0, 60); sshRenderTabs(); }
+  const n = prompt('Tab name', s.label); if (n && n.trim()) { s.label = n.trim().slice(0, 60); const b = s.el.querySelector('.pane-hd .pl'); if (b) b.textContent = s.label; sshRenderTabs(); }
 }
 function sshDuplicateTab(){ const s = sshSess.get(sshActive); if (!s) return; if (s.hostId) sshConnect(s.hostId); else sshConnectAdhoc(s.adhoc); }
 function sshCloseAll(){ for (const id of [...sshSess.keys()]) sshCloseTab(id); }
@@ -4256,7 +4315,9 @@ function sshCloseTab(id){
   try { if (s.ws && s.ws.readyState <= 1) setTimeout(() => { try { s.ws.close(); } catch(e){} }, 150); } catch(e){}
   try { s.term.dispose(); } catch(e){}
   s.el.remove(); sshSess.delete(id);
-  if (sshActive === id) { const rest = [...sshSess.keys()]; sshActive = rest.length ? rest[rest.length-1] : null; if (sshActive) sshActivate(sshActive); }
+  const pi = sshPanes.indexOf(id); if (pi >= 0) { const hidden = [...sshSess.keys()].find(k => !sshPanes.includes(k)); sshPanes[pi] = hidden || null; }
+  if (sshActive === id) { const rest = sshPanes.filter(Boolean).concat([...sshSess.keys()]); sshActive = rest.length ? rest[0] : null; }
+  if (sshActive) sshActivate(sshActive); else sshRenderPanes();
   sshRenderTabs(); sshRenderHosts();
 }
 
@@ -4272,12 +4333,14 @@ async function sshOpenTab(o){
   try { await sshLoadLib(); } catch(e){ return toast('Cannot load terminal library: ' + e.message, 'error'); }
   const id = 't' + (++sshTabSeq);
   const el = document.createElement('div'); el.className = 'ssh-term'; el.dataset.id = id;
+  el.innerHTML = '<div class="pane-hd"><b class="pl">' + esc(o.label) + '</b><span class="pt">' + esc(o.target || '') + '</span><span class="sp"></span><button title="Show only this terminal" onclick="sshPaneSolo(\\'' + id + '\\')">⤢</button><button title="Close tab (ends the session)" onclick="sshCloseTab(\\'' + id + '\\')">×</button></div><div class="pane-body"></div>';
+  el.addEventListener('mousedown', () => { if (sshActive !== id) sshActivate(id, { noFocus: true }); }, true);
   document.getElementById('ssh-terms').appendChild(el);
   const pref = sshPrefs();
   const term = new Terminal({ cursorBlink: !!pref.cursorBlink, cursorStyle: pref.cursorStyle, fontSize: pref.fontSize, fontFamily: pref.fontFamily, scrollback: 10000, allowProposedApi: true, rightClickSelectsWord: false, theme: sshThemeFor(pref) });
   const fit = new FitAddon.FitAddon(); term.loadAddon(fit);
   try { term.loadAddon(new WebLinksAddon.WebLinksAddon()); } catch(e){}
-  term.open(el);
+  term.open(el.querySelector('.pane-body'));
   const s = { id, hostId: o.hostId, adhoc: o.adhoc || null, label: o.label, target: o.target, term, fit, el, ws: null, status: 'connecting', sid: o.sid || null };
   el.addEventListener('contextmenu', (e) => { e.preventDefault(); sshPasteText(s); });
   sshSess.set(id, s);
@@ -4396,7 +4459,7 @@ function sshReconnect(id){
   sshWsConnect(s, q); s.term.focus();
 }
 // keep the active terminal sized to its pane
-new ResizeObserver(() => { const s = sshSess.get(sshActive); if (s && state.tab === 'ssh') { try { s.fit.fit(); } catch(e){} } }).observe(document.getElementById('ssh-terms'));
+new ResizeObserver(() => { if (state.tab !== 'ssh') return; for (const s of sshSess.values()) if (s.el.classList.contains('active') || s.el.classList.contains('shown')) { try { s.fit.fit(); } catch(e){} } }).observe(document.getElementById('ssh-terms'));
 // Re-open tabs for sessions that are still running on the server (after F5, a new browser, …).
 const sshAdopting = new Set(); let sshAdoptedOnce = false;
 async function sshAdoptServerSessions(){
@@ -4580,16 +4643,18 @@ function sshInstallDialog(id){
     + chk('shi-c-ssh', 'SSH host list (this tab, incl. stored passwords)', true)
     + chk('shi-c-auth', 'Login users + authenticator (MFA)', !h.monitor, 'same username / password / authenticator entry works on the target; active sessions are not copied')
     + '<div style="font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin:10px 0 2px">Options</div>'
-    + chk('shi-node', 'Install Node.js ' + esc((src.node||'v22').split('.')[0]) + '.x via NodeSource if missing/too old', true)
+    + chk('shi-privnode', 'Private Node.js ' + esc((src.node||'v22').split('.')[0]) + '.x inside the install dir (system Node.js untouched — pick this for FreePBX / appliances / hosts where other apps depend on node)', true, 'pm2 is installed into that private prefix too')
+    + chk('shi-node', 'Otherwise: install Node.js ' + esc((src.node||'v22').split('.')[0]) + '.x system-wide via NodeSource if missing/too old', true)
     + chk('shi-pm2', 'Install pm2 globally if missing', true)
     + chk('shi-over', 'Overwrite existing install (update in place, keeps its history/data files)', !!h.monitor)
-    + ((h.user||'root') !== 'root' ? sshField('sudo password for ' + esc(h.user), '<input id="shi-sudo" type="password" autocomplete="new-password" placeholder="leave empty if ' + esc(h.user) + ' has passwordless sudo">', 'Used once through SUDO_ASKPASS on the target, never stored or logged') : '')
+    + ((h.user||'root') !== 'root' ? '<div class="box" style="border-color:#f8a30666;margin-top:8px"><b style="color:#f8a306">⚠ ' + esc(h.user) + ' is not root.</b> The installer needs root on the target: enter the sudo password of <b>' + esc(h.user) + '</b> below (it is sent once through SUDO_ASKPASS and never stored or logged). Leave it empty only if the user has passwordless sudo.'
+      + sshField('sudo password for ' + esc(h.user), '<input id="shi-sudo" type="password" autocomplete="new-password" placeholder="' + esc(h.user) + ' sudo password">') + '</div>' : '')
     + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="sshInstallGo(\\'' + id + '\\')">🚀 Install</button></div>');
 }
 async function sshInstallGo(id){
   const g = (i) => document.getElementById(i);
   const opts = { appDir: g('shi-dir').value.trim(), port: parseInt(g('shi-port').value) || 8899, appName: g('shi-name').value.trim(),
-    installNode: g('shi-node').checked, installPm2: g('shi-pm2').checked, overwrite: g('shi-over').checked,
+    installNode: g('shi-node').checked, installPm2: g('shi-pm2').checked, overwrite: g('shi-over').checked, privateNode: g('shi-privnode').checked,
     sudoPassword: g('shi-sudo') ? g('shi-sudo').value : '',
     copy: { modules: g('shi-c-modules').checked, updates: g('shi-c-updates').checked, telegram: g('shi-c-telegram').checked, backups: g('shi-c-backups').checked, sshHosts: g('shi-c-ssh').checked, auth: !!(g('shi-c-auth') && g('shi-c-auth').checked) } };
   try {
@@ -5385,6 +5450,27 @@ pkg_install(){
 log "target: $(uname -n) ($(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME" || uname -s)) as $(id -un)"
 # --- Node.js
 need_node=1
+if [ "\${PRIVATE_NODE:-0}" = 1 ]; then
+  # Private Node.js inside the app dir: the system's node (FreePBX, appliances, other apps) is left alone.
+  NODE_DIR="$APP_DIR/.node"
+  cur=$("$NODE_DIR/bin/node" -v 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+  if [ -n "$cur" ] && [ "$cur" -ge "$MIN_NODE" ]; then log "private node $("$NODE_DIR/bin/node" -v) present in $NODE_DIR"
+  else
+    have curl || pkg_install curl ca-certificates
+    have xz || have unxz || pkg_install xz-utils >/dev/null 2>&1 || pkg_install xz >/dev/null 2>&1 || true
+    arch=$(uname -m); case "$arch" in x86_64) narch=x64;; aarch64|arm64) narch=arm64;; armv7l) narch=armv7l;; *) log "unsupported CPU arch $arch for a private Node.js"; exit 2;; esac
+    ver=$(curl -fsSL https://nodejs.org/dist/index.json | python3 -c 'import json,sys
+m=int(sys.argv[1])
+print(next(v["version"] for v in json.load(sys.stdin) if v["version"].startswith("v%d." % m)))' "$NODE_MAJOR" 2>/dev/null)
+    [ -n "$ver" ] || { log "could not resolve latest Node.js $NODE_MAJOR.x from nodejs.org"; exit 2; }
+    log "installing private Node.js $ver into $NODE_DIR (system node untouched)"
+    mkdir -p "$NODE_DIR" && curl -fsSL "https://nodejs.org/dist/$ver/node-$ver-linux-$narch.tar.xz" | tar -xJ -C "$NODE_DIR" --strip-components=1 || { log "Node.js download/extract failed"; exit 2; }
+  fi
+  export PATH="$NODE_DIR/bin:$PATH" npm_config_prefix="$NODE_DIR"
+  hash -r 2>/dev/null || true
+  log "using $(command -v node) $(node -v)"
+  need_node=0
+fi
 if have node; then
   cur=$(node -v 2>/dev/null | sed 's/^v//' | cut -d. -f1)
   if [ -n "$cur" ] && [ "$cur" -ge "$MIN_NODE" ]; then need_node=0; log "node $(node -v) present"; else log "node v$cur is older than the required v$MIN_NODE"; fi
@@ -5507,7 +5593,7 @@ async function runSshInstall(job, h, secret) {
     // 4) remote install script
     job.step = 'install'; log('Running remote installer…');
     const src = sshSourceInfo();
-    const envs = ['APP_DIR=' + JSON.stringify(o.appDir), 'APP_NAME=' + JSON.stringify(o.appName), 'PORT=' + String(o.port), 'MIN_NODE=' + SSH_INSTALL_MIN_NODE,
+    const envs = ['APP_DIR=' + JSON.stringify(o.appDir), 'APP_NAME=' + JSON.stringify(o.appName), 'PORT=' + String(o.port), 'MIN_NODE=' + SSH_INSTALL_MIN_NODE, 'PRIVATE_NODE=' + (o.privateNode ? 1 : 0),
                   'NODE_MAJOR=' + String(parseInt(process.versions.node) || 22), 'INSTALL_NODE=' + (o.installNode === false ? 0 : 1), 'INSTALL_PM2=' + (o.installPm2 === false ? 0 : 1),
                   'SOURCE_HOST=' + JSON.stringify(src.host), 'SOURCE_GIT=' + JSON.stringify(src.git || 'n/a')].join(' ');
     const inst = await sshRun(h, sudo + 'env ' + envs + ' bash -s', { stdinData: SSH_INSTALL_SCRIPT, timeoutMs: 900_000, onLine: (l, which) => log(l, which === 'err' ? 'err' : 'remote') });
@@ -5533,7 +5619,7 @@ function sshStartInstall(hostId, optsIn) {
     port: Math.max(1, Math.min(65535, parseInt(o.port) || 8899)),
     appDir: (typeof o.appDir === 'string' && /^\/[\w./\-]+$/.test(o.appDir.trim())) ? o.appDir.trim().replace(/\/+$/, '') : '/opt/rhc-srv-mon',
     appName: (typeof o.appName === 'string' && /^[\w.\-]{1,40}$/.test(o.appName.trim())) ? o.appName.trim() : 'rhc-srv-mon',
-    overwrite: !!o.overwrite, installNode: o.installNode !== false, installPm2: o.installPm2 !== false,
+    overwrite: !!o.overwrite, installNode: o.installNode !== false, installPm2: o.installPm2 !== false, privateNode: o.privateNode !== false,
     copy: { modules: !(o.copy && o.copy.modules === false), updates: !(o.copy && o.copy.updates === false), telegram: !(o.copy && o.copy.telegram === false),
             backups: !(o.copy && o.copy.backups === false), sshHosts: !(o.copy && o.copy.sshHosts === false), auth: !!(o.copy && o.copy.auth) },
   };
