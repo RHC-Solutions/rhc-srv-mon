@@ -1097,7 +1097,7 @@ function buildInstallCmd(dir, pm, packages, extraFlags) {
     return `cd '${dirEsc}' && npm install --legacy-peer-deps --no-fund --no-audit --no-progress ${flags} ${pkgsAtLatest} 2>&1`;
   }
   if (pm === 'pnpm') {
-    return `cd '${dirEsc}' && pnpm ${packages.length ? 'add' : 'install'} ${flags} ${pkgsAtLatest} 2>&1`;
+    return `cd '${dirEsc}' && pnpm ${packages.length ? 'add' : 'install'} --config.package-import-method=copy ${flags} ${pkgsAtLatest} 2>&1`;
   }
   if (pm === 'yarn') {
     return `cd '${dirEsc}' && yarn ${packages.length ? 'add' : 'install'} ${flags} ${pkgsAtLatest} 2>&1`;
@@ -1231,10 +1231,13 @@ if [ -z "$GID" ]; then echo "user ${u} not found"; exit 1; fi
 echo "fixing perms: ${u}:$GID for ${dirEsc}"
 if [ -d '${dirEsc}' ]; then
   # Count files not owned by the project user before chown
-  BEFORE=$(find '${dirEsc}' -not -user '${u}' 2>/dev/null | wc -l)
-  chown -R '${u}':"$GID" '${dirEsc}' 2>/dev/null
-  AFTER=$(find '${dirEsc}' -not -user '${u}' 2>/dev/null | wc -l)
-  echo "project tree: $BEFORE files were misowned, $AFTER remain after chown"
+  # Skip files with >1 hard link: those are pnpm-store inodes shared with other projects/users —
+  # chowning them steals them from everybody else (that is what broke every pnpm project once).
+  BEFORE=$(find '${dirEsc}' \\( -type d -o -links 1 \\) -not -user '${u}' 2>/dev/null | wc -l)
+  find '${dirEsc}' \\( -type d -o -links 1 \\) -not -user '${u}' -exec chown -h '${u}':"$GID" {} + 2>/dev/null
+  AFTER=$(find '${dirEsc}' \\( -type d -o -links 1 \\) -not -user '${u}' 2>/dev/null | wc -l)
+  LINKED=$(find '${dirEsc}' -type f -links +1 -not -user '${u}' 2>/dev/null | wc -l)
+  echo "project tree: $BEFORE files were misowned, $AFTER remain after chown ($LINKED shared pnpm-store hard links left alone)"
 fi
 if [ -d '${homeEsc}/.npm' ]; then
   chown -R '${u}':"$GID" '${homeEsc}/.npm' 2>/dev/null && echo "chowned ~/.npm"
@@ -2633,6 +2636,8 @@ const PAGE = `<!doctype html>
   .ssh-tab .st.open { background:#5cdd8b; }
   .ssh-tab .st.dead { background:#ff8088; }
   .ssh-tab .st.reconnecting { background:#f8a306; animation: ssh-blink 1s ease-in-out infinite; }
+  .ssh-terms.drop { outline:2px dashed #5cdd8b; outline-offset:-6px; }
+  .ssh-terms.drop::after { content:'Drop to upload to ~/rhc-uploads on the remote host'; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); background:#1e2230; color:#5cdd8b; padding:10px 16px; border-radius:8px; font-size:13px; z-index:3; pointer-events:none; }
   @keyframes ssh-blink { 50% { opacity:.25; } }
   .ssh-tab .tt { overflow:hidden; text-overflow:ellipsis; }
   .ssh-tab .x { border:none; background:transparent; color:#6b7280; font-size:14px; line-height:1; cursor:pointer; padding:2px 4px; border-radius:4px; }
@@ -2730,7 +2735,7 @@ const PAGE = `<!doctype html>
       <section class="ssh-main">
         <div class="ssh-tabbar" id="ssh-tabbar"></div>
         <div class="ssh-terms" id="ssh-terms">
-          <div class="ssh-empty" id="ssh-empty"><b>No open sessions</b><span>Click a host on the left to open a terminal tab. Each click opens a new tab — like mRemoteNG.</span><span><kbd>＋</kbd> in the tab bar connects ad hoc to any user@host.</span></div>
+          <div class="ssh-empty" id="ssh-empty"><b>No open sessions</b><span>Click a host on the left to open a terminal tab. Each click opens a new tab — like mRemoteNG.</span><span><kbd>＋</kbd> in the tab bar connects ad hoc to any user@host · <kbd>⚙</kbd> font, colors, keys.</span><span>Sessions keep running on the server across refreshes and closed browsers — only the tab's × ends them.</span></div>
         </div>
       </section>
     </div>
@@ -4168,9 +4173,10 @@ async function renderSsh(){
   try { sshData = await fetch('api/ssh').then(r => r.json()); } catch(e){ return; }
   sshRenderHosts();
   sshRenderInstalls();
+  sshAdoptServerSessions();
   const src = sshData.source || {};
   document.getElementById('ssh-side-ft').innerHTML = 'source: <b>' + esc(src.host || '') + '</b> · node ' + esc(src.node || '') + (src.git ? ' · ' + esc(src.git) : '')
-    + '<br>' + sshData.hosts.length + ' host' + (sshData.hosts.length===1?'':'s') + ' · ' + (sshData.sessions||[]).length + ' active session' + ((sshData.sessions||[]).length===1?'':'s') + ((sshData.sessions||[]).some(x => !x.attached) ? ' (' + (sshData.sessions||[]).filter(x => !x.attached).length + ' detached, awaiting re-attach)' : '')
+    + '<br>' + sshData.hosts.length + ' host' + (sshData.hosts.length===1?'':'s') + ' · ' + (sshData.sessions||[]).length + ' running session' + ((sshData.sessions||[]).length===1?'':'s') + ((sshData.sessions||[]).some(x => !x.attached) ? ' (' + (sshData.sessions||[]).filter(x => !x.attached).length + ' detached)' : '')
     + (sshData.helperOk ? '' : '<br><span style="color:#ff8088">⚠ pty helper missing</span>');
   if (sshSess.size) sshRenderTabs();
   const running = (sshData.installs||[]).some(j => j.status === 'running');
@@ -4191,7 +4197,7 @@ function sshRenderHosts(){
     if (g !== lastGrp) { html += '<div class="ssh-grp">' + esc(g) + '</div>'; lastGrp = g; }
     html += '<div class="ssh-host" onclick="sshConnect(\\'' + h.id + '\\')" title="' + esc((h.user||'root') + '@' + h.host + ':' + (h.port||22) + (h.notes ? ' — ' + h.notes : '')) + '">'
       + '<span class="dot' + (openHosts.has(h.id) ? ' on' : '') + '"' + (h.color ? ' style="background:' + esc(h.color) + '"' : '') + '></span>'
-      + '<span class="nm">' + esc(h.name) + '<small>' + esc((h.user||'root') + '@' + h.host) + (h.port && h.port != 22 ? ':' + h.port : '') + (h.auth === 'password' ? ' · pw' : '') + '</small></span>'
+      + '<span class="nm">' + esc(h.name) + '<small>' + esc((h.user||'root') + '@' + h.host) + (h.port && h.port != 22 ? ':' + h.port : '') + (h.auth === 'password' ? ' · pw' : '') + (h.becomeRoot && (h.user||'root') !== 'root' ? ' · sudo -i' : '') + '</small></span>'
       + (h.monitor ? '<span class="mon" title="rhc-srv-mon installed ' + esc(h.monitor.installedAt||'') + ' (port ' + h.monitor.port + ')">📊</span>' : '')
       + '<span class="acts">'
       + '<button title="Install rhc-srv-mon on this host" onclick="event.stopPropagation();sshInstallDialog(\\'' + h.id + '\\')">📦</button>'
@@ -4211,7 +4217,7 @@ function sshRenderTabs(){
       + '<button class="x" title="Close tab" onclick="event.stopPropagation();sshCloseTab(\\'' + s.id + '\\')">×</button></div>';
   }
   html += '<div class="ssh-tab plus" title="Ad-hoc connection (user@host)" onclick="sshAdhocDialog()">＋</div><div class="sp"></div>';
-  if (sshSess.size) html += '<div class="tools"><button onclick="sshDuplicateTab()" title="Open another tab to the same host">⧉ Duplicate</button><button onclick="sshCloseAll()" title="Close all tabs">Close all</button></div>';
+  html += '<div class="tools">' + (sshSess.size ? '<button onclick="sshDuplicateTab()" title="Open another tab to the same host">⧉ Duplicate</button><button onclick="sshCloseAll()" title="Close all tabs (ends the sessions)">Close all</button>' : '') + '<button onclick="sshSettingsDialog()" title="Terminal settings: font, size, colors, keys">⚙</button></div>';
   bar.innerHTML = html;
   document.getElementById('ssh-empty').style.display = sshSess.size ? 'none' : '';
 }
@@ -4230,8 +4236,11 @@ function sshDuplicateTab(){ const s = sshSess.get(sshActive); if (!s) return; if
 function sshCloseAll(){ for (const id of [...sshSess.keys()]) sshCloseTab(id); }
 function sshCloseTab(id){
   const s = sshSess.get(id); if (!s) return;
+  const wasLive = s.status !== 'dead';
   s.status = 'dead'; clearTimeout(s.retryTimer);
-  try { if (s.ws && s.ws.readyState <= 1) s.ws.close(); } catch(e){}
+  // × ends the session on the server (a refresh / closed browser only detaches it)
+  try { if (wasLive && s.ws && s.ws.readyState === 1) s.ws.send(JSON.stringify({ t:'close' })); else if (wasLive && s.sid) fetch('api/ssh/sessions/' + encodeURIComponent(s.sid), { method:'DELETE' }).catch(() => {}); } catch(e){}
+  try { if (s.ws && s.ws.readyState <= 1) setTimeout(() => { try { s.ws.close(); } catch(e){} }, 150); } catch(e){}
   try { s.term.dispose(); } catch(e){}
   s.el.remove(); sshSess.delete(id);
   if (sshActive === id) { const rest = [...sshSess.keys()]; sshActive = rest.length ? rest[rest.length-1] : null; if (sshActive) sshActivate(sshActive); }
@@ -4251,12 +4260,13 @@ async function sshOpenTab(o){
   const id = 't' + (++sshTabSeq);
   const el = document.createElement('div'); el.className = 'ssh-term'; el.dataset.id = id;
   document.getElementById('ssh-terms').appendChild(el);
-  const term = new Terminal({ cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace', scrollback: 8000, allowProposedApi: true,
-    theme: { background: '#0c0e16', foreground: '#e9e9e9', cursor: '#5cdd8b', selectionBackground: '#2a2f40', black: '#1e2230', brightBlack: '#6b7280', green: '#5cdd8b', yellow: '#f8a306', red: '#ff8088', blue: '#7aa2f7', magenta: '#c678dd', cyan: '#56b6c2' } });
+  const pref = sshPrefs();
+  const term = new Terminal({ cursorBlink: !!pref.cursorBlink, cursorStyle: pref.cursorStyle, fontSize: pref.fontSize, fontFamily: pref.fontFamily, scrollback: 10000, allowProposedApi: true, rightClickSelectsWord: false, theme: sshThemeFor(pref) });
   const fit = new FitAddon.FitAddon(); term.loadAddon(fit);
   try { term.loadAddon(new WebLinksAddon.WebLinksAddon()); } catch(e){}
   term.open(el);
-  const s = { id, hostId: o.hostId, adhoc: o.adhoc || null, label: o.label, target: o.target, term, fit, el, ws: null, status: 'connecting' };
+  const s = { id, hostId: o.hostId, adhoc: o.adhoc || null, label: o.label, target: o.target, term, fit, el, ws: null, status: 'connecting', sid: o.sid || null };
+  el.addEventListener('contextmenu', (e) => { e.preventDefault(); sshPasteText(s); });
   sshSess.set(id, s);
   sshActivate(id);
   try { fit.fit(); } catch(e){}
@@ -4265,10 +4275,16 @@ async function sshOpenTab(o){
   term.onBinary(d => { if (s.ws && s.ws.readyState === 1) { const b = new Uint8Array(d.length); for (let i=0;i<d.length;i++) b[i] = d.charCodeAt(i) & 255; s.ws.send(b); } });
   term.onResize(({cols, rows}) => { if (s.ws && s.ws.readyState === 1) s.ws.send(JSON.stringify({ t:'resize', cols, rows })); });
   term.attachCustomKeyEventHandler(ev => {
-    // Ctrl+Shift+C / V = copy / paste (leave plain Ctrl+C for the remote shell)
-    if (ev.type === 'keydown' && ev.ctrlKey && ev.shiftKey && (ev.key === 'C' || ev.key === 'c')) { const sel = term.getSelection(); if (sel) { navigator.clipboard && navigator.clipboard.writeText(sel); return false; } }
-    if (ev.type === 'keydown' && ev.ctrlKey && ev.shiftKey && (ev.key === 'V' || ev.key === 'v')) { navigator.clipboard && navigator.clipboard.readText().then(t => { if (t && s.ws && s.ws.readyState === 1) s.ws.send(sshEnc.encode(t)); }); return false; }
-    if (ev.type === 'keydown' && ev.ctrlKey && ev.shiftKey && ev.key === 'W') { sshCloseTab(s.id); return false; }
+    if (ev.type !== 'keydown') return true;
+    const k = (ev.key || '').toLowerCase(), ctrl = ev.ctrlKey && !ev.altKey && !ev.metaKey;
+    // Windows style: Ctrl+C copies when text is selected (otherwise ^C goes to the remote), Ctrl+V pastes
+    // (text, or a file/screenshot -> upload), Ctrl+Z is swallowed unless the Unix behaviour is chosen.
+    if (ctrl && k === 'c') { const sel = term.getSelection(); if (sel || ev.shiftKey) { if (sel && navigator.clipboard) navigator.clipboard.writeText(sel).catch(() => {}); term.clearSelection(); return false; } return true; }
+    if (ctrl && k === 'insert') { const sel = term.getSelection(); if (sel && navigator.clipboard) navigator.clipboard.writeText(sel).catch(() => {}); return false; }
+    if (ctrl && k === 'v') return false;                                   // let the browser paste -> xterm gets text, our paste handler gets files
+    if (!ev.ctrlKey && ev.shiftKey && k === 'insert') { sshPasteText(s); return false; }
+    if (ctrl && !ev.shiftKey && k === 'z' && sshPrefs().ctrlZ !== 'suspend') return false;
+    if (ctrl && ev.shiftKey && k === 'w') { sshCloseTab(s.id); return false; }
     return true;
   });
 }
@@ -4284,7 +4300,8 @@ function sshWsConnect(s, query){
   ws.onmessage = (ev) => {
     if (typeof ev.data === 'string') {
       let m = null; try { m = JSON.parse(ev.data); } catch(e){ return; }
-      if (m.t === 'hello') { s.sid = m.id; if (m.reattach) { try { s.term.write('\\r\\n\\x1b[90m── re-attached ──\\x1b[0m\\r\\n'); } catch(e){} } }
+      if (m.t === 'hello') { s.sid = m.id; s.target = m.target || s.target; if (m.reattach) s.replaying = true; }
+      else if (m.t === 'replayed') { s.replaying = false; try { s.fit.fit(); ws.send(JSON.stringify({ t:'resize', cols: s.term.cols, rows: s.term.rows })); } catch(e){} }
       else if (m.t === 'hb') { try { ws.send('{"t":"hb"}'); } catch(e){} }
       else if (m.t === 'note') { try { s.term.write('\\r\\n\\x1b[90m── ' + m.msg + ' ──\\x1b[0m\\r\\n'); } catch(e){} }
       else if (m.t === 'exit') sshSessionEnded(s, m.code, m.error);
@@ -4314,6 +4331,10 @@ async function sshDiagnoseHandshake(s, query, code){
     else if (r.status === 200) why += ' — the server is reachable but the WebSocket upgrade did not get through (proxy / Cloudflare in between?)';
   } catch(e){ why += ' — server unreachable (' + e.message + ')'; }
   sshSessionEnded(s, null, why);
+}
+function sshPasteText(s){
+  if (!navigator.clipboard || !navigator.clipboard.readText) return toast('Clipboard access needs https', 'error');
+  navigator.clipboard.readText().then(t => { if (t && s.ws && s.ws.readyState === 1) s.ws.send(sshEnc.encode(t)); }).catch(() => {});
 }
 function sshLostTransport(s, code){
   s.status = 'reconnecting'; s.retry = (s.retry || 0) + 1; sshRenderTabs(); sshRenderHosts();
@@ -4357,7 +4378,89 @@ function sshReconnect(id){
 }
 // keep the active terminal sized to its pane
 new ResizeObserver(() => { const s = sshSess.get(sshActive); if (s && state.tab === 'ssh') { try { s.fit.fit(); } catch(e){} } }).observe(document.getElementById('ssh-terms'));
-window.addEventListener('beforeunload', (e) => { if ([...sshSess.values()].some(s => s.status === 'open' || s.status === 'reconnecting')) { e.preventDefault(); e.returnValue = ''; } });
+// Re-open tabs for sessions that are still running on the server (after F5, a new browser, …).
+const sshAdopting = new Set();
+async function sshAdoptServerSessions(){
+  const list = (sshData && sshData.sessions) || [];
+  const have = new Set([...sshSess.values()].map(s => s.sid).filter(Boolean));
+  for (const srv of list) {
+    if (have.has(srv.id) || sshAdopting.has(srv.id) || srv.attached) continue;   // attached = open in another window
+    sshAdopting.add(srv.id);
+    try { await sshOpenTab({ hostId: srv.hostId, adhoc: srv.hostId ? null : sshAdhocFromTarget(srv.target), label: srv.label, target: srv.target, sid: srv.id, query: 'attach=' + encodeURIComponent(srv.id) }); } catch(e){}
+    sshAdopting.delete(srv.id);
+  }
+}
+function sshAdhocFromTarget(t){ const m = String(t||'').match(/^(.+)@([^:\\s]+)(?::(\\d+))?/); return m ? { user: m[1], host: m[2], port: m[3] ? parseInt(m[3]) : 22 } : null; }
+// Files / images: drag & drop onto the terminal, or Ctrl+V with a file / screenshot in the clipboard.
+(function(){
+  const box = document.getElementById('ssh-terms'); if (!box) return;
+  const hasFiles = (dt) => dt && dt.types && [...dt.types].includes('Files');
+  box.addEventListener('dragover', (e) => { if (hasFiles(e.dataTransfer)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; box.classList.add('drop'); } });
+  box.addEventListener('dragleave', (e) => { if (!box.contains(e.relatedTarget)) box.classList.remove('drop'); });
+  box.addEventListener('drop', (e) => { box.classList.remove('drop'); if (!e.dataTransfer || !e.dataTransfer.files.length) return; e.preventDefault(); sshUploadFiles(sshSess.get(sshActive), [...e.dataTransfer.files]); });
+  box.addEventListener('paste', (e) => { const cd = e.clipboardData; if (!cd || !cd.files || !cd.files.length) return; e.preventDefault(); e.stopPropagation(); sshUploadFiles(sshSess.get(sshActive), [...cd.files]); }, true);
+})();
+async function sshUploadFiles(s, files){
+  if (!s || !s.sid || s.status !== 'open') return toast('No connected terminal to upload to', 'error');
+  const mb = (n) => (n / 1048576).toFixed(n < 1048576 ? 2 : 1) + ' MB';
+  for (const f of files) {
+    let name = f.name || '';
+    if (!name || /^image\\.(png|jpe?g|gif|webp)$/i.test(name)) { const d = new Date(), pad = (x) => String(x).padStart(2, '0'); name = 'paste-' + d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) + '.' + (((f.type||'').split('/')[1] || 'bin').replace('jpeg','jpg')); }
+    toast('Uploading ' + name + ' (' + mb(f.size) + ') to ' + s.target + '…', 'success');
+    try {
+      const r = await fetch('api/ssh/sessions/' + encodeURIComponent(s.sid) + '/upload?name=' + encodeURIComponent(name), { method:'POST', headers:{ 'Content-Type':'application/octet-stream' }, body: f });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) { toast('Upload failed: ' + (j.error || r.status), 'error'); continue; }
+      const quoted = /[\\s'"()\\[\\]&;$\\x60\\\\]/.test(j.path) ? "'" + j.path.replace(/'/g, "'\\\\''") + "'" : j.path;
+      if (s.ws && s.ws.readyState === 1) s.ws.send(sshEnc.encode(quoted + ' '));
+      toast('Uploaded → ' + j.path, 'success');
+    } catch(e){ toast('Upload failed: ' + e.message, 'error'); }
+  }
+}
+/* ---- terminal appearance / key preferences (per browser, localStorage) ---- */
+const SSH_PREF_KEY = 'rhc-ssh-term-prefs';
+const SSH_THEMES = {
+  dark:      { name:'RHC dark', background:'#0c0e16', foreground:'#e9e9e9', cursor:'#5cdd8b', selectionBackground:'#2a2f40', black:'#1e2230', brightBlack:'#6b7280', green:'#5cdd8b', yellow:'#f8a306', red:'#ff8088', blue:'#7aa2f7', magenta:'#c678dd', cyan:'#56b6c2' },
+  putty:     { name:'PuTTY classic', background:'#000000', foreground:'#bbbbbb', cursor:'#00ff00', selectionBackground:'#444444', black:'#000000', red:'#bb0000', green:'#00bb00', yellow:'#bbbb00', blue:'#0000bb', magenta:'#bb00bb', cyan:'#00bbbb', white:'#bbbbbb', brightBlack:'#555555', brightBlue:'#5555ff' },
+  campbell:  { name:'Windows Terminal (Campbell)', background:'#0c0c0c', foreground:'#cccccc', cursor:'#ffffff', selectionBackground:'#3a3a3a', black:'#0c0c0c', red:'#c50f1f', green:'#13a10e', yellow:'#c19c00', blue:'#0037da', magenta:'#881798', cyan:'#3a96dd', white:'#cccccc', brightBlack:'#767676', brightRed:'#e74856', brightGreen:'#16c60c', brightYellow:'#f9f1a5', brightBlue:'#3b78ff', brightMagenta:'#b4009e', brightCyan:'#61d6d6', brightWhite:'#f2f2f2' },
+  monokai:   { name:'Monokai', background:'#272822', foreground:'#f8f8f2', cursor:'#f8f8f0', selectionBackground:'#49483e', black:'#272822', red:'#f92672', green:'#a6e22e', yellow:'#f4bf75', blue:'#66d9ef', magenta:'#ae81ff', cyan:'#a1efe4', white:'#f8f8f2', brightBlack:'#75715e' },
+  dracula:   { name:'Dracula', background:'#282a36', foreground:'#f8f8f2', cursor:'#f8f8f2', selectionBackground:'#44475a', black:'#21222c', red:'#ff5555', green:'#50fa7b', yellow:'#f1fa8c', blue:'#bd93f9', magenta:'#ff79c6', cyan:'#8be9fd', white:'#f8f8f2', brightBlack:'#6272a4' },
+  solarized: { name:'Solarized dark', background:'#002b36', foreground:'#839496', cursor:'#93a1a1', selectionBackground:'#073642', black:'#073642', red:'#dc322f', green:'#859900', yellow:'#b58900', blue:'#268bd2', magenta:'#d33682', cyan:'#2aa198', white:'#eee8d5', brightBlack:'#586e75' },
+  light:     { name:'Light', background:'#fafafa', foreground:'#1f2328', cursor:'#0969da', selectionBackground:'#c8e1ff', black:'#24292f', red:'#cf222e', green:'#116329', yellow:'#9a6700', blue:'#0969da', magenta:'#8250df', cyan:'#1b7c83', white:'#6e7781', brightBlack:'#57606a' },
+};
+const SSH_FONTS = ['ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace', 'Consolas, monospace', '"Cascadia Mono", "Cascadia Code", monospace', '"JetBrains Mono", monospace', '"Fira Code", monospace', '"Source Code Pro", monospace', '"Ubuntu Mono", monospace', '"Courier New", monospace'];
+const SSH_PREF_DEFAULTS = { theme:'dark', fontSize:13, fontFamily: SSH_FONTS[0], bg:'', fg:'', cursorStyle:'block', cursorBlink:true, ctrlZ:'ignore' };
+function sshPrefs(){ try { return Object.assign({}, SSH_PREF_DEFAULTS, JSON.parse(localStorage.getItem(SSH_PREF_KEY) || '{}')); } catch(e){ return Object.assign({}, SSH_PREF_DEFAULTS); } }
+function sshThemeFor(p){ const t = Object.assign({}, SSH_THEMES[p.theme] || SSH_THEMES.dark); delete t.name; if (p.bg) t.background = p.bg; if (p.fg) t.foreground = p.fg; return t; }
+function sshApplyPrefs(p){
+  try { localStorage.setItem(SSH_PREF_KEY, JSON.stringify(p)); } catch(e){}
+  for (const s of sshSess.values()) { try { s.term.options.theme = sshThemeFor(p); s.term.options.fontSize = p.fontSize; s.term.options.fontFamily = p.fontFamily; s.term.options.cursorStyle = p.cursorStyle; s.term.options.cursorBlink = !!p.cursorBlink; s.fit.fit(); } catch(e){} }
+  const box = document.getElementById('ssh-terms'); if (box) box.style.background = sshThemeFor(p).background;
+}
+function sshSettingsDialog(){
+  const p = sshPrefs(), th = sshThemeFor(p);
+  const themeOpts = Object.entries(SSH_THEMES).map(([k,t]) => '<option value="' + k + '"' + (p.theme===k?' selected':'') + '>' + t.name + '</option>').join('');
+  const fontOpts = SSH_FONTS.map(f => '<option value="' + esc(f) + '"' + (p.fontFamily===f?' selected':'') + '>' + esc(f.split(',')[0].replace(/"/g,'')) + '</option>').join('');
+  const custom = SSH_FONTS.includes(p.fontFamily) ? '' : p.fontFamily;
+  const sel = (id, opts, cur) => '<select id="' + id + '" onchange="sshPrefLive()">' + opts.map(([v,l]) => '<option value="' + v + '"' + (String(cur)===v?' selected':'') + '>' + l + '</option>').join('') + '</select>';
+  sshModal('<h3>⚙ Terminal settings</h3>'
+    + '<div class="row2">' + sshField('Font', '<select id="stp-font" onchange="document.getElementById(\\'stp-font-custom\\').value=\\'\\';sshPrefLive()">' + fontOpts + '</select>') + sshField('Custom font (CSS font-family)', '<input id="stp-font-custom" value="' + esc(custom) + '" placeholder="e.g. &quot;Cascadia Code&quot;, monospace" oninput="sshPrefLive()">', 'must be installed on your PC') + '</div>'
+    + '<div class="row3">' + sshField('Font size', '<input id="stp-size" type="number" min="8" max="32" value="' + p.fontSize + '" oninput="sshPrefLive()">') + sshField('Cursor', sel('stp-cursor', [['block','Block'],['underline','Underline'],['bar','Bar']], p.cursorStyle)) + sshField('Cursor blink', sel('stp-blink', [['1','On'],['0','Off']], p.cursorBlink ? '1' : '0')) + '</div>'
+    + '<div class="row3">' + sshField('Color theme', '<select id="stp-theme" onchange="sshPrefLive()">' + themeOpts + '</select>')
+    + sshField('Background', '<div style="display:flex;gap:8px;align-items:center"><input id="stp-bg" type="color" value="' + esc(p.bg || th.background) + '" oninput="document.getElementById(\\'stp-bg-on\\').checked=true;sshPrefLive()" style="width:44px;padding:0;height:30px"><label style="font-size:12px;display:flex;gap:4px;align-items:center"><input type="checkbox" id="stp-bg-on"' + (p.bg?' checked':'') + ' onchange="sshPrefLive()"> override</label></div>')
+    + sshField('Text', '<div style="display:flex;gap:8px;align-items:center"><input id="stp-fg" type="color" value="' + esc(p.fg || th.foreground) + '" oninput="document.getElementById(\\'stp-fg-on\\').checked=true;sshPrefLive()" style="width:44px;padding:0;height:30px"><label style="font-size:12px;display:flex;gap:4px;align-items:center"><input type="checkbox" id="stp-fg-on"' + (p.fg?' checked':'') + ' onchange="sshPrefLive()"> override</label></div>') + '</div>'
+    + sshField('Ctrl+Z', sel('stp-ctrlz', [['ignore','Windows style — does nothing (never suspends the remote program)'],['suspend','Unix style — sends ^Z (suspend; resume with fg)']], p.ctrlZ))
+    + '<div class="box" style="font-size:12px;line-height:1.6"><b>Keys</b> · Ctrl+C: copy when text is selected, otherwise ^C to the remote · Ctrl+V: paste text, or upload a file / screenshot from the clipboard · Ctrl+Shift+C / Ctrl+Shift+V: always copy / paste · Ctrl+Insert / Shift+Insert: copy / paste · Ctrl+Shift+W: close tab · right-click: paste<br><b>Files</b> · drag &amp; drop onto the terminal or Ctrl+V → uploaded to <code>~/rhc-uploads/</code> on the remote host, path typed into the terminal (e.g. for Claude Code).</div>'
+    + '<div class="foot"><div class="left"><button class="btn" onclick="try{localStorage.removeItem(\\'' + SSH_PREF_KEY + '\\')}catch(e){};sshApplyPrefs(sshPrefs());sshModalClose();sshSettingsDialog()">Reset to defaults</button></div><button class="btn pri" onclick="sshModalClose()">Done</button></div>');
+}
+function sshPrefLive(){
+  const g = (i) => document.getElementById(i); if (!g('stp-font')) return;
+  const p = sshPrefs(), custom = g('stp-font-custom').value.trim();
+  p.fontFamily = custom || g('stp-font').value; p.fontSize = Math.max(8, Math.min(32, parseInt(g('stp-size').value) || 13));
+  p.cursorStyle = g('stp-cursor').value; p.cursorBlink = g('stp-blink').value === '1'; p.theme = g('stp-theme').value;
+  p.bg = g('stp-bg-on').checked ? g('stp-bg').value : ''; p.fg = g('stp-fg-on').checked ? g('stp-fg').value : ''; p.ctrlZ = g('stp-ctrlz').value;
+  sshApplyPrefs(p);
+}
 
 /* ---- modals ---- */
 function sshModal(html){
@@ -4386,13 +4489,14 @@ function sshEditHost(id){
     + sshField('Identity file', '<input id="shf-ident" value="' + esc(h.identityFile||'') + '" placeholder="/root/.ssh/id_ed25519 (optional)">') + '</div>'
     + '<div id="shf-pwwrap" style="display:' + (h.auth==='password'?'':'none') + '">' + sshField('Password', '<input id="shf-pw" type="password" autocomplete="new-password" placeholder="' + (h.hasPassword ? '•••••••• (stored — leave blank to keep)' : 'password') + '">', 'Stored in ssh-hosts.json (mode 600, gitignored). Typed automatically at the ssh prompt; sudo prompts are left to you.') + '</div>'
     + sshField('Notes', '<input id="shf-notes" value="' + esc(h.notes||'') + '" placeholder="optional">')
+    + sshField('After login', '<label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer"><input type="checkbox" id="shf-root"' + (h.becomeRoot ? ' checked' : '') + ' style="accent-color:#5cdd8b"> Become root (<code>sudo -i</code>) — for non-root users; a sudo password prompt is answered with the stored password, or type it</label>')
     + '<div id="shf-test"></div>'
     + '<div class="foot"><div class="left">' + (id ? '<button class="btn danger" onclick="sshDeleteHost(\\'' + id + '\\')">Delete</button>' : '') + (id ? '<button class="btn" onclick="sshTestHost(\\'' + id + '\\')">🔌 Test connection</button>' : '') + '</div>'
     + '<button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="sshSaveHost(' + (id ? '\\'' + id + '\\'' : 'null') + ')">' + (id ? 'Save' : 'Add host') + '</button></div>');
 }
 function sshReadHostForm(){
   const v = (i) => document.getElementById(i).value;
-  const o = { name: v('shf-name'), group: v('shf-group'), host: v('shf-host').trim(), port: parseInt(v('shf-port')) || 22, user: v('shf-user').trim() || 'root', auth: v('shf-auth'), identityFile: v('shf-ident').trim(), notes: v('shf-notes') };
+  const o = { name: v('shf-name'), group: v('shf-group'), host: v('shf-host').trim(), port: parseInt(v('shf-port')) || 22, user: v('shf-user').trim() || 'root', auth: v('shf-auth'), identityFile: v('shf-ident').trim(), notes: v('shf-notes'), becomeRoot: document.getElementById('shf-root').checked };
   const pw = document.getElementById('shf-pw').value; if (pw) o.password = pw;
   return o;
 }
@@ -4444,7 +4548,7 @@ function sshInstallDialog(id){
   const src = sshData.source || {};
   const chk = (i, label, on, hint) => '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:6px 0;cursor:pointer"><input type="checkbox" id="' + i + '"' + (on ? ' checked' : '') + ' style="accent-color:#5cdd8b;margin-top:3px"><span>' + label + (hint ? '<br><span style="font-size:11px;color:#6b7280">' + hint + '</span>' : '') + '</span></label>';
   sshModal('<h3>📦 Install rhc-srv-mon on ' + esc(h.name) + '</h3>'
-    + '<div class="box">Copies <b>server.js</b> from this server (' + esc(src.host||'') + (src.git ? ', ' + esc(src.git) : '') + ') to <b>' + esc((h.user||'root') + '@' + h.host) + '</b> over SSH, installs Node.js ≥ ' + (src.minNode||20) + ' and pm2 if missing, and starts it under pm2 with your settings. Needs root or passwordless sudo on the target.' + (h.monitor ? '<br>Already installed there on ' + esc((h.monitor.installedAt||'').slice(0,16).replace('T',' ')) + ' (port ' + h.monitor.port + ') — this will update it.' : '') + '</div>'
+    + '<div class="box">Copies <b>server.js</b> from this server (' + esc(src.host||'') + (src.git ? ', ' + esc(src.git) : '') + ') to <b>' + esc((h.user||'root') + '@' + h.host) + '</b> over SSH, installs Node.js ≥ ' + (src.minNode||20) + ' and pm2 if missing, and starts it under pm2 with your settings. Needs root on the target — or a user with passwordless sudo, or the sudo password below.' + (h.monitor ? '<br>Already installed there on ' + esc((h.monitor.installedAt||'').slice(0,16).replace('T',' ')) + ' (port ' + h.monitor.port + ') — this will update it.' : '') + '</div>'
     + '<div class="row3">' + sshField('Install dir', '<input id="shi-dir" value="' + esc(h.monitor ? h.monitor.appDir : '/opt/rhc-srv-mon') + '">') + sshField('Port', '<input id="shi-port" type="number" value="' + (h.monitor ? h.monitor.port : (src.port||8899)) + '">') + sshField('pm2 name', '<input id="shi-name" value="rhc-srv-mon">') + '</div>'
     + '<div style="font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin:4px 0 2px">Copy settings from this server</div>'
     + chk('shi-c-modules', 'Modules auto-update + cleanup schedule', true, 'severities, time, Telegram flags, cleanup targets — not the project scan')
@@ -4457,12 +4561,14 @@ function sshInstallDialog(id){
     + chk('shi-node', 'Install Node.js ' + esc((src.node||'v22').split('.')[0]) + '.x via NodeSource if missing/too old', true)
     + chk('shi-pm2', 'Install pm2 globally if missing', true)
     + chk('shi-over', 'Overwrite existing install (update in place, keeps its history/data files)', !!h.monitor)
+    + ((h.user||'root') !== 'root' ? sshField('sudo password for ' + esc(h.user), '<input id="shi-sudo" type="password" autocomplete="new-password" placeholder="leave empty if ' + esc(h.user) + ' has passwordless sudo">', 'Used once through SUDO_ASKPASS on the target, never stored or logged') : '')
     + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="sshInstallGo(\\'' + id + '\\')">🚀 Install</button></div>');
 }
 async function sshInstallGo(id){
   const g = (i) => document.getElementById(i);
   const opts = { appDir: g('shi-dir').value.trim(), port: parseInt(g('shi-port').value) || 8899, appName: g('shi-name').value.trim(),
     installNode: g('shi-node').checked, installPm2: g('shi-pm2').checked, overwrite: g('shi-over').checked,
+    sudoPassword: g('shi-sudo') ? g('shi-sudo').value : '',
     copy: { modules: g('shi-c-modules').checked, updates: g('shi-c-updates').checked, telegram: g('shi-c-telegram').checked, backups: g('shi-c-backups').checked, sshHosts: g('shi-c-ssh').checked, auth: !!(g('shi-c-auth') && g('shi-c-auth').checked) } };
   try {
     const r = await fetch('api/ssh/install', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ hostId: id, opts }) });
@@ -4640,8 +4746,9 @@ const SSH_JOB_LOG_MAX = 600;
 const WS_MAX_BUFFER = 4 * 1024 * 1024;
 const WS_PING_MS = 30_000;                 // keepalive ping interval (Cloudflare idle cutoff is ~100 s)
 const WS_IDLE_DEAD_MS = 120_000;           // nothing heard from the browser for this long -> transport is dead
-const SSH_DETACH_GRACE_MS = 10 * 60_000;   // keep a pty alive this long after its WebSocket drops (browser re-attaches)
-const SSH_DETACH_BUFFER = 512 * 1024;      // bytes of terminal output buffered while detached
+const SSH_DETACH_GRACE_MS = 0;             // 0 = detached sessions live until closed from the UI (tmux-like); >0 = ms grace
+const SSH_SCROLLBACK_BYTES = 512 * 1024;   // rolling output history per session, replayed to the browser on (re-)attach
+const SSH_UPLOAD_MAX = 200 * 1024 * 1024;  // file / image dropped or pasted into a terminal
 
 let sshCache = { hosts: [], installLog: [] };
 const sshSessions = new Map();     // sessionId -> { id, hostId, label, startedAt, child, socket }
@@ -4788,6 +4895,7 @@ function sshSanitizeHost(input, existing) {
   if ('identityFile' in input) h.identityFile = str(input.identityFile, 300);
   if ('notes' in input) h.notes = str(input.notes, 2000);
   if ('color' in input) h.color = str(input.color, 16);
+  if ('becomeRoot' in input) h.becomeRoot = !!input.becomeRoot;
   if (typeof input.password === 'string' && input.password !== '') h.password = input.password.slice(0, 256);
   if (input.clearPassword) delete h.password;
   if (!h.host || !SSH_HOST_RE.test(h.host)) throw new Error('Invalid host');
@@ -4937,12 +5045,13 @@ function wsAttach(socket, head, onMessage, onClose) {
 }
 
 /* ---- interactive terminal session over WebSocket ---- */
-// A session = one pty helper (python3 + ssh). The WebSocket is only its transport: when the
-// browser loses it (Cloudflare/proxy cut, laptop sleep, wifi change -> close code 1006) the
-// pty stays alive for SSH_DETACH_GRACE_MS with its output buffered, and the page re-attaches
-// with ?attach=<sessionId>. Only an explicit close from the browser (close frame) or the
-// grace timer hangs the ssh session up.
+// A session = one pty helper (python3 + ssh). The WebSocket is only its transport. Sessions live
+// server-side until closed from the UI (tab ×, or DELETE /api/ssh/sessions/:id) — a refresh, a
+// closed browser, a Cloudflare cut or a laptop sleep only *detaches* them. The page re-attaches
+// with ?attach=<sessionId> and gets the rolling output history replayed (tmux-like).
 function sshOpenTerminal(req, socket, head, query) {
+  const cols = Math.max(20, Math.min(500, parseInt(query.get('cols')) || 120));
+  const rows = Math.max(5, Math.min(200, parseInt(query.get('rows')) || 32));
   if (query.get('attach')) {
     const sess = sshSessions.get(String(query.get('attach')));
     if (!sess || sess.ended) { socket.write('HTTP/1.1 410 Gone\r\nConnection: close\r\n\r\nsession gone\n'); return socket.destroy(); }
@@ -4950,7 +5059,7 @@ function sshOpenTerminal(req, socket, head, query) {
     socket.setNoDelay(true);
     if (sess.socket && !sess.socket.destroyed) { const old = sess.socket; sess.socket = null; wsClose(old, 1000, 'superseded'); }
     console.log(`ssh session ${sess.id} (${sess.target}) re-attached from ${clientIp(req)}`);
-    sshAttachSocket(sess, socket, head, true);
+    sshAttachSocket(sess, socket, head, true, cols, rows);
     return;
   }
   let h = null;
@@ -4963,17 +5072,17 @@ function sshOpenTerminal(req, socket, head, query) {
   }
   if (!wsHandshake(req, socket)) return;
   socket.setNoDelay(true);
-  const cols = Math.max(20, Math.min(500, parseInt(query.get('cols')) || 120));
-  const rows = Math.max(5, Math.min(200, parseInt(query.get('rows')) || 32));
   const id = crypto.randomBytes(6).toString('hex');
   const env = Object.assign({}, process.env, { TERM: 'xterm-256color', LANG: process.env.LANG || 'C.UTF-8', RHC_PTY_COLS: String(cols), RHC_PTY_ROWS: String(rows) });
   if (h.auth === 'password' && h.password) env.RHC_SSH_PASSWORD = h.password;
-  const args = [SSH_PTY_HELPER, 'ssh', '-tt'].concat(sshBaseArgs(h, false), [sshTarget(h)]);
+  // becomeRoot: run `sudo -i` as the remote command (ssh -tt keeps the tty). A sudo password prompt
+  // is answered by the helper with the stored ssh password (same "assword:" match, 2 tries max).
+  const args = [SSH_PTY_HELPER, 'ssh', '-tt'].concat(sshBaseArgs(h, false), [sshTarget(h)], h.becomeRoot && h.user !== 'root' ? ['sudo', '-i'] : []);
   let child;
   try { child = spawn('python3', args, { env, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }); }
   catch (e) { wsSendText(socket, JSON.stringify({ t: 'exit', code: 127, error: e.message })); return wsClose(socket, 1011, 'spawn failed'); }
-  const sess = { id, hostId: h.id || null, label: h.name || sshTarget(h), target: sshTarget(h), startedAt: new Date().toISOString(), child,
-    socket: null, ended: false, outBuf: [], outBufBytes: 0, outBufDropped: false, detachedAt: null, detachTimer: null, attaches: 0 };
+  const sess = { id, hostId: h.id || null, host: h, label: h.name || sshTarget(h), target: sshTarget(h) + (h.becomeRoot && h.user !== 'root' ? ' (root)' : ''), startedAt: new Date().toISOString(), child,
+    socket: null, ended: false, closeRequested: false, hist: [], histBytes: 0, detachedAt: null, detachTimer: null, attaches: 0 };
   sshSessions.set(id, sess);
   console.log(`ssh session ${id} -> ${sess.target} opened from ${clientIp(req)}`);
   const end = (code, error) => {
@@ -4984,9 +5093,9 @@ function sshOpenTerminal(req, socket, head, query) {
     console.log(`ssh session ${id} (${sess.target}) ended, code ${code}${error ? ' (' + error + ')' : ''}`);
   };
   const out = (d) => {
-    if (sess.socket && !sess.socket.destroyed) return wsSendBinary(sess.socket, d);
-    sess.outBuf.push(d); sess.outBufBytes += d.length;
-    while (sess.outBufBytes > SSH_DETACH_BUFFER && sess.outBuf.length) { const x = sess.outBuf.shift(); sess.outBufBytes -= x.length; sess.outBufDropped = true; }
+    sess.hist.push(d); sess.histBytes += d.length;
+    while (sess.histBytes > SSH_SCROLLBACK_BYTES && sess.hist.length > 1) { const x = sess.hist.shift(); sess.histBytes -= x.length; }
+    if (sess.socket && !sess.socket.destroyed) wsSendBinary(sess.socket, d);
   };
   child.stdout.on('data', out);
   child.stderr.on('data', out);
@@ -4994,19 +5103,22 @@ function sshOpenTerminal(req, socket, head, query) {
   child.on('close', (code) => end(code == null ? 0 : code));
   child.stdin.on('error', () => {});
   child.stdio[3].on('error', () => {});
-  sshAttachSocket(sess, socket, head, false);
+  sshAttachSocket(sess, socket, head, false, cols, rows);
 }
-// Bind a (new) WebSocket to a session: greet, replay buffered output, wire keystrokes/resizes.
-function sshAttachSocket(sess, socket, head, reattach) {
+function sshResize(sess, cols, rows) {
+  try { if (sess.child.stdio[3].writable) sess.child.stdio[3].write(JSON.stringify({ resize: [Math.max(20, Math.min(500, +cols || 80)), Math.max(5, Math.min(200, +rows || 24))] }) + '\n'); } catch (_) {}
+}
+// Bind a (new) WebSocket to a session: greet, replay history, wire keystrokes/resizes/close.
+function sshAttachSocket(sess, socket, head, reattach, cols, rows) {
   const child = sess.child;
   sess.socket = socket; sess.attaches++;
   if (sess.detachTimer) { clearTimeout(sess.detachTimer); sess.detachTimer = null; }
   sess.detachedAt = null;
   wsSendText(socket, JSON.stringify({ t: 'hello', id: sess.id, target: sess.target, reattach: !!reattach }));
   if (reattach) {
-    if (sess.outBufDropped) wsSendText(socket, JSON.stringify({ t: 'note', msg: 'some output was dropped while disconnected' }));
-    for (const d of sess.outBuf) wsSendBinary(socket, d);
-    sess.outBuf = []; sess.outBufBytes = 0; sess.outBufDropped = false;
+    if (cols && rows) sshResize(sess, cols, rows);
+    if (sess.histBytes) wsSendBinary(socket, Buffer.concat(sess.hist));
+    wsSendText(socket, JSON.stringify({ t: 'replayed', bytes: sess.histBytes }));
   }
   wsAttach(socket, head, (op, payload) => {
     if (op === 2) { if (!child.stdin.destroyed) child.stdin.write(payload); return; }
@@ -5015,8 +5127,9 @@ function sshAttachSocket(sess, socket, head, reattach) {
       if (s[0] === '{') {
         try {
           const m = JSON.parse(s);
-          if (m.t === 'resize' && child.stdio[3].writable) child.stdio[3].write(JSON.stringify({ resize: [Math.max(20, Math.min(500, +m.cols || 80)), Math.max(5, Math.min(200, +m.rows || 24))] }) + '\n');
+          if (m.t === 'resize') sshResize(sess, m.cols, m.rows);
           else if (m.t === 'input' && typeof m.data === 'string' && !child.stdin.destroyed) child.stdin.write(m.data);
+          else if (m.t === 'close') { sess.closeRequested = true; console.log(`ssh session ${sess.id} closed from the UI -> hangup`); sshHangup(sess); }
           // m.t === 'hb' -> heartbeat reply, nothing to do (wsAttach already refreshed lastSeen)
         } catch (_) {}
       } else if (!child.stdin.destroyed) child.stdin.write(s);
@@ -5024,15 +5137,13 @@ function sshAttachSocket(sess, socket, head, reattach) {
   }, (clientClosed) => {
     if (sess.socket !== socket) return;      // this transport was already superseded by a newer attach
     sess.socket = null;
-    if (sess.ended) return;
-    if (clientClosed) { console.log(`ssh session ${sess.id} closed by browser -> hangup`); return sshHangup(sess); }
-    // transport lost (browser saw 1006) -> keep the pty for the grace period so the page can re-attach
+    if (sess.ended || sess.closeRequested) return;
+    // Browser gone (refresh, closed window, Cloudflare cut, sleep) -> detach, keep the pty running.
     sess.detachedAt = Date.now();
-    console.log(`ssh session ${sess.id} (${sess.target}) detached: transport lost, keeping pty for ${SSH_DETACH_GRACE_MS / 1000}s`);
-    sess.detachTimer = setTimeout(() => {
-      sess.detachTimer = null;
-      if (!sess.ended && !sess.socket) { console.log(`ssh session ${sess.id} not re-attached within grace period -> hangup`); sshHangup(sess); }
-    }, SSH_DETACH_GRACE_MS);
+    if (SSH_DETACH_GRACE_MS > 0) {
+      console.log(`ssh session ${sess.id} (${sess.target}) detached (${clientClosed ? 'browser closed' : 'transport lost'}), keeping pty for ${SSH_DETACH_GRACE_MS / 1000}s`);
+      sess.detachTimer = setTimeout(() => { sess.detachTimer = null; if (!sess.ended && !sess.socket) { console.log(`ssh session ${sess.id} not re-attached within grace period -> hangup`); sshHangup(sess); } }, SSH_DETACH_GRACE_MS);
+    } else console.log(`ssh session ${sess.id} (${sess.target}) detached (${clientClosed ? 'browser closed' : 'transport lost'}), kept until closed from the UI`);
   });
 }
 function sshHangup(sess) {
@@ -5040,6 +5151,35 @@ function sshHangup(sess) {
   try { child.stdin.end(); } catch (_) {}
   setTimeout(() => { try { child.kill('SIGHUP'); } catch (_) {} }, 200);
   setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 3000);
+}
+// POST /api/ssh/sessions/:id/upload?name=<file> (raw body) — drop/paste a file or image into a
+// terminal: it is written to ~/rhc-uploads/ on the remote host over a second ssh connection (same
+// key / stored password) and the path is returned so the page can type it into the terminal.
+function sshUploadToSession(req, res, sess) {
+  const q = new URL(req.url || '/', 'http://localhost').searchParams;
+  const name = (String(q.get('name') || 'upload.bin').replace(/[\/\\\0]/g, '_').replace(/[^\w.\- ()\[\]@+,]/g, '_').replace(/^\.+/, '_').slice(0, 120)) || 'upload.bin';
+  const declared = parseInt(req.headers['content-length'] || '0', 10);
+  if (declared > SSH_UPLOAD_MAX) { authJson(res, 413, { error: 'file too large (max ' + Math.round(SSH_UPLOAD_MAX / 1048576) + ' MB)' }); return req.destroy(); }
+  const tmp = path.join(os.tmpdir(), 'rhc-up-' + crypto.randomBytes(8).toString('hex'));
+  const out = fs.createWriteStream(tmp, { mode: 0o600 });
+  let got = 0, tooBig = false, failed = false;
+  const fail = (code, msg) => { if (failed) return; failed = true; try { fs.unlinkSync(tmp); } catch (_) {} if (!res.headersSent) authJson(res, code, { error: msg }); };
+  req.on('data', (c) => { got += c.length; if (got > SSH_UPLOAD_MAX && !tooBig) { tooBig = true; req.destroy(); } });
+  req.on('error', () => fail(400, 'upload aborted'));
+  req.on('aborted', () => fail(400, 'upload aborted'));
+  out.on('error', (e) => fail(500, e.message));
+  req.pipe(out);
+  out.on('finish', async () => {
+    if (tooBig) return fail(413, 'file too large (max ' + Math.round(SSH_UPLOAD_MAX / 1048576) + ' MB)');
+    if (failed) return;
+    const cmd = `d="$HOME/rhc-uploads"; umask 077; mkdir -p "$d" && f="$d/${name}"; if [ -e "$f" ]; then f="$d/$(date +%Y%m%d-%H%M%S)-${name}"; fi; cat > "$f" && printf 'RHC_UP_OK %s\\n' "$f"`;
+    const r = await sshRun(sess.host, cmd, { stdinStream: fs.createReadStream(tmp), timeoutMs: 900_000 });
+    try { fs.unlinkSync(tmp); } catch (_) {}
+    const mm = r.stdout.match(/RHC_UP_OK (.+)/);
+    if (r.code !== 0 || !mm) return fail(502, 'remote write failed: ' + (r.stderr.trim().split('\n').pop() || r.stdout.trim() || 'exit ' + r.code));
+    console.log(`ssh session ${sess.id}: uploaded ${name} (${got} bytes) -> ${mm[1].trim()}`);
+    authJson(res, 200, { ok: true, path: mm[1].trim(), bytes: got });
+  });
 }
 
 /* ---- remote install of rhc-srv-mon ---- */
@@ -5168,7 +5308,7 @@ function sshPushInstallLog(job) {
   saveSsh();
 }
 
-async function runSshInstall(job, h) {
+async function runSshInstall(job, h, secret) {
   const log = (line, kind) => {
     for (const l of String(line).split('\n')) {
       if (l === '' && kind !== 'hdr') continue;
@@ -5177,7 +5317,7 @@ async function runSshInstall(job, h) {
     }
   };
   const o = job.opts;
-  let stage = null;
+  let stage = null, sudoTmp = null;
   try {
     log('Installing rhc-srv-mon on ' + sshTarget(h) + ' (port ' + o.port + ', dir ' + o.appDir + ')', 'hdr');
     // 1) preflight
@@ -5190,7 +5330,16 @@ async function runSshInstall(job, h) {
     let sudo = '';
     if (kv.UID !== '0') {
       if (kv.SUDO && kv.SUDO_OK === 'yes') { sudo = 'sudo -n '; log('Not root: using passwordless sudo'); }
-      else throw new Error('Remote user is not root and has no passwordless sudo. Connect as root or configure NOPASSWD sudo.');
+      else if (kv.SUDO && secret && secret.sudoPassword) {
+        // No NOPASSWD: feed the password from the dialog to sudo through SUDO_ASKPASS (a mode-700 temp
+        // script on the target, removed at the end) so stdin stays free for the tar stream / script.
+        log('Not root, no passwordless sudo: using the sudo password from the dialog (SUDO_ASKPASS)');
+        const setup = await sshRun(h, 'umask 077; d=$(mktemp -d "${TMPDIR:-/tmp}/.rhc-sudo.XXXXXX") && IFS= read -r pw && printf "%s\n" "$pw" > "$d/pw" && printf "#!/bin/sh\ncat %s/pw\n" "$d" > "$d/ask" && chmod 700 "$d/ask" && SUDO_ASKPASS="$d/ask" sudo -A -k true 2>/dev/null && echo "RHC_SUDO_OK $d" || { rm -rf "$d"; echo RHC_SUDO_BAD; }', { stdinData: secret.sudoPassword + '\n', timeoutMs: 45_000 });
+        const sm = setup.stdout.match(/RHC_SUDO_OK (\S+)/);
+        if (!sm) throw new Error('sudo rejected the password for ' + (kv.USER || 'the remote user') + (setup.stderr.trim() ? ' (' + setup.stderr.trim().split('\n').pop() + ')' : ''));
+        sudoTmp = sm[1]; sudo = 'SUDO_ASKPASS=' + JSON.stringify(sudoTmp + '/ask') + ' sudo -A ';
+      }
+      else throw new Error('Remote user is not root and has no passwordless sudo. Connect as root, enter the sudo password in the install dialog, or configure NOPASSWD sudo.');
     }
     if (kv.EXISTING === 'yes' && !o.overwrite) throw new Error(o.appDir + ' already exists on the target. Tick "Overwrite existing install" to update it in place.');
     // 2) stage files
@@ -5222,6 +5371,7 @@ async function runSshInstall(job, h) {
   } finally {
     job.finishedAt = new Date().toISOString(); job.step = null;
     if (stage) { try { fs.rmSync(stage, { recursive: true, force: true }); } catch (_) {} }
+    if (sudoTmp) { try { await sshRun(h, 'rm -rf ' + JSON.stringify(sudoTmp), { timeoutMs: 20_000 }); } catch (_) {} }
     sshPushInstallLog(job);
   }
 }
@@ -5244,7 +5394,8 @@ function sshStartInstall(hostId, optsIn) {
   // keep only the last few finished jobs in memory
   const finished = [...sshInstallJobs.values()].filter((j) => j.status !== 'running').sort((a, b) => a.startedAt < b.startedAt ? -1 : 1);
   while (finished.length > 10) sshInstallJobs.delete(finished.shift().id);
-  runSshInstall(job, Object.assign({}, h)).catch((e) => { job.status = 'failed'; job.error = e.message; job.finishedAt = new Date().toISOString(); sshPushInstallLog(job); });
+  // the sudo password travels outside job.opts so it never reaches the install log / ssh-hosts.json
+  runSshInstall(job, Object.assign({}, h), { sudoPassword: typeof o.sudoPassword === 'string' ? o.sudoPassword.slice(0, 256) : '' }).catch((e) => { job.status = 'failed'; job.error = e.message; job.finishedAt = new Date().toISOString(); sshPushInstallLog(job); });
   return job;
 }
 
@@ -6070,6 +6221,12 @@ const server = http.createServer((req, res) => {
     }
   }
   {
+    const up = url.match(/^\/api\/ssh\/sessions\/([a-f0-9]{6,16})\/upload$/);
+    if (up && req.method === 'POST') {
+      const s = sshSessions.get(up[1]);
+      if (!s || s.ended) { authJson(res, 404, { error: 'session gone' }); return req.destroy(); }
+      return sshUploadToSession(req, res, s);
+    }
     const m = url.match(/^\/api\/ssh\/sessions\/([a-f0-9]{6,16})$/);
     if (m && req.method === 'GET') {
       // used by the page to check whether a detached session is still alive before re-attaching
