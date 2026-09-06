@@ -2373,7 +2373,7 @@ const PAGE = `<!doctype html>
   * { box-sizing: border-box; }
   body { margin:0; background:#161823; color:#e9e9e9;
          font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
-  .wrap { max-width: 1160px; margin: 0 auto; padding: 28px 16px 60px; }
+  .wrap { width: 100%; box-sizing: border-box; margin: 0; padding: 28px 16px 60px; }
   h1 { font-size: 22px; font-weight: 700; margin: 0 0 4px; display:flex; align-items:center; gap:10px; }
   .sub { color:#9ca3af; font-size:13px; margin-bottom:20px; }
   .banner { border-radius: 14px; padding: 18px 22px; margin-bottom: 26px;
@@ -2610,7 +2610,72 @@ const PAGE = `<!doctype html>
      numeric columns stay aligned at every width — no per-breakpoint width hacks needed.
      Below 860px the bars are hidden entirely (next rule). */
   @media (max-width:860px){ .beats, .hdr .beats-h { display:none; } }
-  @media (max-width:560px){ .col { flex:0 0 48px; } .info{ display:none; } .stat { flex:0 0 54px; } }
+  /* ---- Phones / narrow screens ---- */
+  @media (max-width:820px){
+    .upd-grid { grid-template-columns:1fr; }
+    .site-grid, .ssh-installs { grid-template-columns:1fr; }
+    .ssh-modal .row2, .ssh-modal .row3 { grid-template-columns:1fr; }
+    .ssh-modal-bg { padding:16px 8px; }
+  }
+  @media (max-width:640px){
+    .wrap { padding:14px 10px 40px; }
+    h1 { font-size:18px; }
+    .hdr-row { flex-direction:column; gap:4px; }
+    .userbar { margin-top:0; flex-wrap:wrap; }
+    .banner { font-size:15px; padding:12px 14px; margin-bottom:16px; border-radius:12px; }
+    .group, .upd-card, .mod-card, .auto-card, .site-card, .ssh-inst { padding-left:12px; padding-right:12px; border-radius:12px; }
+    .group { margin-bottom:14px; }
+    /* tabs: one scrollable strip instead of overflowing off the page */
+    .tabs { overflow-x:auto; flex-wrap:nowrap; gap:0; scrollbar-width:none; -webkit-overflow-scrolling:touch; margin:0 -10px 14px; padding:0 10px; }
+    .tabs::-webkit-scrollbar { display:none; }
+    .tab { padding:10px 11px; font-size:13px; white-space:nowrap; flex-shrink:0; }
+    .toolbar { gap:8px; margin-bottom:14px; }
+    .toolbar input { flex:1 1 100%; }
+    .chip { padding:8px 12px; }
+    /* service / database rows: status + name on the first line, numbers with labels underneath */
+    .hdr { display:none; }
+    .row { flex-wrap:wrap; gap:4px 8px; padding:10px 0; }
+    .row::after { content:''; flex:0 0 100%; height:0; order:1; }  /* forces the numbers onto their own line */
+    .stat { flex:0 0 auto; }
+    .meta { flex:1 1 0; min-width:0; }
+    .info { display:block; white-space:normal; }
+    .act { flex:0 0 auto; }
+    .row > .col, .row > .pct { flex:0 0 auto; text-align:left; order:2; font-size:12.5px; padding:2px 8px; background:#161823; border-radius:6px; }
+    .row > .col::before, .row > .pct::before { color:#6b7280; font-weight:500; font-size:11px; margin-right:4px; }
+    #pm2view .row > div:nth-child(4)::before { content:'CPU'; }
+    #pm2view .row > div:nth-child(5)::before { content:'Mem'; }
+    #pm2view .row > div:nth-child(6)::before { content:'↺'; }
+    #pm2view .row > div:nth-child(7)::before { content:'24h'; }
+    #dbview .row > div:nth-child(4)::before { content:'Size'; }
+    #dbview .row > div:nth-child(5)::before { content:'Conns'; }
+    #dbview .row > div:nth-child(6)::before { content:'Cache'; }
+    #dbview .row > div:nth-child(7)::before { content:'24h'; }
+    /* single-value rows (location/size) keep their plain look */
+    #dbview .row[style] > .col { background:none; padding:0; max-width:100% !important; }
+    #dbview .row[style] > .col::before { content:none; }
+    .btn.small, .act .btn { padding:6px 10px; font-size:12px; }
+    /* tables scroll sideways inside their card, never the page */
+    .upd-table, .creds table { display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    .upd-table tr, .creds table tr { white-space:nowrap; }
+    .mod-path { max-width:180px; }
+    .upd-log-entry .comp { min-width:0; }
+    .upd-log-entry .result { white-space:normal; }
+    .auto-row { gap:8px; }
+    .auto-row input[type=text] { flex:1 1 100%; min-width:0; }
+    /* SSH tab on a phone: host list collapses to a short scrollable strip above the terminal */
+    .ssh-layout { gap:10px; }
+    .ssh-side { max-height:200px; }
+    .ssh-main { height:calc(100dvh - 120px); min-height:320px; }
+    .ssh-tab { max-width:150px; }
+    .ssh-modal { padding:16px 14px; }
+    /* inputs at 16px stop iOS Safari zooming in on focus */
+    input, select, textarea { font-size:16px !important; }
+  }
+  /* touch devices: no hover, so per-host actions must always be visible */
+  @media (hover:none){
+    .ssh-host .acts { display:flex; }
+    .beat:hover::after { display:none; }
+  }
   /* ---- SSH tab ---- */
   .ssh-layout { display:flex; gap:14px; align-items:stretch; height:calc(100vh - 230px); min-height:420px; }
   .ssh-side { flex:0 0 250px; background:#1e2230; border-radius:14px; box-shadow:0 2px 8px rgba(0,0,0,.25); display:flex; flex-direction:column; min-width:0; overflow:hidden; }
@@ -2714,7 +2779,6 @@ const PAGE = `<!doctype html>
   body.tab-ssh .ssh-layout { flex:1; height:auto; min-height:0; }
   body.tab-ssh footer { margin-top:6px; }
   @media (max-width:820px){ html:has(body.tab-ssh), body.tab-ssh { height:auto; overflow:auto; } body.tab-ssh .wrap { height:auto; display:block; } body.tab-ssh .ssh-layout { height:auto; } }
-  body.tab-ssh .wrap { max-width:1640px; }
   .hdr-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
   .userbar { display:flex; gap:6px; align-items:center; font-size:12.5px; color:#9ca3af; margin-top:8px; }
   .userbar .who { margin-right:6px; } .userbar .who small { color:#6b7280; }
