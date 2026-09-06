@@ -7,9 +7,9 @@
 {{css}}</style></head>
 <body>
 <div class="wrap">
-  <div class="hdr-row"><h1>📊 RHC SRV Manager <span id="host" class="sub" style="margin:0"></span></h1><div class="userbar" id="userbar"></div></div>
-  <div class="subrow"><div class="sub" id="updated">loading…</div><div class="statuses" id="statuses"></div></div>
-  <div class="tabs">
+  <nav class="sidenav">
+    <div class="brand"><span class="logo">📊</span><span class="brand-name">RHC SRV Manager</span></div>
+    <div class="tabs">
     <a class="tab active" href="sites" data-tab="sites">🌐 Sites</a>
     <a class="tab" href="monitor" data-tab="pm2">📈 Monitor</a>
     <a class="tab" href="postgres" data-tab="db">🐘 PostgreSQL</a>
@@ -19,7 +19,12 @@
     <a class="tab" href="ssh" data-tab="ssh">🖥️ SSH</a>
     <a class="tab" href="events" data-tab="events">📜 Events</a>
     <a class="tab" href="settings" data-tab="settings">⚙️ Settings</a>
-  </div>
+    </div>
+    <div class="userbar" id="userbar"></div>
+  </nav>
+  <main class="content">
+  <div class="hdr-row"><h1><span id="pagetitle">Sites</span> <span id="host" class="sub" style="margin:0"></span></h1></div>
+  <div class="subrow"><div class="sub" id="updated">loading…</div><div class="statuses" id="statuses"></div></div>
   <div id="banner" class="banner ok" style="display:none"></div>
   <div id="pm2view">
   <div class="toolbar">
@@ -63,6 +68,7 @@
   <div id="eventsview" style="display:none"></div>
   <div id="settingsview" style="display:none"></div>
   <footer>auto-refresh 10s · heartbeat = <span id="ivl">60</span>s samples · 🟩 up · 🟥 down · 🟧 restarted</footer>
+  </main>
 </div>
 <div id="toast-host"></div>
 <script>

@@ -5,7 +5,7 @@ let lastUpdates = null;
 function renderUpdates(){
   if (!lastUpdates) return;
   const d = lastUpdates;
-  document.getElementById('host').textContent = 'updates';
+  document.getElementById('host').textContent = '';
   document.getElementById('updated').textContent = 'Last checked: ' + (d.lastChecked ? new Date(d.lastChecked).toLocaleString() : 'never') + ' · hourly auto-check';
   showBanner(null);
   const avail = (d.components||[]).filter(c => c.updateAvailable).length;

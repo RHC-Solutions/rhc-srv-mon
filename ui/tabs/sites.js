@@ -50,7 +50,7 @@ function renderSitesList(){
   if (!lastSites) { view.innerHTML = '<div class="upd-card">Loading…</div>'; return; }
   if (view.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
   const d = lastSites;
-  document.getElementById('host').textContent = 'sites';
+  document.getElementById('host').textContent = '';
   document.getElementById('updated').textContent = 'Last checked: ' + (d.generated_at ? new Date(d.generated_at).toLocaleString() : 'never') + ' · auto-refresh 5 min';
   // no banner when everything is fine — problems show as a red banner, counts live in the toolbar pills
   const down = d.sites.filter(s => s.status === 'down').length, degraded = d.sites.filter(s => s.status === 'degraded').length, total = d.sites.length, online = d.sites.filter(s => s.status === 'online').length;

@@ -55,7 +55,7 @@ const document = {
   addEventListener() {},
 };
 document.body.appendChild = (c) => { document.body.children.push(c); if (c._html) registerIds(c, c._html); return c; };
-for (const id of ['host', 'updated', 'banner', 'userbar', 'q', 'sort', 'sharedToggle', 'main', 'toast-host', 'ivl', 'ssh-hostlist', 'ssh-tabbar', 'ssh-terms', 'ssh-empty', 'ssh-side-ft',
+for (const id of ['host', 'pagetitle', 'updated', 'banner', 'userbar', 'q', 'sort', 'sharedToggle', 'main', 'toast-host', 'ivl', 'ssh-hostlist', 'ssh-tabbar', 'ssh-terms', 'ssh-empty', 'ssh-side-ft',
   'pm2view', 'dbview', 'updatesview', 'sitesview', 'modulesview', 'backupview', 'sshview', 'eventsview', 'settingsview']) byId.set(id, makeEl(id.endsWith('view') ? 'div' : id === 'q' ? 'input' : 'div', id));
 
 const storage = new Map();

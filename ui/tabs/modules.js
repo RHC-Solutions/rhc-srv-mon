@@ -11,7 +11,7 @@ function renderModules(){
   const active = d.activeUpdates || {};
   const isUpdating = (dir) => !!active[dir];
 
-  document.getElementById('host').textContent = 'modules';
+  document.getElementById('host').textContent = '';
   const ts = d.generated_at ? new Date(d.generated_at).toLocaleString() : 'never';
   let stamp = 'Last scan: ' + ts + ' · refresh every 6h';
   if (d.scanInProgress) {

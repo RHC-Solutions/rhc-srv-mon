@@ -9,7 +9,7 @@ function renderBackup(){
   // don't clobber a field the user is mid-edit on during the 10s auto-refresh
   if (view.contains(document.activeElement) && ['INPUT','SELECT','TEXTAREA'].includes((document.activeElement.tagName||''))) return;
   const d = lastBackup, sc = d.scope||{}, sch = d.schedule||{}, lr = d.lastRun;
-  document.getElementById('host').textContent = 'backups';
+  document.getElementById('host').textContent = '';
   document.getElementById('updated').textContent = 'Wasabi · ' + (sch.enabled ? 'daily at ' + String(sch.hour).padStart(2,'0') + ':' + String(sch.minute).padStart(2,'0') : 'schedule off') + ' · keep ' + (d.retentionDays||14) + ' days';
   showBanner(null);
   setStatus(d.running ? [{ level:'info', icon:'⏳', text:'Backup running' }]

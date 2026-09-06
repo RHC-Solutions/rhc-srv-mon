@@ -22,6 +22,7 @@ function dbRow(db){
 function renderDb(){
   if (!lastDb) return;
   const d = lastDb;
+  document.getElementById('host').textContent = '';
   if (d.error) {
     showBanner('<span class="ico">🔴</span> PostgreSQL unreachable <span style="margin-left:auto;font-size:13px;font-weight:400">'+esc(d.error)+'</span>');
     setStatus([{ level:'bad', icon:'🔴', text:'PostgreSQL unreachable' }]);

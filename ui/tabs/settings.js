@@ -14,7 +14,7 @@ const stField = (label, inner, hint) => sshField(label, inner, hint);
 
 function renderSettings(){
   const view = document.getElementById('settingsview');
-  document.getElementById('host').textContent = 'settings';
+  document.getElementById('host').textContent = lastSettings ? lastSettings.general.hostname : '';
   showBanner(null); setStatus([]);
   if (!lastSettings) { view.innerHTML = '<div class="upd-card">Loading…</div>'; loadSettings(); return; }
   if (view.contains(document.activeElement) && ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;

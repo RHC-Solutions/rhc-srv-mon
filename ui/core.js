@@ -87,15 +87,15 @@ function showBanner(html){ const b = document.getElementById('banner'); if (html
 // One entry per tab: URL slug, view element, render (on tab switch) and onRefresh (every 10 s
 // while the tab is active — omitted for tabs that fetch their own data on their own schedule).
 const TABS = {
-  sites:   { slug:'sites',    view:'sitesview',   render: () => renderSites(),   onRefresh: () => { if (!siteView.domain) renderSitesList(); } },
-  pm2:     { slug:'monitor',  view:'pm2view',     render: () => render(),        onRefresh: () => render() },
-  db:      { slug:'postgres', view:'dbview',      render: () => renderDb(),      onRefresh: () => renderDb() },
-  updates: { slug:'updates',  view:'updatesview', render: () => renderUpdates(), onRefresh: () => renderUpdates() },
-  modules: { slug:'modules',  view:'modulesview', render: () => renderModules(), onRefresh: () => renderModules() },
-  backup:  { slug:'backups',  view:'backupview',  render: () => renderBackup(),  onRefresh: () => renderBackup() },
-  ssh:     { slug:'ssh',      view:'sshview',     render: () => renderSsh() },
-  events:  { slug:'events',   view:'eventsview',  render: () => renderEvents(),  onRefresh: () => refreshEvents() },
-  settings:{ slug:'settings', view:'settingsview',render: () => renderSettings() },
+  sites:   { slug:'sites',    label:'Sites',      view:'sitesview',   render: () => renderSites(),   onRefresh: () => { if (!siteView.domain) renderSitesList(); } },
+  pm2:     { slug:'monitor',  label:'Monitor',    view:'pm2view',     render: () => render(),        onRefresh: () => render() },
+  db:      { slug:'postgres', label:'PostgreSQL', view:'dbview',      render: () => renderDb(),      onRefresh: () => renderDb() },
+  updates: { slug:'updates',  label:'Updates',    view:'updatesview', render: () => renderUpdates(), onRefresh: () => renderUpdates() },
+  modules: { slug:'modules',  label:'Modules',    view:'modulesview', render: () => renderModules(), onRefresh: () => renderModules() },
+  backup:  { slug:'backups',  label:'Backups',    view:'backupview',  render: () => renderBackup(),  onRefresh: () => renderBackup() },
+  ssh:     { slug:'ssh',      label:'SSH',        view:'sshview',     render: () => renderSsh() },
+  events:  { slug:'events',   label:'Events',     view:'eventsview',  render: () => renderEvents(),  onRefresh: () => refreshEvents() },
+  settings:{ slug:'settings', label:'Settings',   view:'settingsview',render: () => renderSettings() },
 };
 const TAB_SLUG = Object.fromEntries(Object.entries(TABS).map(([k, v]) => [k, v.slug]));
 const SLUG_TAB = Object.assign(Object.fromEntries(Object.entries(TAB_SLUG).map(([k,v]) => [v,k])),
@@ -111,6 +111,7 @@ function setTab(tab, opts){
     try { history.pushState({ tab }, '', TAB_SLUG[tab]); } catch(e){}   // clicking the tab again leaves any sub-view (site detail)
   }
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===tab));
+  const title = document.getElementById('pagetitle'); if (title) title.textContent = TABS[tab].label || tab;
   for (const [k, t] of Object.entries(TABS)) { const el = document.getElementById(t.view); if (el) el.style.display = k===tab ? '' : 'none'; }
   TABS[tab].render();
 }
