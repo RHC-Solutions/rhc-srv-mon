@@ -6,3 +6,7 @@ ssh-hosts.json
 .helpers/
 auth.json
 .sessions/
+modules.json
+rhc.sqlite
+rhc.sqlite-*
+secret.key
