@@ -33,6 +33,7 @@ const sites = require('./lib/sites');
 const modules = require('./lib/modules');
 const backups = require('./lib/backups');
 const ssh = require('./lib/ssh');
+const vnc = require('./lib/vnc');
 
 /* ----------------------------------------------------------------- server */
 
@@ -453,11 +454,14 @@ const server = http.createServer((req, res) => {
 server.on('upgrade', (req, socket, head) => {
   let u;
   try { u = new URL(req.url || '/', 'http://localhost'); } catch (_) { return socket.destroy(); }
-  if (u.pathname !== '/ws/ssh') { socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); return socket.destroy(); }
+  if (u.pathname !== '/ws/ssh' && u.pathname !== '/ws/vnc') { socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); return socket.destroy(); }
   socket.on('error', () => {});
   if (!httpu.isLocalDirect(req) && !auth.authSessionOf(req)) { socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); return socket.destroy(); }
-  try { ssh.sshOpenTerminal(req, socket, head, u.searchParams); }
-  catch (e) { console.error('ssh ws failed:', e.message); try { socket.destroy(); } catch (_) {} }
+  try {
+    if (u.pathname === '/ws/vnc') vnc.openVncBridge(req, socket, head, u.searchParams);
+    else ssh.sshOpenTerminal(req, socket, head, u.searchParams);
+  }
+  catch (e) { console.error(u.pathname + ' ws failed:', e.message); try { socket.destroy(); } catch (_) {} }
 });
 
 /* ------------------------------------------------------------------- boot */

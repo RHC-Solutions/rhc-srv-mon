@@ -50,7 +50,7 @@ function sshRenderHosts(){
     if (g !== lastGrp) { html += '<div class="ssh-grp">' + esc(g) + '</div>'; lastGrp = g; }
     html += '<div class="ssh-host" onclick="sshConnect(\'' + h.id + '\')" title="' + esc((h.user||'root') + '@' + h.host + ':' + (h.port||22) + (h.notes ? ' — ' + h.notes : '')) + '">'
       + '<span class="dot' + (openHosts.has(h.id) ? ' on' : '') + '"' + (h.color ? ' style="background:' + esc(h.color) + '"' : '') + '></span>'
-      + '<span class="nm">' + esc(h.name) + '<small>' + esc((h.user||'root') + '@' + h.host) + (h.port && h.port != 22 ? ':' + h.port : '') + (h.auth === 'password' ? ' · pw' : '') + (h.becomeRoot && (h.user||'root') !== 'root' ? ' · sudo -i' : '') + '</small></span>'
+      + '<span class="nm">' + ((h.protocol||'ssh') === 'vnc' ? '🖵 ' : '') + esc(h.name) + '<small>' + ((h.protocol||'ssh') === 'vnc' ? 'vnc ' + esc(String(h.vncHost||'127.0.0.1')) + ':' + (h.vncPort||5901) + ' · via ' : '') + esc((h.user||'root') + '@' + h.host) + (h.port && h.port != 22 ? ':' + h.port : '') + (h.auth === 'password' ? ' · pw' : '') + (h.becomeRoot && (h.user||'root') !== 'root' ? ' · sudo -i' : '') + '</small></span>'
       + (h.monitor ? '<span class="mon" title="rhc-srv-mon installed ' + esc(h.monitor.installedAt||'') + ' (port ' + h.monitor.port + ')">📊</span>' : '')
       + '<span class="acts">'
       + '<button title="Who is logged in on this host" onclick="event.stopPropagation();sshSessionsDialog(\'' + h.id + '\')">👥</button>'
@@ -108,7 +108,7 @@ function sshRenderPanes(){
     sshPanes.forEach((id, i) => { if (!id || !sshSess.has(id)) { const e = document.createElement('div'); e.className = 'ssh-empty-pane'; e.style.order = String(i); e.textContent = 'empty pane ' + (i + 1) + ' — click here, then a host on the left'; e.onclick = () => { sshFocusPane = i; sshRenderPanes(); }; if (i === sshFocusPane) e.style.borderColor = '#5cdd8b'; box.appendChild(e); } });
   }
   document.getElementById('ssh-empty').style.display = sshSess.size ? 'none' : '';
-  requestAnimationFrame(() => { for (const s of sshSess.values()) if (s.el.classList.contains('active') || s.el.classList.contains('shown')) { try { s.fit.fit(); } catch(e){} } });
+  requestAnimationFrame(() => { for (const s of sshSess.values()) if (s.el.classList.contains('active') || s.el.classList.contains('shown')) { try { if (s.kind !== 'vnc') s.fit.fit(); } catch(e){} } });
 }
 function sshActivate(id, opts){
   opts = opts || {};
@@ -122,7 +122,7 @@ function sshActivate(id, opts){
   }
   sshRenderPanes(); sshRenderTabs();
   const s = sshSess.get(id);
-  if (s && !opts.noFocus) requestAnimationFrame(() => { try { s.fit.fit(); s.term.focus(); } catch(e){} });
+  if (s && !opts.noFocus) requestAnimationFrame(() => { try { if (s.kind === 'vnc') s.rfb && s.rfb.focus(); else { s.fit.fit(); s.term.focus(); } } catch(e){} });
 }
 function sshPaneSolo(id){ sshSetLayout(1); sshActivate(id); }
 function sshRenameTab(id){
@@ -133,6 +133,16 @@ function sshDuplicateTab(){ const s = sshSess.get(sshActive); if (!s) return; if
 function sshCloseAll(){ for (const id of [...sshSess.keys()]) sshCloseTab(id); }
 function sshCloseTab(id){
   const s = sshSess.get(id); if (!s) return;
+  if (s.kind === 'vnc') {                      // a viewer has no server-side session to end
+    s.status = 'dead';
+    try { s.rfb && s.rfb.disconnect(); } catch(e){}
+    s.el.remove(); sshSess.delete(id);
+    const pv = sshPanes.indexOf(id); if (pv >= 0) { const hidden = [...sshSess.keys()].find(k => !sshPanes.includes(k)); sshPanes[pv] = hidden || null; }
+    if (sshActive === id) { const rest = sshPanes.filter(Boolean).concat([...sshSess.keys()]); sshActive = rest.length ? rest[0] : null; }
+    if (sshActive) sshActivate(sshActive); else sshRenderPanes();
+    sshRenderTabs(); sshRenderHosts();
+    return;
+  }
   const wasLive = s.status !== 'dead' && !s.superseded;
   s.status = 'dead'; clearTimeout(s.retryTimer);
   // × ends the session on the server (a refresh / closed browser only detaches it)
@@ -148,8 +158,64 @@ function sshCloseTab(id){
 
 async function sshConnect(hostId){
   const h = sshData && sshData.hosts.find(x => x.id === hostId); if (!h) return toast('Unknown host', 'error');
+  if ((h.protocol || 'ssh') === 'vnc') return sshOpenVncTab(h);
   await sshOpenTab({ hostId, label: h.name, target: (h.user||'root') + '@' + h.host, query: 'id=' + encodeURIComponent(hostId) });
 }
+/* ---- VNC viewer (noVNC over the /ws/vnc bridge) ---- */
+let novncPromise = null;
+function sshLoadNoVnc(){
+  if (window.__RFB) return Promise.resolve(window.__RFB);
+  if (novncPromise) return novncPromise;
+  novncPromise = import('https://cdn.jsdelivr.net/npm/@novnc/novnc@1.6.0/lib/rfb.js')
+    .then((m) => { window.__RFB = m.default; return window.__RFB; })
+    .catch((e) => { novncPromise = null; throw new Error('cannot load the VNC client library (' + e.message + ')'); });
+  return novncPromise;
+}
+async function sshOpenVncTab(h){
+  let RFB, cred;
+  try { RFB = await sshLoadNoVnc(); } catch(e){ return toast(e.message, 'error', { duration: 9000 }); }
+  try { cred = await siteApi('GET', 'api/ssh/hosts/' + h.id + '/vnc'); } catch(e){ return toast('VNC: ' + e.message, 'error'); }
+  const id = 't' + (++sshTabSeq);
+  const target = (cred.target.tunnel ? 'ssh → ' : '') + cred.target.host + ':' + cred.target.port;
+  const el = document.createElement('div'); el.className = 'ssh-term vnc'; el.dataset.id = id;
+  el.innerHTML = '<div class="pane-hd"><b class="pl">🖵 ' + esc(h.name) + '</b><span class="pt">' + esc(target) + '</span><span class="sp"></span>'
+    + '<button title="Send Ctrl+Alt+Del" onclick="sshVncCad(\'' + id + '\')">⌨</button>'
+    + '<button title="Fit / 1:1" onclick="sshVncScale(\'' + id + '\')">⤢</button>'
+    + '<button title="Show only this pane" onclick="sshPaneSolo(\'' + id + '\')">▭</button>'
+    + '<button title="Close viewer" onclick="sshCloseTab(\'' + id + '\')">×</button></div><div class="pane-body vnc-body"></div>';
+  el.addEventListener('mousedown', () => { if (sshActive !== id) sshActivate(id, { noFocus: true }); }, true);
+  document.getElementById('ssh-terms').appendChild(el);
+  const s = { id, hostId: h.id, kind: 'vnc', label: h.name, target, el, rfb: null, status: 'connecting', fit: { fit(){} } };
+  sshSess.set(id, s);
+  if (window.innerWidth < 820) { const side = document.querySelector('.ssh-side'); if (side) side.classList.add('collapsed'); }
+  sshActivate(id);
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  const url = proto + location.host + new URL('ws/vnc', location.href).pathname + '?id=' + encodeURIComponent(h.id);
+  try {
+    const rfb = new RFB(el.querySelector('.vnc-body'), url, { credentials: { password: cred.password || '' }, wsProtocols: ['binary'] });
+    rfb.viewOnly = !!cred.viewOnly; rfb.scaleViewport = true; rfb.resizeSession = false; rfb.background = '#0c0e16';
+    rfb.addEventListener('connect', () => { s.status = 'open'; sshRenderTabs(); sshRenderHosts(); });
+    rfb.addEventListener('disconnect', (e) => { s.status = 'dead'; sshRenderTabs(); sshVncNote(s, (e.detail && e.detail.clean) ? 'Disconnected.' : 'Connection lost — the VNC server may not be running, or the port is wrong.'); });
+    rfb.addEventListener('credentialsrequired', () => { const pw = prompt('VNC password for ' + h.name); if (pw != null) rfb.sendCredentials({ password: pw }); else rfb.disconnect(); });
+    rfb.addEventListener('securityfailure', (e) => sshVncNote(s, 'VNC authentication failed' + (e.detail && e.detail.reason ? ': ' + e.detail.reason : '') + ' — check the password in the host settings.'));
+    s.rfb = rfb;
+  } catch(e){ s.status = 'dead'; sshVncNote(s, 'Could not start the viewer: ' + e.message); }
+  sshRenderTabs();
+}
+function sshVncNote(s, msg){
+  const body = s.el.querySelector('.vnc-body'); if (!body) return;
+  let bar = s.el.querySelector('.vnc-note');
+  if (!bar) { bar = document.createElement('div'); bar.className = 'vnc-note'; s.el.appendChild(bar); }
+  bar.innerHTML = esc(msg) + ' <button class="upd-test-btn" onclick="sshVncRetry(\'' + s.id + '\')">Reconnect</button>';
+}
+function sshVncRetry(id){
+  const s = sshSess.get(id); if (!s) return;
+  const h = sshData && sshData.hosts.find(x => x.id === s.hostId);
+  sshCloseTab(id);
+  if (h) sshOpenVncTab(h);
+}
+function sshVncCad(id){ const s = sshSess.get(id); if (s && s.rfb) { s.rfb.sendCtrlAltDel(); toast('Ctrl+Alt+Del sent', 'success'); } }
+function sshVncScale(id){ const s = sshSess.get(id); if (s && s.rfb) { s.rfb.scaleViewport = !s.rfb.scaleViewport; toast(s.rfb.scaleViewport ? 'Scaled to fit' : '1:1 (scroll to pan)', 'info'); } }
 async function sshConnectAdhoc(a){
   if (!a || !a.host) return;
   await sshOpenTab({ hostId: null, adhoc: a, label: (a.user||'root') + '@' + a.host, target: (a.user||'root') + '@' + a.host + ':' + (a.port||22), query: 'host=' + encodeURIComponent(a.host) + '&user=' + encodeURIComponent(a.user||'root') + '&port=' + encodeURIComponent(a.port||22) });
@@ -375,7 +441,8 @@ function sshPrefLive(){
 
 
 function sshEditHost(id){
-  const h = (id && sshData && sshData.hosts.find(x => x.id === id)) || { name:'', group:'', host:'', port:22, user:'root', auth:'key', identityFile:'', notes:'' };
+  const h = (id && sshData && sshData.hosts.find(x => x.id === id)) || { name:'', group:'', host:'', port:22, user:'root', auth:'key', identityFile:'', notes:'', protocol:'ssh' };
+  const isVnc = (h.protocol || 'ssh') === 'vnc';
   const groups = [...new Set((sshData ? sshData.hosts : []).map(x => x.group).filter(Boolean))];
   sshModal('<h3>' + (id ? '✎ Edit host' : '＋ Add host') + '</h3>'
     + '<div class="row2">' + sshField('Name', '<input id="shf-name" value="' + esc(h.name) + '" placeholder="web02 (prod)">')
@@ -386,7 +453,15 @@ function sshEditHost(id){
     + '<div class="row2">' + sshField('Authentication', '<select id="shf-auth" onchange="document.getElementById(\'shf-pwwrap\').style.display=this.value===\'password\'?\'\':\'none\'"><option value="key"' + (h.auth!=='password'?' selected':'') + '>SSH key (default keys / file below)</option><option value="password"' + (h.auth==='password'?' selected':'') + '>Password</option></select>')
     + sshField('Identity file', '<input id="shf-ident" value="' + esc(h.identityFile||'') + '" placeholder="/root/.ssh/id_ed25519 (optional)">') + '</div>'
     + '<div id="shf-pwwrap" style="display:' + (h.auth==='password'?'':'none') + '">' + sshField('Password', '<input id="shf-pw" type="password" autocomplete="new-password" placeholder="' + (h.hasPassword ? '•••••••• (stored — leave blank to keep)' : 'password') + '">', 'Stored in ssh-hosts.json (mode 600, gitignored). Typed automatically at the ssh prompt; sudo prompts are left to you.') + '</div>'
-    + sshField('Notes', '<input id="shf-notes" value="' + esc(h.notes||'') + '" placeholder="optional">')
+    + '<div class="row2">' + sshField('Opens as', '<select id="shf-proto" onchange="document.getElementById(\'shf-vncwrap\').style.display=this.value===\'vnc\'?\'\':\'none\'"><option value="ssh"' + (isVnc?'':' selected') + '>SSH terminal</option><option value="vnc"' + (isVnc?' selected':'') + '>VNC viewer (desktop)</option></select>', 'the SSH settings above are still used — a VNC viewer reaches the desktop through them')
+    + sshField('Notes', '<input id="shf-notes" value="' + esc(h.notes||'') + '" placeholder="optional">') + '</div>'
+    + '<div id="shf-vncwrap" style="display:' + (isVnc?'':'none') + '">'
+      + '<div class="row3">' + sshField('VNC address', '<input id="shf-vnchost" value="' + esc(h.vncHost||'127.0.0.1') + '" placeholder="127.0.0.1">', 'as seen from the target')
+      + sshField('VNC port', '<input id="shf-vncport" type="number" min="1" max="65535" value="' + (h.vncPort||5901) + '">', ':1 = 5901, :2 = 5902')
+      + sshField('VNC password', '<input id="shf-vncpw" type="password" autocomplete="new-password" placeholder="' + (h.hasVncPassword ? '•••••••• (stored)' : 'vnc password') + '">') + '</div>'
+      + '<label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer;margin-bottom:8px"><input type="checkbox" id="shf-vnctunnel"' + (h.vncTunnel === false ? '' : ' checked') + ' style="accent-color:#5cdd8b"> Reach it through SSH (<code>ssh -W</code>) — required for a server bound to localhost, and nothing is exposed to the network</label>'
+      + '<label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer"><input type="checkbox" id="shf-vncview"' + (h.vncViewOnly ? ' checked' : '') + ' style="accent-color:#5cdd8b"> View only (no keyboard or mouse)</label>'
+      + '</div>'
     + sshField('After login', '<label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer"><input type="checkbox" id="shf-root"' + (h.becomeRoot ? ' checked' : '') + ' style="accent-color:#5cdd8b"> Become root (<code>sudo -i</code>) — for non-root users; a sudo password prompt is answered with the stored password, or type it</label>')
     + '<div id="shf-test"></div>'
     + '<div class="foot"><div class="left">' + (id ? '<button class="btn danger" onclick="sshDeleteHost(\'' + id + '\')">Delete</button>' : '') + (id ? '<button class="btn" onclick="sshTestHost(\'' + id + '\')">🔌 Test connection</button>' : '') + '</div>'
@@ -396,6 +471,14 @@ function sshReadHostForm(){
   const v = (i) => document.getElementById(i).value;
   const o = { name: v('shf-name'), group: v('shf-group'), host: v('shf-host').trim(), port: parseInt(v('shf-port')) || 22, user: v('shf-user').trim() || 'root', auth: v('shf-auth'), identityFile: v('shf-ident').trim(), notes: v('shf-notes'), becomeRoot: document.getElementById('shf-root').checked };
   const pw = document.getElementById('shf-pw').value; if (pw) o.password = pw;
+  o.protocol = v('shf-proto');
+  if (o.protocol === 'vnc') {
+    o.vncHost = v('shf-vnchost').trim() || '127.0.0.1';
+    o.vncPort = parseInt(v('shf-vncport')) || 5901;
+    o.vncTunnel = document.getElementById('shf-vnctunnel').checked;
+    o.vncViewOnly = document.getElementById('shf-vncview').checked;
+    const vp = document.getElementById('shf-vncpw').value; if (vp) o.vncPassword = vp;
+  }
   return o;
 }
 async function sshSaveHost(id){
