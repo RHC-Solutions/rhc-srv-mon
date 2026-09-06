@@ -50,7 +50,7 @@ function sshRenderHosts(){
     if (g !== lastGrp) { html += '<div class="ssh-grp">' + esc(g) + '</div>'; lastGrp = g; }
     html += '<div class="ssh-host" onclick="sshConnect(\'' + h.id + '\')" title="' + esc((h.user||'root') + '@' + h.host + ':' + (h.port||22) + (h.notes ? ' — ' + h.notes : '')) + '">'
       + '<span class="dot' + (openHosts.has(h.id) ? ' on' : '') + '"' + (h.color ? ' style="background:' + esc(h.color) + '"' : '') + '></span>'
-      + '<span class="nm">' + ((h.protocol||'ssh') === 'vnc' ? '🖵 ' : '') + esc(h.name) + '<small>' + ((h.protocol||'ssh') === 'vnc' ? 'vnc ' + esc(String(h.vncHost||'127.0.0.1')) + ':' + (h.vncPort||5901) + ' · via ' : '') + esc((h.user||'root') + '@' + h.host) + (h.port && h.port != 22 ? ':' + h.port : '') + (h.auth === 'password' ? ' · pw' : '') + (h.becomeRoot && (h.user||'root') !== 'root' ? ' · sudo -i' : '') + '</small></span>'
+      + '<span class="nm">' + ((h.protocol||'ssh') === 'vnc' ? '🖵 ' : (h.protocol||'ssh') === 'rdp' ? '🪟 ' : '') + esc(h.name) + '<small>' + ((h.protocol||'ssh') === 'vnc' ? 'vnc ' + esc(String(h.vncHost||'127.0.0.1')) + ':' + (h.vncPort||5901) + ' · via ' : (h.protocol||'ssh') === 'rdp' ? 'rdp ' + esc(String(h.rdpHost||h.host)) + ':' + (h.rdpPort||3389) + ' · ' : '') + esc((h.user||'root') + '@' + h.host) + (h.port && h.port != 22 ? ':' + h.port : '') + (h.auth === 'password' ? ' · pw' : '') + (h.becomeRoot && (h.user||'root') !== 'root' ? ' · sudo -i' : '') + '</small></span>'
       + (h.monitor ? '<span class="mon" title="rhc-srv-mon installed ' + esc(h.monitor.installedAt||'') + ' (port ' + h.monitor.port + ')">📊</span>' : '')
       + '<span class="acts">'
       + '<button title="Who is logged in on this host" onclick="event.stopPropagation();sshSessionsDialog(\'' + h.id + '\')">👥</button>'
@@ -133,9 +133,10 @@ function sshDuplicateTab(){ const s = sshSess.get(sshActive); if (!s) return; if
 function sshCloseAll(){ for (const id of [...sshSess.keys()]) sshCloseTab(id); }
 function sshCloseTab(id){
   const s = sshSess.get(id); if (!s) return;
-  if (s.kind === 'vnc') {                      // a viewer has no server-side session to end
+  if (s.kind === 'vnc') {                      // a VNC viewer has no server-side session; an RDP one does
     s.status = 'dead';
     try { s.rfb && s.rfb.disconnect(); } catch(e){}
+    if (s.rdpDisplay) fetch('api/ssh/rdp/' + s.rdpDisplay, { method:'DELETE' }).catch(() => {});
     s.el.remove(); sshSess.delete(id);
     const pv = sshPanes.indexOf(id); if (pv >= 0) { const hidden = [...sshSess.keys()].find(k => !sshPanes.includes(k)); sshPanes[pv] = hidden || null; }
     if (sshActive === id) { const rest = sshPanes.filter(Boolean).concat([...sshSess.keys()]); sshActive = rest.length ? rest[0] : null; }
@@ -159,6 +160,7 @@ function sshCloseTab(id){
 async function sshConnect(hostId){
   const h = sshData && sshData.hosts.find(x => x.id === hostId); if (!h) return toast('Unknown host', 'error');
   if ((h.protocol || 'ssh') === 'vnc') return sshOpenVncTab(h);
+  if ((h.protocol || 'ssh') === 'rdp') return sshOpenRdpTab(h);
   await sshOpenTab({ hostId, label: h.name, target: (h.user||'root') + '@' + h.host, query: 'id=' + encodeURIComponent(hostId) });
 }
 /* ---- VNC viewer (noVNC over the /ws/vnc bridge) ---- */
@@ -442,7 +444,8 @@ function sshPrefLive(){
 
 function sshEditHost(id){
   const h = (id && sshData && sshData.hosts.find(x => x.id === id)) || { name:'', group:'', host:'', port:22, user:'root', auth:'key', identityFile:'', notes:'', protocol:'ssh' };
-  const isVnc = (h.protocol || 'ssh') === 'vnc';
+  const proto = h.protocol || 'ssh';
+  const isVnc = proto === 'vnc', isRdp = proto === 'rdp';
   const groups = [...new Set((sshData ? sshData.hosts : []).map(x => x.group).filter(Boolean))];
   sshModal('<h3>' + (id ? '✎ Edit host' : '＋ Add host') + '</h3>'
     + '<div class="row2">' + sshField('Name', '<input id="shf-name" value="' + esc(h.name) + '" placeholder="web02 (prod)">')
@@ -453,8 +456,18 @@ function sshEditHost(id){
     + '<div class="row2">' + sshField('Authentication', '<select id="shf-auth" onchange="document.getElementById(\'shf-pwwrap\').style.display=this.value===\'password\'?\'\':\'none\'"><option value="key"' + (h.auth!=='password'?' selected':'') + '>SSH key (default keys / file below)</option><option value="password"' + (h.auth==='password'?' selected':'') + '>Password</option></select>')
     + sshField('Identity file', '<input id="shf-ident" value="' + esc(h.identityFile||'') + '" placeholder="/root/.ssh/id_ed25519 (optional)">') + '</div>'
     + '<div id="shf-pwwrap" style="display:' + (h.auth==='password'?'':'none') + '">' + sshField('Password', '<input id="shf-pw" type="password" autocomplete="new-password" placeholder="' + (h.hasPassword ? '•••••••• (stored — leave blank to keep)' : 'password') + '">', 'Stored in ssh-hosts.json (mode 600, gitignored). Typed automatically at the ssh prompt; sudo prompts are left to you.') + '</div>'
-    + '<div class="row2">' + sshField('Opens as', '<select id="shf-proto" onchange="document.getElementById(\'shf-vncwrap\').style.display=this.value===\'vnc\'?\'\':\'none\'"><option value="ssh"' + (isVnc?'':' selected') + '>SSH terminal</option><option value="vnc"' + (isVnc?' selected':'') + '>VNC viewer (desktop)</option></select>', 'the SSH settings above are still used — a VNC viewer reaches the desktop through them')
+    + '<div class="row2">' + sshField('Opens as', '<select id="shf-proto" onchange="sshProtoChanged(this.value)"><option value="ssh"' + (proto==='ssh'?' selected':'') + '>SSH terminal</option><option value="vnc"' + (proto==='vnc'?' selected':'') + '>VNC viewer (desktop)</option><option value="rdp"' + (proto==='rdp'?' selected':'') + '>RDP viewer (Windows desktop)</option></select>', 'the SSH settings above are still used by the terminal and by a tunnelled VNC viewer')
     + sshField('Notes', '<input id="shf-notes" value="' + esc(h.notes||'') + '" placeholder="optional">') + '</div>'
+    + '<div id="shf-rdpwrap" style="display:' + (isRdp?'':'none') + '">'
+      + '<div class="box">The panel runs an RDP client on <b>this</b> server and streams its screen to the browser — the target must be reachable from here on the RDP port.</div>'
+      + '<div class="row3">' + sshField('RDP address', '<input id="shf-rdphost" value="' + esc(h.rdpHost||'') + '" placeholder="same as the host above">')
+      + sshField('RDP port', '<input id="shf-rdpport" type="number" min="1" max="65535" value="' + (h.rdpPort||3389) + '">')
+      + sshField('Screen size', '<input id="shf-rdpgeom" value="' + esc(h.rdpGeometry||'1280x800') + '">') + '</div>'
+      + '<div class="row3">' + sshField('Windows user', '<input id="shf-rdpuser" value="' + esc(h.rdpUser||'') + '" placeholder="Administrator">')
+      + sshField('Domain', '<input id="shf-rdpdomain" value="' + esc(h.rdpDomain||'') + '" placeholder="optional">')
+      + sshField('Password', '<input id="shf-rdppw" type="password" autocomplete="new-password" placeholder="' + (h.hasRdpPassword ? '•••••••• (stored)' : 'password') + '">') + '</div>'
+      + sshField('Security', '<select id="shf-rdpsec"><option value="auto"' + ((h.rdpSecurity||'auto')==='auto'?' selected':'') + '>Negotiate (default)</option><option value="nla"' + (h.rdpSecurity==='nla'?' selected':'') + '>NLA</option><option value="tls"' + (h.rdpSecurity==='tls'?' selected':'') + '>TLS</option><option value="rdp"' + (h.rdpSecurity==='rdp'?' selected':'') + '>Legacy RDP</option></select>')
+      + '</div>'
     + '<div id="shf-vncwrap" style="display:' + (isVnc?'':'none') + '">'
       + '<div class="row3">' + sshField('VNC address', '<input id="shf-vnchost" value="' + esc(h.vncHost||'127.0.0.1') + '" placeholder="127.0.0.1">', 'as seen from the target')
       + sshField('VNC port', '<input id="shf-vncport" type="number" min="1" max="65535" value="' + (h.vncPort||5901) + '">', ':1 = 5901, :2 = 5902')
@@ -472,6 +485,15 @@ function sshReadHostForm(){
   const o = { name: v('shf-name'), group: v('shf-group'), host: v('shf-host').trim(), port: parseInt(v('shf-port')) || 22, user: v('shf-user').trim() || 'root', auth: v('shf-auth'), identityFile: v('shf-ident').trim(), notes: v('shf-notes'), becomeRoot: document.getElementById('shf-root').checked };
   const pw = document.getElementById('shf-pw').value; if (pw) o.password = pw;
   o.protocol = v('shf-proto');
+  if (o.protocol === 'rdp') {
+    o.rdpHost = v('shf-rdphost').trim();
+    o.rdpPort = parseInt(v('shf-rdpport')) || 3389;
+    o.rdpGeometry = v('shf-rdpgeom').trim() || '1280x800';
+    o.rdpUser = v('shf-rdpuser').trim();
+    o.rdpDomain = v('shf-rdpdomain').trim();
+    o.rdpSecurity = v('shf-rdpsec');
+    const rp = document.getElementById('shf-rdppw').value; if (rp) o.rdpPassword = rp;
+  }
   if (o.protocol === 'vnc') {
     o.vncHost = v('shf-vnchost').trim() || '127.0.0.1';
     o.vncPort = parseInt(v('shf-vncport')) || 5901;
@@ -741,4 +763,57 @@ function sshDeployVncDialog(id){
       await renderSsh(); sshInstallsDialog();
     } catch(e){ toast('Deploy failed to start: ' + e.message, 'error', { duration: 9000 }); }
   };
+}
+
+function sshProtoChanged(v){
+  const vw = document.getElementById('shf-vncwrap'), rw = document.getElementById('shf-rdpwrap');
+  if (vw) vw.style.display = v === 'vnc' ? '' : 'none';
+  if (rw) rw.style.display = v === 'rdp' ? '' : 'none';
+}
+/* ---- RDP viewer: the panel runs the RDP client and streams its screen as VNC ---- */
+async function sshOpenRdpTab(h){
+  let RFB;
+  try { RFB = await sshLoadNoVnc(); } catch(e){ return toast(e.message, 'error', { duration: 9000 }); }
+  toast('Starting the RDP session…');
+  let sess;
+  try { sess = await siteApi('POST', 'api/ssh/hosts/' + h.id + '/rdp'); }
+  catch(e){ return toast('RDP: ' + e.message, 'error', { duration: 12000 }); }
+  const id = 't' + (++sshTabSeq);
+  const el = document.createElement('div'); el.className = 'ssh-term vnc'; el.dataset.id = id;
+  el.innerHTML = '<div class="pane-hd"><b class="pl">🪟 ' + esc(h.name) + '</b><span class="pt">' + esc(sess.target) + ' · display :' + sess.display + '</span><span class="sp"></span>'
+    + '<button title="Send Ctrl+Alt+Del" onclick="sshVncCad(\'' + id + '\')">⌨</button>'
+    + '<button title="Client log" onclick="sshRdpLog(\'' + id + '\')">📄</button>'
+    + '<button title="Fit / 1:1" onclick="sshVncScale(\'' + id + '\')">⤢</button>'
+    + '<button title="Show only this pane" onclick="sshPaneSolo(\'' + id + '\')">▭</button>'
+    + '<button title="Close (ends the RDP session)" onclick="sshCloseTab(\'' + id + '\')">×</button></div><div class="pane-body vnc-body"></div>';
+  el.addEventListener('mousedown', () => { if (sshActive !== id) sshActivate(id, { noFocus: true }); }, true);
+  document.getElementById('ssh-terms').appendChild(el);
+  const s = { id, hostId: h.id, kind: 'vnc', rdpDisplay: sess.display, label: h.name, target: sess.target, el, rfb: null, status: 'connecting', fit: { fit(){} } };
+  sshSess.set(id, s);
+  sshActivate(id);
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  const url = proto + location.host + new URL('ws/vnc', location.href).pathname + '?id=' + encodeURIComponent(sess.id);
+  try {
+    const rfb = new RFB(el.querySelector('.vnc-body'), url, { credentials: { password: sess.password }, wsProtocols: ['binary'] });
+    rfb.scaleViewport = true; rfb.resizeSession = false; rfb.background = '#0c0e16';
+    rfb.addEventListener('connect', () => { s.status = 'open'; sshRenderTabs(); sshRenderHosts(); });
+    rfb.addEventListener('disconnect', async () => {
+      s.status = 'dead'; sshRenderTabs();
+      let why = '';
+      try { const d = await siteApi('GET', 'api/ssh/rdp/' + sess.display + '/log'); if (d.error) why = ' — ' + d.error; } catch(e){}
+      sshVncNote(s, 'The RDP session ended' + why + (why ? '' : ' — open 📄 for the client log.'));
+    });
+    s.rfb = rfb;
+  } catch(e){ s.status = 'dead'; sshVncNote(s, 'Could not start the viewer: ' + e.message); }
+  sshRenderTabs();
+}
+async function sshRdpLog(id){
+  const s = sshSess.get(id); if (!s || !s.rdpDisplay) return;
+  try {
+    const d = await siteApi('GET', 'api/ssh/rdp/' + s.rdpDisplay + '/log');
+    sshModal('<h3>🪟 RDP client log <span class="dim" style="font-weight:400;font-size:12px">' + esc(d.target) + '</span></h3>'
+      + (d.error ? '<div class="box" style="border-color:#5a1f25;color:#ff8088">' + esc(d.error) + '</div>' : '')
+      + '<pre class="site-code-pre" style="max-height:50vh">' + esc((d.log || []).join('\n') || '(nothing logged yet)') + '</pre>'
+      + '<div class="foot"><button class="btn pri" onclick="sshModalClose()">Close</button></div>');
+  } catch(e){ toast('Log: ' + e.message, 'error'); }
 }

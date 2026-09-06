@@ -503,7 +503,7 @@ if (NO_JOBS) {
   setInterval(() => { try { events.prune(); } catch (e) { console.error('events prune failed:', e.message); } }, 24 * 3600_000);
 }
 for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, () => { history.saveHistory(true); process.exit(0); });
+  process.on(sig, () => { history.saveHistory(true); try { require('./lib/rdp').stopAll(); } catch (_) {} process.exit(0); });
 }
 
 server.listen(PORT, HOST, () => {

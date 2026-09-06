@@ -61,6 +61,13 @@ optionally XFCE, a password file generated locally (`lib/vnc-passwd.js` — Debi
 predictable `rhc-vnc@:N` systemd unit (`resources/deploy-vnc.sh`) listening on loopback only. On success the host
 entry is switched to VNC with the password stored, so it opens with a click.
 
+**RDP** has no pure-JS client and Debian ships no `guacd`, so each RDP viewer gets a throwaway X display on
+*this* server: `Xvnc` on a free loopback port (`:60`–`:99`, random per-session password) with `xfreerdp3` drawing
+into it (`lib/rdp.js`), streamed to the browser through the same bridge. The display is torn down when the tab
+closes or either process exits; a failed connection keeps its log, so the viewer can say
+`ERRCONNECT_CONNECT_TRANSPORT_FAILED` instead of showing a blank screen. Needs `tigervnc-standalone-server` and
+`freerdp3-x11` on the panel host — `GET /api/ssh/rdp` reports whether they are installed.
+
 **👥 Sessions** lists this panel's open terminals (closable) and, per host, who is logged in over SSH right now —
 from logind, falling back to `who`/`ss` — with a disconnect that only ever signals a pid from that live list.
 

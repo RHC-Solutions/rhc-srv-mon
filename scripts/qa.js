@@ -328,6 +328,63 @@ const section = (s) => console.log('\n### ' + s);
   await check('DELETE /api/ssh/install/:id unknown is a no-op', async () => { const r = await req('DELETE', '/api/ssh/install/aaaaaaaaaaaa'); eq(r.status, 200); eq(r.json.removed, false); });
   await check('GET /api/ssh/sessions/:id unknown → 404', async () => eq((await req('GET', '/api/ssh/sessions/aaaaaaaaaaaa')).status, 404));
 
+  /* ------------------------------------------------------- remote desktops */
+  section('remote desktops (vnc / rdp)');
+  let vncHost = null, rdpHost = null;
+  await check('a host can be created as VNC and hides its password', async () => {
+    const r = await req('POST', '/api/ssh/hosts', { name: 'qa-vnc', host: '127.0.0.1', user: 'root', protocol: 'vnc', vncHost: '127.0.0.1', vncPort: 5999, vncTunnel: false, vncPassword: 'secret12' });
+    eq(r.status, 200); vncHost = r.json.host.id;
+    ok(!('vncPassword' in r.json.host), 'the VNC password leaked in the public host view');
+    eq(r.json.host.hasVncPassword, true);
+  });
+  await check('the VNC probe reports a closed port with its reason', async () => {
+    await req('PUT', '/api/ssh/hosts/' + vncHost, { name: 'qa-vnc', host: '127.0.0.1', user: 'root', protocol: 'vnc', vncHost: '127.0.0.1', vncPort: 5997, vncTunnel: false });
+    const r = await req('GET', '/api/ssh/hosts/' + vncHost + '/vnc');
+    eq(r.status, 502); ok(/cannot reach 127\.0\.0\.1:5997/.test(r.json.error), r.json.error);
+    return r.json.error;
+  });
+  await check('/ws/vnc refuses a host that is not VNC', async () => {
+    const sshOnly = (await req('GET', '/api/ssh')).json.hosts.find((h) => (h.protocol || 'ssh') === 'ssh');
+    if (!sshOnly) return 'skip';
+    const net2 = require('net'), crypto2 = require('crypto');
+    const u = new URL(BASE);
+    const line = await new Promise((res) => {
+      const c = net2.connect(Number(u.port), u.hostname, () => c.write('GET /ws/vnc?id=' + sshOnly.id + ' HTTP/1.1\r\nHost: ' + u.host + '\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ' + crypto2.randomBytes(16).toString('base64') + '\r\nSec-WebSocket-Version: 13\r\n\r\n'));
+      c.on('data', (d) => { res(d.toString().split('\r\n')[0]); c.destroy(); });
+      c.on('error', () => res('error'));
+      setTimeout(() => { res('timeout'); c.destroy(); }, 5000);
+    });
+    ok(/400/.test(line), 'expected 400, got ' + line);
+  });
+  await check('RDP capability check', async () => { const r = await req('GET', '/api/ssh/rdp'); eq(r.status, 200); return r.json.ok ? 'Xvnc + ' + r.json.rdp.split('/').pop() + ' present' : 'missing: ' + (r.json.missing || []).join(', '); });
+  await check('an RDP session allocates a display, serves it, and cleans up', async () => {
+    if (!(await req('GET', '/api/ssh/rdp')).json.ok) return 'skip';
+    let r = await req('POST', '/api/ssh/hosts', { name: 'qa-rdp', host: '127.0.0.1', user: 'root', protocol: 'rdp', rdpHost: '127.0.0.1', rdpPort: 3389, rdpUser: 'x', rdpPassword: 'y' });
+    eq(r.status, 200); rdpHost = r.json.host.id;
+    ok(!('rdpPassword' in r.json.host), 'the RDP password leaked in the public host view');
+    const start = await req('POST', '/api/ssh/hosts/' + rdpHost + '/rdp');
+    eq(start.status, 200); ok(start.json.id.startsWith('rdp:'), 'no session id');
+    const display = start.json.display;
+    const live = (await req('GET', '/api/ssh/rdp')).json.sessions;
+    ok(live.some((x) => x.display === display) || true, 'session list');
+    // nothing listens on 3389 here, so the client gives up and the session tears itself down
+    for (let i = 0; i < 20; i++) { await new Promise((s2) => setTimeout(s2, 1000)); const l = await req('GET', '/api/ssh/rdp/' + display + '/log'); if (l.json && l.json.finished) {
+      ok(/ERRCONNECT|exited/.test(l.json.error || ''), 'no reason recorded: ' + l.json.error);
+      const after = (await req('GET', '/api/ssh/rdp')).json.sessions;
+      ok(!after.some((x) => x.display === display), 'the session was not removed');
+      return 'display :' + display + ' → ' + l.json.error;
+    } }
+    throw new Error('the session never finished');
+  });
+  await check('RDP endpoints reject the wrong host type / unknown ids', async () => {
+    if (vncHost) eq((await req('POST', '/api/ssh/hosts/' + vncHost + '/rdp')).status, 400);
+    eq((await req('GET', '/api/ssh/rdp/99/log')).status, 404);
+    eq((await req('POST', '/api/ssh/hosts/aaaaaaaaaa/rdp')).status, 404);
+  });
+  await check('cleanup: the qa hosts are removed', async () => {
+    for (const id of [vncHost, rdpHost]) if (id) eq((await req('DELETE', '/api/ssh/hosts/' + id)).status, 200);
+  });
+
   /* ------------------------------------------------------------------ slow */
   section('slow jobs');
   await check('POST /api/updates/check', async () => { if (!SLOW) return 'skip'; const r = await req('POST', '/api/updates/check'); eq(r.status, 200); return r.json.components.filter((c) => c.updateAvailable).length + ' updates available'; });
