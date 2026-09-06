@@ -52,7 +52,7 @@
   <div id="sshview" style="display:none">
     <div class="ssh-layout">
       <aside class="ssh-side">
-        <div class="ssh-side-hd"><span onclick="sshSideToggle()">🖥️ Hosts <span class="ssh-side-toggle">▾</span></span><span style="display:flex;gap:6px"><button class="upd-test-btn" id="ssh-inst-btn" style="padding:4px 10px" onclick="sshInstallsDialog()" title="rhc-srv-mon install history / running installs">📦</button><button class="upd-test-btn" style="padding:4px 10px" onclick="sshEditHost()">＋ Add host</button></span></div>
+        <div class="ssh-side-hd"><span onclick="sshSideToggle()">🖥️ Hosts <span class="ssh-side-toggle">▾</span></span><span style="display:flex;gap:6px"><button class="upd-test-btn" style="padding:4px 10px" onclick="sshSessionsDialog()" title="Open terminals here + who is logged in on each host">👥</button><button class="upd-test-btn" id="ssh-inst-btn" style="padding:4px 10px" onclick="sshInstallsDialog()" title="rhc-srv-mon install history / running installs">📦</button><button class="upd-test-btn" style="padding:4px 10px" onclick="sshEditHost()">＋ Add host</button></span></div>
         <input class="q" id="ssh-q" type="search" placeholder="Filter hosts…" autocomplete="off" oninput="sshRenderHosts()">
         <div class="ssh-hostlist" id="ssh-hostlist"><div class="ssh-grp">loading…</div></div>
         <div class="ssh-side-ft" id="ssh-side-ft"></div>

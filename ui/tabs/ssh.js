@@ -53,6 +53,7 @@ function sshRenderHosts(){
       + '<span class="nm">' + esc(h.name) + '<small>' + esc((h.user||'root') + '@' + h.host) + (h.port && h.port != 22 ? ':' + h.port : '') + (h.auth === 'password' ? ' · pw' : '') + (h.becomeRoot && (h.user||'root') !== 'root' ? ' · sudo -i' : '') + '</small></span>'
       + (h.monitor ? '<span class="mon" title="rhc-srv-mon installed ' + esc(h.monitor.installedAt||'') + ' (port ' + h.monitor.port + ')">📊</span>' : '')
       + '<span class="acts">'
+      + '<button title="Who is logged in on this host" onclick="event.stopPropagation();sshSessionsDialog(\'' + h.id + '\')">👥</button>'
       + '<button title="Install rhc-srv-mon on this host" onclick="event.stopPropagation();sshInstallDialog(\'' + h.id + '\')">📦</button>'
       + '<button title="Edit" onclick="event.stopPropagation();sshEditHost(\'' + h.id + '\')">✎</button>'
       + '</span></div>';
@@ -550,3 +551,78 @@ async function sshRenderInstalls(){
   for (const pre of box.querySelectorAll('pre')) pre.scrollTop = pre.scrollHeight;
 }
 
+
+
+/* ---- sessions viewer: this panel's terminals + the logins on each host ---- */
+let sshSessView = { hostId: null, data: null, loading: false, error: null };
+function sshSessionsDialog(hostId){
+  sshSessView = { hostId: hostId || null, data: null, loading: false, error: null };
+  const bg = sshModal('<h3>👥 SSH sessions</h3><div id="ssh-sess-body"></div>'
+    + '<div class="foot"><div class="left"><button class="btn" onclick="sshSessRender(true)">↻ Refresh</button></div><button class="btn pri" onclick="sshModalClose()">Close</button></div>');
+  const m = bg && bg.querySelector('.ssh-modal'); if (m) m.classList.add('wide');
+  sshSessRender(!!hostId);
+}
+// Local sessions come from the /api/ssh payload; remote logins need a live ssh probe per host, so
+// they are only fetched when a host is picked (never polled).
+async function sshSessRender(fetchRemote){
+  const box = document.getElementById('ssh-sess-body'); if (!box) return;
+  if (fetchRemote && sshSessView.hostId) {
+    sshSessView.loading = true; sshSessView.error = null; box.innerHTML = sshSessHtml();
+    try { sshSessView.data = await siteApi('GET', 'api/ssh/hosts/' + sshSessView.hostId + '/sessions'); }
+    catch(e){ sshSessView.error = e.message; sshSessView.data = null; }
+    sshSessView.loading = false;
+  }
+  box.innerHTML = sshSessHtml();
+}
+function sshSessHtml(){
+  const local = (sshData && sshData.sessions) || [];
+  let h = '<div class="upd-card" style="margin:0 0 12px"><div class="site-card-hd"><h3 style="margin:0;font-size:14px">Terminals open in this panel</h3><span class="dim" style="font-size:12px">' + local.length + ' session' + (local.length === 1 ? '' : 's') + ' — they keep running on the server until closed here</span></div>';
+  if (!local.length) h += '<p class="dim" style="margin:0">No open terminals.</p>';
+  else {
+    h += '<table class="upd-table"><tr><th>Target</th><th>Label</th><th>Started</th><th>State</th><th></th></tr>';
+    for (const s of local) {
+      h += '<tr><td class="mono">' + esc(s.target) + '</td><td>' + esc(s.label || '') + '</td><td class="dim">' + esc(String(s.startedAt || '').slice(0, 16).replace('T', ' ')) + '</td>'
+        + '<td>' + (s.attached ? '<span class="upd-badge ok">attached</span>' : '<span class="upd-badge na">detached' + (s.detachedAt ? ' ' + esc(String(s.detachedAt).slice(11, 16)) : '') + '</span>') + '</td>'
+        + '<td style="text-align:right"><button class="upd-test-btn" onclick="armConfirm(this, \'⚠ Close?\', () => sshCloseSessionFromDialog(\'' + s.id + '\'))">Close</button></td></tr>';
+    }
+    h += '</table>';
+  }
+  h += '</div>';
+  const hosts = (sshData && sshData.hosts) || [];
+  h += '<div class="upd-card" style="margin:0"><div class="site-card-hd"><h3 style="margin:0;font-size:14px">Logins on a host</h3>'
+    + '<select onchange="sshSessView.hostId=this.value||null; sshSessView.data=null; sshSessRender(true)"><option value="">— pick a host —</option>'
+    + hosts.map(x => '<option value="' + esc(x.id) + '"' + (x.id === sshSessView.hostId ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select></div>';
+  if (!sshSessView.hostId) h += '<p class="dim" style="margin:0">Pick a host to run <code>who</code> and <code>ss</code> on it over SSH. Nothing is polled — this only runs when you ask.</p>';
+  else if (sshSessView.loading) h += '<p class="dim" style="margin:0">Asking the host…</p>';
+  else if (sshSessView.error) h += '<p style="margin:0;color:#ff8088">⚠ ' + esc(sshSessView.error) + '</p>';
+  else if (sshSessView.data) {
+    const d = sshSessView.data;
+    h += '<p class="dim" style="margin:0 0 8px;font-size:12.5px">' + esc(d.target) + ' · checked ' + esc(String(d.checkedAt).slice(11, 19)) + '</p>';
+    h += '<table class="upd-table"><tr><th>User</th><th>TTY</th><th>From</th><th>Since</th><th>Idle</th><th>PID</th><th></th></tr>';
+    for (const s of d.sessions) {
+      h += '<tr><td><b>' + esc(s.user) + '</b>' + (s.fromPanel ? ' <span class="upd-badge na" title="connected from this server — probably this panel">this panel</span>' : '') + '</td><td class="mono">' + esc(s.tty || s.type || '—') + '</td><td class="mono">' + esc(s.from || '') + '</td><td class="dim">' + esc(s.since) + '</td><td class="dim">' + esc(s.idle || '') + '</td><td class="mono dim">' + (s.pid || '') + '</td>'
+        + '<td style="text-align:right">' + (s.pid ? '<button class="upd-test-btn" onclick="armConfirm(this, \'⚠ Disconnect?\', () => sshDisconnectRemote(' + s.pid + '))">Disconnect</button>' : '') + '</td></tr>';
+    }
+    if (!d.sessions.length) h += '<tr><td colspan="7" class="dim">No interactive logins.</td></tr>';
+    h += '</table>';
+    const extra = (d.connections || []).filter(c => !d.sessions.some(s => s.pid === c.pid));
+    if (extra.length) {
+      h += '<div class="dim" style="font-size:12px;margin-top:10px">Other connections on port 22 (sftp, scp, port forwards):</div><table class="upd-table"><tr><th>Peer</th><th>PID</th><th></th></tr>';
+      for (const c of extra) h += '<tr><td class="mono">' + esc(c.peer) + '</td><td class="mono dim">' + c.pid + '</td><td style="text-align:right"><button class="upd-test-btn" onclick="armConfirm(this, \'⚠ Disconnect?\', () => sshDisconnectRemote(' + c.pid + '))">Disconnect</button></td></tr>';
+      h += '</table>';
+    }
+    h += '<div class="dim" style="font-size:11.5px;margin-top:8px">Disconnecting hangs up that login\'s sshd process. Your own session shows up here too — closing it drops you.</div>';
+  }
+  return h + '</div>';
+}
+async function sshCloseSessionFromDialog(id){
+  try { await fetch('api/ssh/sessions/' + id, { method:'DELETE' }); sshCloseTab(id); await renderSsh(); sshSessRender(false); toast('Terminal closed', 'success'); }
+  catch(e){ toast('Error: ' + e, 'error'); }
+}
+async function sshDisconnectRemote(pid){
+  try {
+    const r = await siteApi('POST', 'api/ssh/hosts/' + sshSessView.hostId + '/sessions/' + pid + '/disconnect');
+    toast('Disconnected pid ' + r.pid, 'success');
+  } catch(e){ toast('Disconnect failed: ' + e.message, 'error', { duration: 9000 }); }
+  sshSessRender(true);
+}
