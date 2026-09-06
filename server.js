@@ -2761,6 +2761,16 @@ const PAGE = `<!doctype html>
   .ssh-modal h3 { margin:0 0 14px; font-size:15px; }
   .ssh-modal .row2 { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
   .ssh-modal .row3 { display:grid; grid-template-columns:2fr 1fr 1fr; gap:0 12px; }
+  .ssh-modal .upd-field { min-width:0; }
+  .ssh-modal .upd-field input, .ssh-modal .upd-field select { width:100%; max-width:100%; min-width:0; box-sizing:border-box; }
+  .ssh-modal .box { overflow-wrap:anywhere; }
+  @media (max-width:820px){
+    /* must come after the base .row2/.row3 rules above, otherwise they win (same specificity, later wins) */
+    .ssh-modal .row2, .ssh-modal .row3 { grid-template-columns:1fr; }
+    .ssh-modal { padding:16px 14px; max-width:100%; }
+    .ssh-modal.wide { width:100%; }
+    .ssh-modal-bg { padding:12px 8px 20px; align-items:flex-start; }
+  }
   .ssh-modal .foot { display:flex; gap:8px; justify-content:flex-end; align-items:center; margin-top:8px; flex-wrap:wrap; }
   .ssh-modal .foot .left { margin-right:auto; display:flex; gap:8px; }
   .ssh-modal .btn { background:#2a2f40; border:none; color:#e9e9e9; border-radius:8px; padding:8px 16px; font-size:13px; font-weight:600; cursor:pointer; }
