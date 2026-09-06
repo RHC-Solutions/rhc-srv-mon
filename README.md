@@ -12,7 +12,10 @@ Runs as root under pm2 (`rhc-srv-mon`, cwd `/root`), binds 127.0.0.1:8899, expos
 - `ui/` — the browser app: `index.html` shell, `app.css`, `core.js` (helpers, state, tabs, refresh), `tabs/*.js`, `boot.js`,
   `login.html`. `lib/page.js` concatenates all JS into one `<script>` (shared scope) and syntax-checks it at boot.
 - `scripts/check-page.js` (UI assembly + duplicate top-level identifiers), `scripts/check-refs.js` (no dangling references
-  after moving code between modules). Run both before landing.
+  after moving code between modules), `scripts/ui-smoke.js` (drives every tab in a DOM stub) and `scripts/qa.js`
+  (functional sweep over every HTTP endpoint: `node scripts/qa.js http://127.0.0.1:8898 [--slow] [--net]`). Run them
+  against the dev instance before landing — qa.js only makes no-op or self-restoring changes, since /etc/nginx,
+  /etc/cron.d and /home are shared with production.
 - State files stay next to `server.js`: `auth.json`, `updates.json`, `modules.json`, `backups.json`, `ssh-hosts.json`,
   `history.json`, `.helpers/`, `.sessions/` (all gitignored).
 - `rhc.sqlite` (node:sqlite, WAL) holds the event log and key/value settings; schema changes are numbered migrations in

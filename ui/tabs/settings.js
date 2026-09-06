@@ -46,7 +46,7 @@ function renderSettings(){
   html += '<div class="upd-card"><h3>Cloudflare</h3>'
     + '<p class="dim" style="margin:0 0 8px;font-size:12.5px">API token with <b>Zone:Read</b> and <b>DNS:Edit</b> (Cloudflare dashboard → My Profile → API Tokens). Stored encrypted. Powers the domains overview below; DNS records for new sites and origin certificates come next.</p>'
     + stField('API token', '<input type="password" id="cfToken" placeholder="' + (cf.configured ? esc(cf.token) + ' (leave empty to keep, type REMOVE to delete)' : 'paste token') + '">')
-    + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'cloudflare\')"' + (cf.configured ? '' : ' disabled') + '>Verify token</button><button class="btn pri" onclick="saveCloudflareSettings()">Save</button></div></div>';
+    + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'cloudflare\')">Verify token</button><button class="btn pri" onclick="saveCloudflareSettings()">Save</button></div></div>';
   html += '</div>';
   // Domains (Cloudflare zones × our sites)
   html += '<div class="upd-card" style="margin-top:14px"><div class="site-card-hd"><h3>Domains</h3>' + (cf.configured ? '<button class="btn small" onclick="cfDomains=null; loadCfDomains()">↻</button>' : '') + '</div>';
@@ -106,10 +106,19 @@ async function saveCloudflareSettings(){
   try { const r = await stApi('PUT', 'api/settings/cloudflare', { token: v === 'REMOVE' ? '' : v }); toast(r.configured ? 'Cloudflare token verified and saved' : 'Cloudflare token removed', 'success'); cfDomains = null; lastSettings = null; renderSettings(); }
   catch(e){ stErr(e, 'Cloudflare'); }
 }
+// Tests use whatever is typed in the form, so a credential can be checked before it is saved.
 async function testChannel(which){
+  const val = (id) => { const el = document.getElementById(id); return el && el.value.trim() ? el.value.trim() : undefined; };
+  const body = which === 'cloudflare' ? { token: val('cfToken') }
+    : which === 'telegram' ? { botToken: val('tgToken'), chatId: val('tgChat') }
+    : { webhookUrl: val('slUrl') };
   toast('Testing ' + which + '…');
-  try { const r = await stApi('POST', 'api/settings/' + which + '/test'); toast(which === 'cloudflare' ? 'Token ' + r.status + ' · ' + r.zones + ' zones visible' : 'Test message sent — check ' + which, 'success'); }
-  catch(e){ stErr(e, which); }
+  try {
+    const r = await stApi('POST', 'api/settings/' + which + '/test', body);
+    toast(which === 'cloudflare'
+      ? 'Token ' + r.status + (r.saved ? '' : ' (not saved yet — press Save to keep it)') + ' · ' + r.zones + ' zone' + (r.zones === 1 ? '' : 's') + (r.zoneNames && r.zoneNames.length ? ': ' + r.zoneNames.join(', ') : '')
+      : 'Test message sent — check ' + which, 'success', { duration: 9000 });
+  } catch(e){ stErr(e, which); }
 }
 
 // ---- Cleanup card (moved from the Modules tab; the API stays under /api/modules/cleanup*) ----
