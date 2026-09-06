@@ -4814,6 +4814,8 @@ def set_size(fd, r, c):
 
 pid, master = pty.fork()
 if pid == 0:
+    # the daemon ignores HUP/INT; ssh must not inherit that or a hangup would never end the session
+    signal.signal(signal.SIGHUP, signal.SIG_DFL); signal.signal(signal.SIGINT, signal.SIG_DFL)
     try: os.execvp(sys.argv[2], sys.argv[2:])
     except Exception as e:
         sys.stderr.write('exec failed: %s\\n' % e); os._exit(127)
