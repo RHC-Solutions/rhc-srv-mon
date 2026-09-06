@@ -44,7 +44,9 @@ function findIn(root, sel) {
   const out = [];
   const idm = /^#([\w-]+)$/.exec(sel); if (idm) { const e = byId.get(idm[1]); return e ? [e] : []; }
   const tagm = /^(input|select|textarea)(,.*)?$/i.exec(sel); if (tagm) { for (const e of byId.values()) if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.tagName)) out.push(e); return out; }
-  return out;   // class selectors etc. → nothing (only used for wiring listeners)
+  // class/tag selectors: hand back a throwaway element so `el.querySelector('.x').addEventListener(…)`
+  // behaves like a browser instead of throwing (these are only used to wire listeners)
+  return out.length ? out : [makeEl('div')];
 }
 const document = {
   body: makeEl('body'), head: makeEl('head'), activeElement: null, visibilityState: 'visible',

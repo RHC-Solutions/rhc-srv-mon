@@ -622,6 +622,7 @@ async function sshForgetInstall(id){
 function sshRetryInstall(id){
   const j = (sshData.installs || []).find(x => x.id === id); if (!j) return;
   if (!(sshData.hosts || []).some(h => h.id === j.hostId)) return toast('That host no longer exists', 'error');
+  if (j.kind === 'vnc') return sshDeployVncDialog(j.hostId);
   sshInstallDialog(j.hostId, j);
 }
 function sshInstallsBadge(){
