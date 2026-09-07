@@ -234,7 +234,9 @@ async function sshOpenTab(o){
   try { term.loadAddon(new WebLinksAddon.WebLinksAddon()); } catch(e){}
   term.open(el.querySelector('.pane-body'));
   const s = { id, hostId: o.hostId, adhoc: o.adhoc || null, label: o.label, target: o.target, term, fit, el, ws: null, status: 'connecting', sid: o.sid || null };
-  el.addEventListener('contextmenu', (e) => { e.preventDefault(); sshPasteText(s); });
+  // Right-click copies when something is selected and pastes when nothing is — it used to paste
+  // unconditionally, so the obvious "select, then right-click to copy" gesture pasted instead.
+  el.addEventListener('contextmenu', (e) => { e.preventDefault(); if (s.term.getSelection()) sshCopySelection(s); else sshPasteText(s); });
   sshSess.set(id, s);
   if (window.innerWidth < 820) { const side = document.querySelector('.ssh-side'); if (side) side.classList.add('collapsed'); }
   sshActivate(id);
@@ -248,8 +250,12 @@ async function sshOpenTab(o){
     const k = (ev.key || '').toLowerCase(), ctrl = ev.ctrlKey && !ev.altKey && !ev.metaKey;
     // Windows style: Ctrl+C copies when text is selected (otherwise ^C goes to the remote), Ctrl+V pastes
     // (text, or a file/screenshot -> upload), Ctrl+Z is swallowed unless the Unix behaviour is chosen.
-    if (ctrl && k === 'c') { const sel = term.getSelection(); if (sel || ev.shiftKey) { if (sel && navigator.clipboard) navigator.clipboard.writeText(sel).catch(() => {}); term.clearSelection(); return false; } return true; }
-    if (ctrl && k === 'insert') { const sel = term.getSelection(); if (sel && navigator.clipboard) navigator.clipboard.writeText(sel).catch(() => {}); return false; }
+    if (ctrl && k === 'c') {
+      if (ev.shiftKey) { sshCopySelection(s); return false; }            // Ctrl+Shift+C always copies
+      if (term.getSelection()) { sshCopySelection(s, { quiet: true }); return false; }
+      return true;                                                       // nothing selected -> ^C to the remote
+    }
+    if (ctrl && k === 'insert') { sshCopySelection(s, { quiet: true }); return false; }
     if (ctrl && k === 'v') return false;                                   // let the browser paste -> xterm gets text, our paste handler gets files
     if (!ev.ctrlKey && ev.shiftKey && k === 'insert') { sshPasteText(s); return false; }
     if (ctrl && !ev.shiftKey && k === 'z' && sshPrefs().ctrlZ !== 'suspend') return false;
@@ -301,6 +307,54 @@ async function sshDiagnoseHandshake(s, query, code){
     else if (r.status === 200) why += ' — the server is reachable but the WebSocket upgrade did not get through (proxy / Cloudflare in between?)';
   } catch(e){ why += ' — server unreachable (' + e.message + ')'; }
   sshSessionEnded(s, null, why);
+}
+// Copying out of the terminal failed three different ways: right-click pasted even when text was
+// selected, a rejected clipboard write was swallowed by .catch(()=>{}) while the selection was
+// cleared anyway (so it looked like nothing happened), and while a TUI has mouse reporting on —
+// Claude Code, tmux, htop, vim — a plain drag goes to the remote app and makes no selection at all,
+// so Ctrl+C just sent ^C. xterm.js needs Shift held to select locally in that mode.
+function sshMouseTracking(term){
+  try { const m = term.modes && term.modes.mouseTrackingMode; return !!m && m !== 'none'; } catch(e){ return false; }
+}
+// execCommand is deprecated but it is the only path that works when the Clipboard API is refused
+// (permission denied, or the document is not considered focused).
+function sshCopyFallback(text){
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-1000px;left:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.select(); ta.setSelectionRange(0, ta.value.length);
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch(e){ return false; }
+}
+async function sshCopyText(text){
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try { await navigator.clipboard.writeText(text); return true; } catch(e){ /* fall through */ }
+  }
+  return sshCopyFallback(text);
+}
+async function sshCopySelection(s, opts){
+  const term = s.term;
+  const sel = term.getSelection();
+  if (!sel) {
+    toast(sshMouseTracking(term)
+      ? 'Nothing selected — the program running here is capturing the mouse, so hold Shift while dragging to select text'
+      : 'Nothing selected — drag over text first (hold Shift if the remote program captures the mouse)',
+      'warn', { duration: 9000 });
+    return false;
+  }
+  const ok = await sshCopyText(sel);
+  if (ok) {
+    term.clearSelection();
+    if (!(opts && opts.quiet)) toast('Copied ' + sel.length + ' character' + (sel.length === 1 ? '' : 's'), 'success', { duration: 1600 });
+  } else {
+    toast('The browser refused clipboard access', 'error', { detail: 'Allow clipboard writes for this site, or use Ctrl+Insert. The selection has been left in place so you can try again.', duration: 12000 });
+  }
+  try { term.focus(); } catch(e){}
+  return ok;
 }
 function sshPasteText(s){
   if (!navigator.clipboard || !navigator.clipboard.readText) return toast('Clipboard access needs https', 'error');
@@ -428,7 +482,7 @@ function sshSettingsDialog(){
     + sshField('Background', '<div style="display:flex;gap:8px;align-items:center"><input id="stp-bg" type="color" value="' + esc(p.bg || th.background) + '" oninput="document.getElementById(\'stp-bg-on\').checked=true;sshPrefLive()" style="width:44px;padding:0;height:30px"><label style="font-size:14px;display:flex;gap:4px;align-items:center"><input type="checkbox" id="stp-bg-on"' + (p.bg?' checked':'') + ' onchange="sshPrefLive()"> override</label></div>')
     + sshField('Text', '<div style="display:flex;gap:8px;align-items:center"><input id="stp-fg" type="color" value="' + esc(p.fg || th.foreground) + '" oninput="document.getElementById(\'stp-fg-on\').checked=true;sshPrefLive()" style="width:44px;padding:0;height:30px"><label style="font-size:14px;display:flex;gap:4px;align-items:center"><input type="checkbox" id="stp-fg-on"' + (p.fg?' checked':'') + ' onchange="sshPrefLive()"> override</label></div>') + '</div>'
     + sshField('Ctrl+Z', sel('stp-ctrlz', [['ignore','Windows style — does nothing (never suspends the remote program)'],['suspend','Unix style — sends ^Z (suspend; resume with fg)']], p.ctrlZ))
-    + '<div class="box" style="font-size:14px;line-height:1.6"><b>Keys</b> · Ctrl+C: copy when text is selected, otherwise ^C to the remote · Ctrl+V: paste text, or upload a file / screenshot from the clipboard · Ctrl+Shift+C / Ctrl+Shift+V: always copy / paste · Ctrl+Insert / Shift+Insert: copy / paste · Ctrl+Shift+W: close tab · right-click: paste<br><b>Files</b> · drag &amp; drop onto the terminal or Ctrl+V → uploaded to <code>~/rhc-uploads/</code> on the remote host, path typed into the terminal (e.g. for Claude Code).</div>'
+    + '<div class="box" style="font-size:14px;line-height:1.6"><b>Selecting</b> · drag to select, then Ctrl+C. While a full-screen program (Claude Code, tmux, htop, vim) is capturing the mouse, <b>hold Shift while dragging</b> — otherwise the drag goes to that program and nothing gets selected.<br><b>Keys</b> · Ctrl+C: copy when text is selected, otherwise ^C to the remote · Ctrl+V: paste text, or upload a file / screenshot from the clipboard · Ctrl+Shift+C / Ctrl+Shift+V: always copy / paste · Ctrl+Insert / Shift+Insert: copy / paste · Ctrl+Shift+W: close tab · right-click: copy if something is selected, otherwise paste<br><b>Files</b> · drag &amp; drop onto the terminal or Ctrl+V → uploaded to <code>~/rhc-uploads/</code> on the remote host, path typed into the terminal (e.g. for Claude Code).</div>'
     + '<div class="foot"><div class="left"><button class="btn" onclick="try{localStorage.removeItem(\'' + SSH_PREF_KEY + '\')}catch(e){};sshApplyPrefs(sshPrefs());sshModalClose();sshSettingsDialog()">Reset to defaults</button></div><button class="btn pri" onclick="sshModalClose()">Done</button></div>');
 }
 function sshPrefLive(){

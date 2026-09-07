@@ -23,7 +23,7 @@ function makeEl(tag, id) {
     tagName: String(tag || 'div').toUpperCase(), id: id || '', _html: '', children: [], style: {}, dataset: {}, value: '', checked: false, textContent: '',
     classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, toggle(c, f) { f ? this._s.add(c) : this._s.delete(c); }, contains(c) { return this._s.has(c); } },
     addEventListener() {}, removeEventListener() {}, appendChild(c) { this.children.push(c); return c; }, remove() {}, focus() {}, select() {}, click() {},
-    setAttribute() {}, getAttribute() { return null; }, contains() { return false; }, scrollTop: 0, scrollHeight: 0,
+    setAttribute() {}, getAttribute() { return null; }, contains() { return false; }, scrollTop: 0, scrollHeight: 0, setSelectionRange() {},
     querySelector(sel) { return findIn(this, sel)[0] || null; }, querySelectorAll(sel) { return findIn(this, sel); },
     get innerHTML() { return this._html; },
     set innerHTML(h) { this._html = String(h); this.children = []; registerIds(this, this._html); },
@@ -54,7 +54,7 @@ const document = {
   createElement(tag) { return makeEl(tag); },
   querySelector(sel) { return findIn(document.body, sel)[0] || null; },
   querySelectorAll(sel) { return findIn(document.body, sel); },
-  addEventListener() {},
+  addEventListener() {}, execCommand: () => true,
 };
 document.body.appendChild = (c) => { document.body.children.push(c); if (c._html) registerIds(c, c._html); return c; };
 for (const id of ['host', 'pagetitle', 'updated', 'banner', 'userbar', 'q', 'sort', 'sharedToggle', 'main', 'toast-host', 'ivl', 'ssh-hostlist', 'ssh-tabbar', 'ssh-terms', 'ssh-empty', 'ssh-side-ft',
@@ -121,6 +121,11 @@ const call = (label, fn) => { try { const r = fn(); log('  ok  ' + label); retur
       const job = (d.installs || [])[0];
       if (job) call('sshRetryInstall', () => sandbox.sshRetryInstall(job.id));
       if (d.hosts && d.hosts[0]) call('sshDeployVncDialog', () => sandbox.sshDeployVncDialog(d.hosts[0].id));
+      // terminal copy helpers: no session needed, just that the code paths are sound
+      call('sshCopyFallback', () => sandbox.sshCopyFallback('hello'));
+      call('sshMouseTracking', () => sandbox.sshMouseTracking({ modes: { mouseTrackingMode: 'vt200' } }));
+      call('sshCopySelection (nothing selected)', () => sandbox.sshCopySelection({ term: { getSelection: () => '', modes: { mouseTrackingMode: 'vt200' }, clearSelection() {}, focus() {} } }));
+      call('sshCopySelection (with text)', () => sandbox.sshCopySelection({ term: { getSelection: () => 'copied text', modes: { mouseTrackingMode: 'none' }, clearSelection() {}, focus() {} } }));
       sandbox.sshModalClose();
     } catch (e) { errors.push('ssh dialogs: ' + e.message); }
     // dialogs (render only)

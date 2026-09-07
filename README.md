@@ -193,6 +193,18 @@ flock /var/lock/rhc-autocommit sh -c 'git merge --no-edit v2 && pm2 restart rhc-
 pm2 logs rhc-srv-mon --lines 30      # expect "re-adopted" lines for open SSH sessions
 ```
 
+## Copying out of the SSH terminal
+
+Three things had to be right, and none of them were. Right-click pasted unconditionally, so the
+obvious *select → right-click* gesture pasted over the selection; it now copies when something is
+selected and pastes only when nothing is. A rejected `navigator.clipboard.writeText` was swallowed by
+`.catch(() => {})` while the selection was cleared regardless, so a refused copy looked like a no-op;
+there is now a `textarea` + `execCommand` fallback, the selection survives a failure, and the failure
+is reported. And while a full-screen program has mouse reporting on — Claude Code, tmux, htop, vim —
+a plain drag is delivered to that program and xterm.js makes no selection at all, so `Ctrl+C` merely
+sent `^C`: **Shift must be held while dragging**, which the tab now says, and an empty copy explains
+it by reading `term.modes.mouseTrackingMode` instead of failing mutely.
+
 ## Reverse proxy: WebSocket for the SSH tab
 
 The 🖥️ SSH tab uses a WebSocket at `/ws/ssh`. Behind nginx the `Connection` header must be the literal
