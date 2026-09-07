@@ -39,7 +39,10 @@ outage on 2026-09-06 while nothing was listening. A Cloudflare-only vhost answer
 "unknown", never as a failure, and the app port decides. Each site carries `originStatus` / `appStatus` and a plain-language
 `statusReason`, shown on the card and in the site's Processes tab.
 
-The Node version field is a dropdown of interpreters that actually exist — the system `node` plus that site user's
+The **Sites list** shows the runtime it measured, not the one on record: for a Node site the interpreter of the
+process listening on the app port (one `ss -tlnpH` for the whole pass, then `/proc/<pid>/exe`), for a PHP site the
+php-fpm pool that actually exists on disk. The recorded value is kept as a `(rec. 22)` footnote when the two disagree,
+which on this host is every single Node site. The Node version field is a dropdown of interpreters that actually exist — the system `node` plus that site user's
 nvm builds (`~/.nvm/versions/node/*`) — and the card states which one the site's processes are *really* executing,
 read from `/proc/<pid>/exe`. `site_nodejs.node_version` is CloudPanel bookkeeping and routinely disagrees: an app
 started from an SSH user's login shell runs the system node no matter what the site user's nvm holds. A binary shown

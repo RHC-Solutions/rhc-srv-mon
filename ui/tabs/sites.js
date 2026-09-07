@@ -72,13 +72,13 @@ function renderSitesList(){
   const sorted = filtered.sort(byStatus);
   html += '<div class="site-grid">';
   for (const s of sorted) {
-    const appVer = s.nodeVersion ? 'Node ' + s.nodeVersion : s.phpVersion ? 'PHP ' + s.phpVersion : '';
+    const rt = siteRuntime(s);
     const portInfo = s.nodePort ? ':' + s.nodePort : s.poolPort ? ':' + s.poolPort : '';
     const healthIcon = s.httpUp ? '✅' : (s.httpUp === false ? '❌' : '—');
     html += '<div class="site-card clickable" onclick="siteGo(\'' + esc(s.domain) + '\', state.siteTab || \'settings\')">';
     html += '<div class="top"><div class="domain">' + esc(s.domain) + '<span class="hint">' + esc(siteTypeLabel(s.type)) + (s.managed_by === 'clp' ? ' · CLP' : '') + '</span></div>';
     html += '<span class="badge ' + s.status + '">' + s.statusLabel + '</span></div>';
-    html += '<div class="meta"><span>Port: <span class="val">' + (portInfo || 'n/a') + '</span></span><span>HTTP: <span class="val">' + healthIcon + '</span></span><span>' + esc(appVer) + '</span><span>Disk: <span class="val">' + esc(s.disk || '?') + '</span></span></div>';
+    html += '<div class="meta"><span>Port: <span class="val">' + (portInfo || 'n/a') + '</span></span><span>HTTP: <span class="val">' + healthIcon + '</span></span><span title="' + esc(rt.title) + '">' + rt.text + '</span><span>Disk: <span class="val">' + esc(s.disk || '?') + '</span></span></div>';
     if (s.statusReason) html += '<div class="site-why">' + esc(s.statusReason) + '</div>';
     if (s.pm2 && s.pm2.length) {
       html += '<div class="procs">';
@@ -120,12 +120,33 @@ async function siteCtl(btn, domain, action, app, user){
   finally { if (btn) btn.disabled = false; }
 }
 
+// Runtime as measured, not as recorded. site_nodejs.node_version / site_php.php_version come from
+// CloudPanel and disagree with reality on every site here: apps started from an SSH user's login
+// shell run the system node whatever the site user's nvm holds. Show the truth, keep the record as a
+// footnote when the two differ, and flag a binary that was replaced under a running process.
+function siteRuntime(s){
+  if (s.nodeStale) return { text: 'Node <span style="color:#f8a306">⚠ replaced</span>', title: 'This process is still running ' + (s.nodeExe || 'its node binary') + ', which has since been replaced on disk by an upgrade. It keeps the old version until it is restarted.' };
+  if (s.nodeActual) {
+    const rec = String(s.nodeVersion || '').replace(/^v/, '');
+    const act = s.nodeActual.replace(/^v/, '');
+    const differs = rec && act.split('.')[0] !== rec.split('.')[0];
+    return { text: 'Node ' + esc(s.nodeActual) + (differs ? ' <span class="dim">(rec. ' + esc(rec) + ')</span>' : ''),
+      title: 'Measured from the process listening on port ' + s.nodePort + (differs ? '. CloudPanel recorded ' + rec + ', which is not what runs.' : '') };
+  }
+  if (s.phpActual) {
+    const differs = s.phpVersion && String(s.phpVersion) !== String(s.phpActual);
+    return { text: 'PHP ' + esc(s.phpActual) + (differs ? ' <span class="dim">(rec. ' + esc(s.phpVersion) + ')</span>' : ''), title: 'From the php-fpm pool that exists on disk' + (differs ? '; the database records ' + s.phpVersion : '') };
+  }
+  if (s.nodeVersion) return { text: 'Node ' + esc(s.nodeVersion) + ' <span class="dim">(recorded)</span>', title: 'Nothing is running on port ' + (s.nodePort || '?') + ' to measure, so this is only what is on record.' };
+  if (s.phpVersion) return { text: 'PHP ' + esc(s.phpVersion) + ' <span class="dim">(recorded)</span>', title: 'No pool file found on disk, so this is only what is on record.' };
+  return { text: '', title: '' };
+}
 function siteSetView(m){ siteViewMode = m; state.siteViewMode = m; saveState(); renderSitesList(); }
 function siteSetSort(col){ if (siteSort === col) siteSortDir = -siteSortDir; else { siteSort = col; siteSortDir = 1; } state.siteSort = siteSort; state.siteSortDir = siteSortDir; saveState(); renderSitesList(); }
 // Compact table: one row per site, sortable columns, whole row opens the site.
 function siteTableHtml(list, byStatus){
   const cols = [['status', 'Status'], ['domain', 'Domain'], ['type', 'Type'], ['user', 'Site user'], ['port', 'Port'], ['http', 'HTTP'], ['runtime', 'Runtime'], ['pm2', 'PM2'], ['disk', 'Disk'], ['owner', 'Owner']];
-  const val = (s, c) => c === 'port' ? Number(s.nodePort || s.poolPort || 0) : c === 'http' ? (s.httpUp ? 1 : 0) : c === 'runtime' ? (s.nodeVersion ? 'node ' + s.nodeVersion : s.phpVersion ? 'php ' + s.phpVersion : '') : c === 'pm2' ? (s.pm2 ? s.pm2.filter(p => p.status === 'online').length : -1) : c === 'disk' ? siteDiskBytes(s.disk) : c === 'owner' ? s.managed_by : (s[c] || '');
+  const val = (s, c) => c === 'port' ? Number(s.nodePort || s.poolPort || 0) : c === 'http' ? (s.httpUp ? 1 : 0) : c === 'runtime' ? (s.nodeActual || s.phpActual || s.nodeVersion || s.phpVersion || '') : c === 'pm2' ? (s.pm2 ? s.pm2.filter(p => p.status === 'online').length : -1) : c === 'disk' ? siteDiskBytes(s.disk) : c === 'owner' ? s.managed_by : (s[c] || '');
   const rows = list.slice().sort((a, b) => { if (siteSort === 'status') return byStatus(a, b) * siteSortDir; const x = val(a, siteSort), y = val(b, siteSort); const r = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y)); return (r || a.domain.localeCompare(b.domain)) * siteSortDir; });
   let h = '<div class="upd-card" style="padding:6px 16px 10px"><table class="upd-table site-table"><thead><tr>' + cols.map(([k, l]) => '<th onclick="siteSetSort(\'' + k + '\')" class="sortable' + (siteSort === k ? ' on' : '') + '">' + l + (siteSort === k ? (siteSortDir > 0 ? ' ▲' : ' ▼') : '') + '</th>').join('') + '<th></th></tr></thead><tbody>';
   for (const s of rows) {
@@ -138,7 +159,7 @@ function siteTableHtml(list, byStatus){
       + '<td class="mono">' + esc(s.user || '') + '</td>'
       + '<td class="mono">' + (port ? ':' + esc(port) : '<span class="dim">–</span>') + '</td>'
       + '<td>' + (s.httpUp ? '✅' : s.httpUp === false ? '❌' : '—') + '</td>'
-      + '<td>' + esc(s.nodeVersion ? 'Node ' + s.nodeVersion : s.phpVersion ? 'PHP ' + s.phpVersion : '') + '</td>'
+      + '<td title="' + esc(siteRuntime(s).title) + '">' + siteRuntime(s).text + '</td>'
       + '<td>' + pm2 + '</td>'
       + '<td class="mono">' + esc(s.disk || '?') + '</td>'
       + '<td>' + (s.managed_by === 'clp' ? '<span class="badge type">CloudPanel</span>' : '<span class="badge online">this panel</span>') + '</td>'
