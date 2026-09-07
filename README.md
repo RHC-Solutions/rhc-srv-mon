@@ -118,7 +118,32 @@ and a cwd inside that home, because pm2 spawns the app from its own cwd and the 
 `/var/lib/rhc-srv-mon/vhost-bak/`), SSL/TLS (stored certificates, upload PEM, self-signed, activate), Security (basic auth,
 blocked IPs/bots, Cloudflare-only → `{{settings}}`), SSH/FTP (SSH users: own uid, site group, symlinked htdocs/logs/backups),
 File Manager (`bin/fileop.js` runs **as the site user**, so the kernel enforces what can be read/written; uploads/downloads
-stream through it), Cron Jobs (`/etc/cron.d/<siteUser>`), Logs (tail with filter/follow). New Site/Delete comes with the next slice. `scripts/ui-smoke.js` drives every tab and sub-tab against a dev instance with a DOM stub.
+stream through it), Cron Jobs (`/etc/cron.d/<siteUser>`), Logs (tail with filter/follow). ## Creating and deleting a site
+
+`lib/sites/create.js`. Create runs the sequence CloudPanel does — unix user and home from
+`resources/skel/site-user`, document root, the site row, the **stage-1 vhost template** from
+`materialize()`, a php-fpm pool on the next free port running as the site user, a self-signed
+certificate so https answers from the first request, the vhost itself (`nginx -t` decides whether the
+site exists at all), and logrotate. Every step records how to undo itself and a failure **unwinds in
+reverse**, because a half-made site is worse than none: the leftovers block the retry. What could not
+be undone is reported rather than hidden.
+
+`root_dir` follows CLP's convention — the domain, plus the template's own subdirectory where it has one
+(Laravel `public`, Drupal `web`). Getting that wrong points nginx at `~/htdocs` itself, which answers
+**403** because there is no index there; QA asserts it.
+
+Creation does not report success until the new server block actually answers on `127.0.0.1:443` under
+its own SNI: `systemctl reload nginx` returns *before* the configuration is serving, and a TLS request
+in that window fails the handshake outright — which is exactly what made the first lifecycle test
+flap.
+
+Delete needs the domain typed back (the server refuses without `?confirm=<domain>`, not just the UI)
+and removes databases first — dropping the unix user earlier would orphan them — then cron, vhost,
+pool, certificates, logrotate, basic-auth file, SSH/FTP users, and finally the guarded `userdel`.
+`?keepHome=1` keeps the files. Verified end to end: create → serves 200 over https → delete leaves no
+vhost, cert, pool, logrotate entry, home, unix user or row.
+
+ `scripts/ui-smoke.js` drives every tab and sub-tab against a dev instance with a DOM stub.
 
 ## Settings tab
 

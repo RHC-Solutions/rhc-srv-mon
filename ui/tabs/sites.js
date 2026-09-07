@@ -174,7 +174,101 @@ async function siteSyncClp(){
   try { const r = await siteApi('POST', 'api/sites/sync-clp'); toast('Sync: ' + r.sites + ' new, ' + r.updated + ' refreshed, ' + r.skipped + ' managed here' + (r.errors.length ? ' · ' + r.errors.length + ' error(s)' : ''), r.errors.length ? 'warn' : 'success', r.errors.length ? { detail: r.errors.join('\n') } : {}); refresh(); }
   catch(e){ siteErr(e, 'Sync'); }
 }
-function siteNewDialog(){ toast('New Site comes with the next milestone (1b) — create sites in CloudPanel for now; they appear here after the next sync.', 'info', { duration: 7000 }); }
+// Create a site: the panel makes the unix user, document root, vhost, php pool and a self-signed
+// certificate. A failure rolls all of it back, so a retry does not trip over leftovers.
+function siteNewDialog(){
+  const bg = sshModal('<h3>＋ New site</h3>'
+    + '<div class="row2">' + siteField('Domain *', '<input id="nsDomain" placeholder="app.example.com" autocomplete="off" oninput="siteNewSuggest()">', '<span id="nsHint" class="dim">without www — that is added as an alias automatically for an apex domain</span>')
+    + siteField('Type *', '<select id="nsType" onchange="siteNewType()"><option value="php">PHP</option><option value="nodejs">Node.js</option><option value="static">Static</option><option value="reverse-proxy">Reverse proxy</option></select>') + '</div>'
+    + '<div class="row2">' + siteField('Template', '<select id="nsTpl"></select>', 'sets the document root subdirectory and the default PHP version')
+    + siteField('Site user *', '<input id="nsUser" autocomplete="off">', '<span id="nsUserHint" class="dim">owns /home/&lt;user&gt;; php-fpm runs as this account</span>') + '</div>'
+    + '<div class="row2" id="nsTypeFields"></div>'
+    + siteField('Site user password', '<input id="nsPw" placeholder="leave empty to generate one" autocomplete="off">', 'shown once after creation and stored encrypted')
+    + '<label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsSelfSigned" checked> install a self-signed certificate so https answers immediately</label>'
+    + '<div id="nsSteps" class="site-cf-detail" style="display:none"></div>'
+    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" id="nsGo" onclick="siteNewGo(this)">Create site</button></div>');
+  siteNewType();
+  siteApi('GET', 'api/sites/templates').then(t => { siteView.sub.nsTemplates = { data: t }; siteNewType(); }).catch(() => {});
+}
+function siteNewType(){
+  const t = (document.getElementById('nsType') || {}).value || 'php';
+  const tpls = ((siteView.sub.nsTemplates || {}).data || []).filter(x => x.type === t);
+  const sel = document.getElementById('nsTpl');
+  if (sel) sel.innerHTML = tpls.length ? tpls.map(x => '<option value="' + esc(x.name) + '"' + (x.name === 'Generic' || x.name === 'Nodejs' || x.name === 'Static' ? ' selected' : '') + '>' + esc(x.name) + (x.php_version ? ' · php ' + x.php_version : '') + (x.root_dir ? ' · /' + esc(x.root_dir) : '') + '</option>').join('') : '<option value="">(loading…)</option>';
+  const f = document.getElementById('nsTypeFields');
+  if (!f) return;
+  f.innerHTML = t === 'nodejs' ? siteField('App port *', '<input id="nsPort" type="number" min="1024" max="65535">', 'nginx proxies / to 127.0.0.1:&lt;port&gt;; the app itself is yours to start')
+    : t === 'reverse-proxy' ? siteField('Proxy target *', '<input id="nsProxy" placeholder="http://127.0.0.1:8080">')
+    : t === 'php' ? '<div class="dim" style="font-size:13px;padding-top:6px">A php-fpm pool is created on the next free port, running as the site user.</div>' : '';
+  siteNewSuggest();
+}
+let nsSuggestT = null;
+function siteNewSuggest(){
+  clearTimeout(nsSuggestT);
+  nsSuggestT = setTimeout(async () => {
+    const d = (document.getElementById('nsDomain') || {}).value;
+    if (!d || !d.trim()) return;
+    try {
+      const r = await siteApi('GET', 'api/sites/suggest?domain=' + encodeURIComponent(d.trim()));
+      const u = document.getElementById('nsUser'), h = document.getElementById('nsHint'), uh = document.getElementById('nsUserHint'), p = document.getElementById('nsPort');
+      if (u && (!u.dataset.touched || !u.value)) u.value = r.user;
+      if (p && !p.value) p.value = r.nextNodePort;
+      if (h) h.innerHTML = !r.valid ? '<span style="color:#ff8088">that is not a valid domain name</span>'
+        : r.managed ? '<span style="color:#ff8088">this panel already manages it</span>'
+        : r.vhostExists ? '<span style="color:#ff8088">a vhost for it already exists on disk</span>'
+        : '<span class="up">available</span>';
+      if (uh) uh.innerHTML = r.userTaken ? '<span style="color:#f8a306">the unix user ' + esc(r.user) + ' already exists — pick another</span>' : 'owns /home/' + esc(r.user) + '; php-fpm runs as this account';
+    } catch(e){}
+  }, 350);
+}
+async function siteNewGo(btn){
+  const v = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  const body = { domain: v('nsDomain'), type: v('nsType'), template: v('nsTpl') || undefined, user: v('nsUser') || undefined,
+    self_signed: !!(document.getElementById('nsSelfSigned') || {}).checked };
+  if (v('nsPw')) body.password = v('nsPw');
+  if (body.type === 'nodejs' && v('nsPort')) body.port = Number(v('nsPort'));
+  if (body.type === 'reverse-proxy') body.reverse_proxy_url = v('nsProxy');
+  if (!body.domain) return toast('Enter a domain', 'warn');
+  btn.disabled = true;
+  const box = document.getElementById('nsSteps');
+  if (box) { box.style.display = 'block'; box.textContent = 'Creating…'; }
+  try {
+    const r = await siteApi('POST', 'api/sites', body);
+    if (box) box.textContent = r.steps.map(s => '✓ ' + s.name + (s.detail ? ' — ' + s.detail : '')).join('\n');
+    toast('Created ' + r.site.domain, 'success', { detail: 'site user: ' + r.user + '\npassword: ' + r.password + '\ndocument root: ' + r.docroot + '\n\nPoint DNS at this server, then replace the self-signed certificate under SSL/TLS.', duration: 40000 });
+    setTimeout(() => { sshModalClose(); refresh(); siteGo(r.site.domain, 'settings'); }, 900);
+  } catch(e){
+    if (box) box.textContent = (e.message || 'failed') + (e.detail ? '\n\n' + e.detail : '');
+    siteErr(e, 'Create site');
+    btn.disabled = false;
+  }
+}
+// Delete: the domain has to be typed back, and the server refuses without it too.
+function siteDeleteDialog(){
+  const s = siteView.data;
+  const bg = sshModal('<h3>Delete ' + esc(s.domain) + '</h3>'
+    + '<div class="box" style="border-color:#ff808866"><b style="color:#ff8088">This removes the vhost, certificates'
+    + (s.php ? ', the php-fpm pool' : '') + ', databases, SSH/FTP users, cron jobs, logrotate and the unix account <span class="mono">' + esc(s.user) + '</span> with its home directory.</b><br>Everything under <span class="mono">/home/' + esc(s.user) + '</span> goes with it. Export anything you need first.</div>'
+    + siteField('Type the domain to confirm', '<input id="delConfirm" autocomplete="off" placeholder="' + esc(s.domain) + '">')
+    + '<label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin:6px 0"><input type="checkbox" id="delKeepHome"> keep the home directory (removes the account, leaves the files)</label>'
+    + '<div id="delSteps" class="site-cf-detail" style="display:none"></div>'
+    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn danger" id="delGo" onclick="siteDeleteGo(this)">Delete site</button></div>');
+}
+async function siteDeleteGo(btn){
+  const s = siteView.data;
+  const typed = (document.getElementById('delConfirm') || {}).value || '';
+  if (typed.trim() !== s.domain) return toast('Type ' + s.domain + ' exactly to confirm', 'warn');
+  const keepHome = !!(document.getElementById('delKeepHome') || {}).checked;
+  btn.disabled = true;
+  const box = document.getElementById('delSteps');
+  if (box) { box.style.display = 'block'; box.textContent = 'Deleting…'; }
+  try {
+    const r = await siteApi('DELETE', siteUrl('?confirm=' + encodeURIComponent(s.domain) + (keepHome ? '&keepHome=1' : '')));
+    if (box) box.textContent = r.steps.map(x => '✓ ' + x.name).join('\n') + (r.errors.length ? '\n\n⚠ ' + r.errors.join('\n⚠ ') : '');
+    toast('Deleted ' + r.domain + (r.errors.length ? ' with ' + r.errors.length + ' problem(s)' : ''), r.errors.length ? 'warn' : 'success', r.errors.length ? { detail: r.errors.join('\n'), duration: 20000 } : {});
+    setTimeout(() => { sshModalClose(); siteGo(null); refresh(); }, 1200);
+  } catch(e){ if (box) box.textContent = e.message + (e.detail ? '\n\n' + e.detail : ''); siteErr(e, 'Delete'); btn.disabled = false; }
+}
 
 /* =============================================================== detail */
 async function siteLoad(){
@@ -193,7 +287,8 @@ function siteHeader(s){
     + '<div><div class="k">IP Address</div><div class="v mono">' + esc(s.ip || '?') + '</div></div>'
     + '<div><div class="k">Type</div><div class="v">' + esc(siteTypeLabel(s.type)) + (s.application && s.application !== siteTypeLabel(s.type) ? ' · ' + esc(s.application) : '') + '</div></div>'
     + '<div><div class="k">Status</div><div class="v">' + (s.health ? '<span class="badge ' + s.health.status + '">' + esc(s.health.statusLabel) + '</span>' : '<span class="dim">unknown</span>') + (s.managed_by === 'clp' ? ' <span class="badge type" title="Imported from CloudPanel. The first change made here takes it over — do not edit it in CloudPanel afterwards.">owned by CloudPanel</span>' : '') + '</div></div>'
-    + '</div></div>'
+    + '</div>'
+    + '<div class="site-head-actions"><button class="btn small danger" onclick="siteDeleteDialog()" title="Delete this site and everything belonging to it">🗑 Delete site</button></div></div>'
     + '<div class="site-tabs">' + SITE_TABS.map(([k, l]) => '<a class="site-tab' + (k === t ? ' active' : '') + '" href="sites?d=' + esc(encodeURIComponent(s.domain)) + '&t=' + k + '" onclick="event.preventDefault(); state.siteTab=\'' + k + '\'; saveState(); siteGo(\'' + esc(s.domain) + '\', \'' + k + '\')">' + l + '</a>').join('') + '</div>';
 }
 function renderSiteDetail(){

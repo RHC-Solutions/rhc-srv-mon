@@ -30,6 +30,7 @@ async function check(name, fn) {
 function eq(actual, expected, what) { if (actual !== expected) throw new Error((what || '') + ' expected ' + JSON.stringify(expected) + ', got ' + JSON.stringify(actual)); }
 function ok(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed'); }
 const section = (s) => console.log('\n### ' + s);
+const store2 = () => require('/opt/rhc-srv-mon-v2/lib/sites/store');
 
 (async () => {
   console.log('QA sweep against ' + BASE + (SLOW ? ' (+slow)' : '') + (NET ? ' (+net)' : ''));
@@ -148,6 +149,67 @@ const section = (s) => console.log('\n### ' + s);
     ok(Array.isArray(r.json.nodejs.actual), 'no measured interpreter list');
     for (const a of r.json.nodejs.actual) ok(a.path && Array.isArray(a.procs), 'actual entry shape');
     return r.json.nodejs.actual.map((a) => (a.stale ? a.path + ' (stale)' : a.version)).join(', ') || 'nothing running';
+  });
+  await check('GET /api/sites/suggest derives a user and flags collisions', async () => {
+    const r = await req('GET', '/api/sites/suggest?domain=shop.example.com');
+    eq(r.status, 200); eq(r.json.user, 'shop-example'); eq(r.json.valid, true); eq(r.json.managed, false);
+    const taken = await req('GET', '/api/sites/suggest?domain=' + php.domain);
+    eq(taken.json.managed, true, 'an existing site was not reported as managed');
+    const bad = await req('GET', '/api/sites/suggest?domain=not a domain');
+    eq(bad.json.valid, false, 'a bad domain was reported valid');
+    return 'shop.example.com → ' + r.json.user;
+  });
+  await check('POST /api/sites rejects what it should before touching the system', async () => {
+    const before = require('fs').readdirSync('/etc/nginx/sites-enabled').length;
+    for (const [body, why] of [
+      [{ domain: 'not a domain', type: 'static' }, 'invalid domain'],
+      [{ domain: 'qa-reject.example.com', type: 'nonsense' }, 'unknown type'],
+      [{ domain: php.domain, type: 'static' }, 'already managed'],
+      [{ domain: 'qa-reject.example.com', type: 'static', user: 'root' }, 'denylisted user'],
+      [{ domain: 'qa-reject.example.com', type: 'reverse-proxy' }, 'reverse proxy with no target'],
+      [{ domain: 'qa-reject.example.com', type: 'php', php_version: '5.2' }, 'php version not installed'],
+      [{ domain: 'qa-reject.example.com', type: 'static', template: 'Nodejs' }, 'template of the wrong type'],
+    ]) {
+      const r = await req('POST', '/api/sites', body);
+      ok(r.status >= 400 && r.status < 500, why + ' was not rejected (got ' + r.status + ')');
+    }
+    eq(require('fs').readdirSync('/etc/nginx/sites-enabled').length, before, 'a rejected create still wrote a vhost');
+    ok(!require('fs').existsSync('/home/qa-reject-example'), 'a rejected create still made a unix user');
+    return '7 bad requests refused, nothing created';
+  });
+  await check('DELETE /api/sites/:domain refuses without the domain typed back', async () => {
+    eq((await req('DELETE', '/api/sites/' + php.domain)).status, 400);
+    eq((await req('DELETE', '/api/sites/' + php.domain + '?confirm=wrong')).status, 400);
+    ok(store2().get(php.domain), 'the site was deleted despite a bad confirmation!');
+  });
+  await check('full site lifecycle: create → serves over https → delete leaves nothing', async () => {
+    if (!SLOW) return 'skip';
+    const domain = 'qa-life-' + Date.now().toString(36).slice(-5) + '.rhcsolutions.com';
+    const c = await req('POST', '/api/sites', { domain, type: 'static', template: 'Static' });
+    eq(c.status, 200, c.text.slice(0, 200));
+    const user = c.json.user;
+    try {
+      ok(require('fs').existsSync('/etc/nginx/sites-enabled/' + domain + '.conf'), 'no vhost written');
+      ok(require('fs').existsSync(c.json.docroot), 'no document root');
+      eq(c.json.site.root_dir, domain, 'root_dir is not the domain — nginx would answer 403');
+      const v = await req('GET', '/api/sites/' + domain + '/vhost');
+      eq(v.json.in_sync, true, 'the vhost it just wrote does not round-trip');
+      require('fs').writeFileSync(c.json.docroot + '/index.html', 'qa');
+      let code = '';
+      for (let i = 0; i < 12; i++) {                       // nginx reload is asynchronous
+        try { code = require('child_process').execFileSync('curl', ['-sk', '--resolve', domain + ':443:127.0.0.1', 'https://' + domain + '/', '-o', '/dev/null', '-w', '%{http_code}'], { encoding: 'utf8' }).trim(); } catch (_) { code = 'connect-failed'; }
+        if (code === '200') break;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      eq(code, '200', 'the new site does not serve over https');
+    } finally {
+      const d = await req('DELETE', '/api/sites/' + domain + '?confirm=' + domain);
+      if (d.status !== 200) { fails.push('lifecycle delete failed: ' + d.text.slice(0, 150)); return 'delete FAILED'; }
+      for (const p of ['/etc/nginx/sites-enabled/' + domain + '.conf', '/home/' + user, '/etc/logrotate.d/' + user, '/etc/nginx/ssl-certificates/' + domain + '.crt']) {
+        if (require('fs').existsSync(p)) fails.push('left behind after delete: ' + p);
+      }
+    }
+    return 'created, served 200 over https, deleted clean';
   });
   await check('GET /api/sites/:domain', async () => { const r = await req('GET', '/api/sites/' + php.domain); eq(r.status, 200); ok(r.json.domain === php.domain && r.json.unix, 'shape'); ok(!('user_password_enc' in r.json), 'leaked the encrypted password'); });
   await check('GET /api/sites/unknown → 404', async () => eq((await req('GET', '/api/sites/nope.example')).status, 404));
