@@ -355,6 +355,60 @@ const store2 = () => require('/opt/rhc-srv-mon-v2/lib/sites/store');
     eq(r.status, 200); eq(r.json.ok, false);
     ok(/not found/i.test(r.json.results.map((x) => x.output).join(' ')), 'pm2 did not say the process is unknown');
   });
+  await check('GET rules: shape for a site with none', async () => {
+    const r = await req('GET', '/api/sites/' + php.domain + '/rules');
+    eq(r.status, 200);
+    for (const k of ['aliases', 'redirects', 'rewrites']) ok(Array.isArray(r.json[k]), k + ' is not an array');
+    ok(r.json.hotlink && r.json.traffic, 'hotlink/traffic missing');
+    ok('has_settings_placeholder' in r.json, 'no settings-placeholder flag');
+    return r.json.aliases.length + ' aliases, ' + r.json.redirects.length + ' redirects';
+  });
+  await check('rules reject anything that could break out of a directive', async () => {
+    const u = '/api/sites/' + php.domain;
+    for (const [path, body, why] of [
+      ['/aliases', { domain: 'not a domain' }, 'invalid alias domain'],
+      ['/aliases', { domain: php.domain }, 'the site\'s own domain'],
+      ['/redirects', { kind: 'exact', source: 'no-slash', target: '/x' }, 'source without a leading slash'],
+      ['/redirects', { kind: 'exact', source: '/a', target: 'not-a-target' }, 'target that is neither URL nor path'],
+      ['/redirects', { kind: 'exact', source: '/a;return 444', target: '/b' }, 'semicolon in the source'],
+      ['/redirects', { kind: 'exact', source: '/a', target: '/b} location / {' }, 'brace in the target'],
+      ['/rewrites', { pattern: '^/a$', replacement: '/b; return 444' }, 'semicolon in a rewrite'],
+      ['/rewrites', { pattern: '^/a$', replacement: '/b', flag: 'nonsense' }, 'unknown rewrite flag'],
+    ]) {
+      const r = await req('POST', u + path, body);
+      ok(r.status >= 400 && r.status < 500, why + ' was not rejected (got ' + r.status + ')');
+    }
+    for (const [path, body, why] of [
+      ['/hotlink', { enabled: true, extensions: 'jpg;return 444' }, 'semicolon in an extension'],
+      ['/hotlink', { enabled: true, action: 500 }, 'action other than 403/444'],
+      ['/hotlink', { enabled: true, allowed: 'evil;{}' }, 'punctuation in an allowed referer'],
+      ['/traffic', { enabled: true, req_per_sec: 0 }, 'rate below 1'],
+      ['/traffic', { enabled: true, req_per_sec: 99999999 }, 'absurd rate'],
+      ['/traffic', { enabled: true }, 'enabled with no limit at all'],
+    ]) {
+      const r = await req('PUT', u + path, body);
+      ok(r.status >= 400 && r.status < 500, why + ' was not rejected (got ' + r.status + ')');
+    }
+    // and none of that may have altered the site
+    const after = await req('GET', '/api/sites/' + php.domain + '/vhost');
+    eq(after.json.in_sync, true, 'a rejected rule changed the vhost');
+    return '14 malformed rules refused, vhost untouched';
+  });
+  await check('a rule nginx refuses leaves no row behind', async () => {
+    if (!SLOW) return 'skip';
+    const u = '/api/sites/' + php.domain + '/redirects';
+    const a = await req('POST', u, { kind: 'exact', source: '/qa-dup-' + Date.now(), target: '/x' });
+    eq(a.status, 200, 'setup redirect failed: ' + a.text.slice(0, 120));
+    const src = a.json.redirects[a.json.redirects.length - 1].source;
+    const dup = await req('POST', u, { kind: 'exact', source: src, target: '/y' });
+    eq(dup.status, 409, 'a duplicate location was accepted');
+    const rules = (await req('GET', '/api/sites/' + php.domain + '/rules')).json;
+    eq(rules.redirects.filter((r) => r.source === src).length, 1, 'the refused duplicate was stored anyway');
+    const id = rules.redirects.find((r) => r.source === src).id;
+    eq((await req('DELETE', u + '/' + id)).status, 200, 'cleanup failed');
+    eq((await req('GET', '/api/sites/' + php.domain + '/vhost')).json.in_sync, true, 'vhost left out of sync');
+    return 'duplicate refused, single row kept, cleaned up';
+  });
   await check('GET databases: shape, server probes and unmanaged listing', async () => {
     const r = await req('GET', '/api/sites/' + php.domain + '/databases');
     eq(r.status, 200);

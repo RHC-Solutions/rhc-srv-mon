@@ -118,7 +118,34 @@ and a cwd inside that home, because pm2 spawns the app from its own cwd and the 
 `/var/lib/rhc-srv-mon/vhost-bak/`), SSL/TLS (stored certificates, upload PEM, self-signed, activate), Security (basic auth,
 blocked IPs/bots, Cloudflare-only → `{{settings}}`), SSH/FTP (SSH users: own uid, site group, symlinked htdocs/logs/backups),
 File Manager (`bin/fileop.js` runs **as the site user**, so the kernel enforces what can be read/written; uploads/downloads
-stream through it), Cron Jobs (`/etc/cron.d/<siteUser>`), Logs (tail with filter/follow). ## Creating and deleting a site
+stream through it), Cron Jobs (`/etc/cron.d/<siteUser>`), Logs (tail with filter/follow). ## Domains & Rules (per site)
+
+One tab, five kinds of rule, all rendered into the vhost's `{{settings}}` block so a change is one
+validated nginx write:
+
+* **Domains** — extra `server_name` entries, each either *served* or *301 to the primary*. A
+  redirecting domain still has to appear in `server_name`, or nginx never selects the block and the
+  browser gets a TLS error instead of a redirect. Aliases are merged at **render** time, not baked into
+  the stored template, so they work on an imported literal `server_name` as well as on a
+  `{{server_name}}` placeholder — and with no aliases it is a no-op, which is what keeps every
+  imported vhost byte-identical.
+* **Redirects** — exact path, path prefix or regex, with 301/302/307/308. Two rules on one path would
+  be a hard `duplicate location` error that blocks every later edit, so that is refused up front.
+* **URL rewrite** — `rewrite` with `last` / `break` / `redirect` / `permanent`.
+* **Hotlink protection** — `valid_referers` plus two `set`s combined in the server block. Deliberately
+  *not* a `location ~* \.(jpg|…)$`, which would take precedence over the site's own handlers and break
+  anything the application serves itself. No referer is always allowed, so bookmarks keep working.
+* **Traffic control** — `limit_req`, `limit_conn` and `limit_rate` per client address. The zones must
+  be declared in nginx's **http** context, and this box's `nginx.conf` includes only
+  `sites-enabled/*.conf` — which *is* spliced into http — so they go in
+  `sites-enabled/000-rhc-traffic-zones.conf`, sorting before every vhost and leaving CloudPanel's
+  `nginx.conf` alone. Deleting a site rebuilds that include.
+
+Every rule is validated for `;` `{` `}` and newlines before it can reach a directive, and a rule nginx
+refuses is **discarded whole** — the file is restored *and* the row is removed. Without that second
+half a site becomes unmanageable: the bad row re-renders on every later change and fails again.
+
+## Creating and deleting a site
 
 `lib/sites/create.js`. Create runs the sequence CloudPanel does — unix user and home from
 `resources/skel/site-user`, document root, the site row, the **stage-1 vhost template** from

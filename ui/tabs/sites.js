@@ -2,7 +2,7 @@
 // List (cards with health) → detail with CloudPanel-style sub-tabs. Sub-navigation lives in the
 // query string (sites?d=<domain>&t=<tab>) so every relative api/ URL keeps working behind nginx.
 let lastSites = null;
-const SITE_TABS = [['settings', 'Settings'], ['procs', 'Processes'], ['vhost', 'Vhost'], ['databases', 'Databases'], ['ssl', 'SSL/TLS'], ['cloudflare', 'Cloudflare'], ['security', 'Security'], ['ssh', 'SSH/FTP'], ['files', 'File Manager'], ['cron', 'Cron Jobs'], ['logs', 'Logs']];
+const SITE_TABS = [['settings', 'Settings'], ['procs', 'Processes'], ['vhost', 'Vhost'], ['databases', 'Databases'], ['ssl', 'SSL/TLS'], ['cloudflare', 'Cloudflare'], ['rules', 'Domains & Rules'], ['security', 'Security'], ['ssh', 'SSH/FTP'], ['files', 'File Manager'], ['cron', 'Cron Jobs'], ['logs', 'Logs']];
 let siteView = { domain: null, tab: 'settings', data: null, loading: false, sub: {} };   // sub: per-tab fetched data
 let siteQ = state.siteQ || '';
 let siteViewMode = state.siteViewMode || 'cards';      // cards | table
@@ -303,7 +303,7 @@ function renderSiteDetail(){
   // do not clobber a form the user is typing in (10 s refresh)
   if (view.contains(document.activeElement) && ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;
   const s = siteView.data;
-  const body = ({ settings: siteTabSettings, procs: siteTabProcs, vhost: siteTabVhost, databases: siteTabDatabases, ssl: siteTabSsl, cloudflare: siteTabCf, security: siteTabSecurity, ssh: siteTabSsh, files: siteTabFiles, cron: siteTabCron, logs: siteTabLogs }[siteView.tab] || siteTabSettings)(s);
+  const body = ({ settings: siteTabSettings, procs: siteTabProcs, vhost: siteTabVhost, databases: siteTabDatabases, ssl: siteTabSsl, cloudflare: siteTabCf, rules: siteTabRules, security: siteTabSecurity, ssh: siteTabSsh, files: siteTabFiles, cron: siteTabCron, logs: siteTabLogs }[siteView.tab] || siteTabSettings)(s);
   view.innerHTML = siteHeader(s) + '<div class="site-body">' + body + '</div>';
   if (typeof siteView.afterRender === 'function') { const f = siteView.afterRender; siteView.afterRender = null; f(); }
 }
@@ -370,6 +370,117 @@ async function siteRecheck(btn){
   try { await siteApi('POST', 'api/sites/check'); siteView.data = null; siteSubReload('procs'); toast('Re-checked', 'success'); }
   catch(e){ siteErr(e, 'Re-check'); }
   finally { if (btn) btn.disabled = false; }
+}
+
+/* ---- Domains & Rules ---- */
+// Extra domains, redirects, rewrites, hotlink protection and traffic limits. Every one of them lands
+// in the vhost's {{settings}} block, so a rule nginx refuses is discarded whole — the previous file
+// is restored and the row is removed, rather than leaving a site that cannot be edited again.
+function siteTabRules(s){
+  return siteSub('rules', siteUrl('/rules'), (d) => {
+    let html = '';
+    if (!d.has_settings_placeholder) html += '<div class="upd-card"><div class="site-why">This site\'s stored vhost template has no <span class="mono">{{settings}}</span> placeholder, so none of these rules can be rendered into it. Open the Vhost tab and insert <span class="mono">{{settings}}</span> after the <span class="mono">.well-known</span> block.</div></div>';
+
+    // ---- domains
+    let dom = '<table class="upd-table"><thead><tr><th>Domain</th><th>Behaviour</th><th></th></tr></thead><tbody>'
+      + '<tr><td class="mono"><b>' + esc(s.domain) + '</b></td><td><span class="badge online">primary</span></td><td></td></tr>'
+      + d.aliases.map(a => '<tr><td class="mono">' + esc(a.domain) + '</td><td>' + (a.redirect
+          ? '<span class="badge type">301 → ' + esc(s.domain) + '</span>'
+          : '<span class="badge online">served</span>')
+        + '</td><td style="text-align:right"><button class="btn small danger" onclick="siteRuleDel(this, \'aliases\', ' + a.id + ')">Remove</button></td></tr>').join('')
+      + '</tbody></table>'
+      + '<div class="row3" style="margin-top:10px">'
+      + siteField('Add a domain', '<input id="raDomain" placeholder="www.' + esc(s.domain) + '" autocomplete="off">')
+      + siteField('Behaviour', '<select id="raMode"><option value="serve">serve the same site</option><option value="redirect">301 to ' + esc(s.domain) + '</option></select>')
+      + '<div style="display:flex;align-items:flex-end"><button class="btn pri" onclick="siteAliasAdd(this)">Add domain</button></div></div>'
+      + '<p class="dim" style="font-size:12.5px">Both kinds are added to <span class="mono">server_name</span> — a redirecting domain has to be listed too, or nginx never selects this site and the browser gets a TLS error instead of a redirect. Point DNS at this server and put the name on the certificate (SSL/TLS) as well.</p>';
+    html += siteCard('Domains', dom);
+
+    // ---- redirects
+    let red = d.redirects.length
+      ? '<table class="upd-table"><thead><tr><th>Match</th><th>From</th><th>To</th><th>Code</th><th></th></tr></thead><tbody>'
+        + d.redirects.map(r => '<tr><td>' + esc(r.kind) + '</td><td class="mono">' + esc(r.source) + '</td><td class="mono">' + esc(r.target) + '</td><td>' + r.code + '</td>'
+          + '<td style="text-align:right"><button class="btn small danger" onclick="siteRuleDel(this, \'redirects\', ' + r.id + ')">Remove</button></td></tr>').join('')
+        + '</tbody></table>'
+      : '<p class="dim">No redirects.</p>';
+    red += '<div class="row3" style="margin-top:10px">'
+      + siteField('Match', '<select id="rrKind"><option value="exact">exact path</option><option value="prefix">path prefix</option><option value="regex">regex</option></select>')
+      + siteField('From', '<input id="rrFrom" placeholder="/old-page" autocomplete="off">')
+      + siteField('To', '<input id="rrTo" placeholder="/new-page or https://example.com/x" autocomplete="off">') + '</div>'
+      + '<div class="row3">' + siteField('Status', '<select id="rrCode"><option value="301">301 permanent</option><option value="302">302 temporary</option><option value="307">307 temporary, keep method</option><option value="308">308 permanent, keep method</option></select>')
+      + '<div style="display:flex;align-items:flex-end"><button class="btn pri" onclick="siteRedirectAdd(this)">Add redirect</button></div><div></div></div>';
+    html += siteCard('Redirects', red);
+
+    // ---- rewrites
+    let rw = d.rewrites.length
+      ? '<table class="upd-table"><thead><tr><th>Pattern</th><th>Replacement</th><th>Flag</th><th></th></tr></thead><tbody>'
+        + d.rewrites.map(r => '<tr><td class="mono">' + esc(r.pattern) + '</td><td class="mono">' + esc(r.replacement) + '</td><td>' + esc(r.flag) + '</td>'
+          + '<td style="text-align:right"><button class="btn small danger" onclick="siteRuleDel(this, \'rewrites\', ' + r.id + ')">Remove</button></td></tr>').join('')
+        + '</tbody></table>'
+      : '<p class="dim">No rewrites.</p>';
+    rw += '<div class="row3" style="margin-top:10px">'
+      + siteField('Pattern', '<input id="rwPat" placeholder="^/p/(.*)$" autocomplete="off">', 'nginx regex, matched against the URI')
+      + siteField('Replacement', '<input id="rwRep" placeholder="/page.php?slug=$1" autocomplete="off">')
+      + siteField('Flag', '<select id="rwFlag"><option value="last">last — restart matching</option><option value="break">break — stop rewriting</option><option value="redirect">redirect — 302</option><option value="permanent">permanent — 301</option></select>') + '</div>'
+      + '<div class="site-actions"><button class="btn pri" onclick="siteRewriteAdd(this)">Add rewrite</button></div>';
+    html += siteCard('URL rewrite', rw);
+
+    // ---- hotlink
+    const h = d.hotlink;
+    html += siteCard('Hotlink protection',
+      '<label class="chip" style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="hlOn"' + (h.enabled ? ' checked' : '') + '> block requests for these files from other sites</label>'
+      + '<div class="row3" style="margin-top:10px">'
+      + siteField('File extensions', '<input id="hlExt" value="' + esc(h.extensions) + '" autocomplete="off">', 'comma separated, no dots')
+      + siteField('Also allow these referers', '<input id="hlAllow" value="' + esc((h.allowed || '').split(/\n/).join(' ')) + '" placeholder="cdn.example.com *.partner.net" autocomplete="off">', 'your own domains are always allowed')
+      + siteField('When blocked', '<select id="hlAction"><option value="403"' + (h.action === 403 ? ' selected' : '') + '>403 Forbidden</option><option value="444"' + (h.action === 444 ? ' selected' : '') + '>444 drop the connection</option></select>') + '</div>'
+      + '<p class="dim" style="font-size:12.5px">Requests with no referer are always allowed, so direct links and bookmarks keep working. Implemented without a <span class="mono">location</span> block, so it cannot shadow the site\'s own handlers.</p>'
+      + '<div class="site-actions"><button class="btn pri" onclick="siteHotlinkSave(this)">Save</button></div>');
+
+    // ---- traffic
+    const t = d.traffic;
+    html += siteCard('Traffic control',
+      '<label class="chip" style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="tcOn"' + (t.enabled ? ' checked' : '') + '> apply limits per client address</label>'
+      + '<div class="row3" style="margin-top:10px">'
+      + siteField('Requests / second', '<input id="tcRps" type="number" min="1" max="10000" value="' + (t.req_per_sec || '') + '" placeholder="off">', 'excess is delayed, then rejected with 503')
+      + siteField('Burst', '<input id="tcBurst" type="number" min="1" max="10000" value="' + (t.req_burst || 20) + '">', 'requests allowed to queue above the rate')
+      + siteField('Concurrent connections', '<input id="tcConn" type="number" min="1" max="10000" value="' + (t.conn_limit || '') + '" placeholder="off">') + '</div>'
+      + '<div class="row2">' + siteField('Bandwidth per connection (KB/s)', '<input id="tcRate" type="number" min="8" max="1000000" value="' + (t.rate_kb || '') + '" placeholder="off">')
+      + '<div class="dim" style="font-size:12.5px;display:flex;align-items:flex-end">Zones are declared in <span class="mono">' + esc((d.zones_file || '').split('/').pop()) + '</span>, which nginx reads in its http context.</div></div>'
+      + '<div class="site-actions"><button class="btn pri" onclick="siteTrafficSave(this)">Save</button></div>');
+    return html;
+  });
+}
+const siteRuleVal = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+async function siteRuleReq(btn, method, path, body, what){
+  if (btn) btn.disabled = true;
+  try { await siteApi(method, siteUrl(path), body); toast(what + ' applied · nginx reloaded', 'success'); siteSubReload('rules'); }
+  catch(e){ siteErr(e, what); }
+  finally { if (btn) btn.disabled = false; }
+}
+function siteAliasAdd(btn){
+  const domain = siteRuleVal('raDomain');
+  if (!domain) return toast('Enter a domain', 'warn');
+  siteRuleReq(btn, 'POST', '/aliases', { domain, redirect: siteRuleVal('raMode') === 'redirect' }, 'Domain');
+}
+function siteRedirectAdd(btn){
+  const source = siteRuleVal('rrFrom'), target = siteRuleVal('rrTo');
+  if (!source || !target) return toast('Fill in both From and To', 'warn');
+  siteRuleReq(btn, 'POST', '/redirects', { kind: siteRuleVal('rrKind'), source, target, code: Number(siteRuleVal('rrCode')) || 301 }, 'Redirect');
+}
+function siteRewriteAdd(btn){
+  const pattern = siteRuleVal('rwPat'), replacement = siteRuleVal('rwRep');
+  if (!pattern || !replacement) return toast('Fill in the pattern and the replacement', 'warn');
+  siteRuleReq(btn, 'POST', '/rewrites', { pattern, replacement, flag: siteRuleVal('rwFlag') }, 'Rewrite');
+}
+function siteHotlinkSave(btn){
+  siteRuleReq(btn, 'PUT', '/hotlink', { enabled: !!(document.getElementById('hlOn') || {}).checked, extensions: siteRuleVal('hlExt'), allowed: siteRuleVal('hlAllow'), action: Number(siteRuleVal('hlAction')) || 403 }, 'Hotlink protection');
+}
+function siteTrafficSave(btn){
+  const n = (id) => { const v = siteRuleVal(id); return v === '' ? null : Number(v); };
+  siteRuleReq(btn, 'PUT', '/traffic', { enabled: !!(document.getElementById('tcOn') || {}).checked, req_per_sec: n('tcRps'), req_burst: n('tcBurst') || 20, conn_limit: n('tcConn'), rate_kb: n('tcRate') }, 'Traffic control');
+}
+function siteRuleDel(btn, kind, id){
+  armConfirm(btn, 'remove?', () => siteRuleReq(btn, 'DELETE', '/' + kind + '/' + id, undefined, 'Rule removal'));
 }
 
 /* ---- Cloudflare ---- */
