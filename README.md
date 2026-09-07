@@ -39,6 +39,12 @@ outage on 2026-09-06 while nothing was listening. A Cloudflare-only vhost answer
 "unknown", never as a failure, and the app port decides. Each site carries `originStatus` / `appStatus` and a plain-language
 `statusReason`, shown on the card and in the site's Processes tab.
 
+The Node version field is a dropdown of interpreters that actually exist — the system `node` plus that site user's
+nvm builds (`~/.nvm/versions/node/*`) — and the card states which one the site's processes are *really* executing,
+read from `/proc/<pid>/exe`. `site_nodejs.node_version` is CloudPanel bookkeeping and routinely disagrees: an app
+started from an SSH user's login shell runs the system node no matter what the site user's nvm holds. A binary shown
+as `(deleted)` is a process still mapping an inode that was replaced by a node upgrade — it needs a restart.
+
 Per-site tabs: Settings (root dir, site-user password + authorized_keys, PHP version/limits or Node version/port), **Processes**
 (the site's PM2 apps with start / restart / stop, and `pm2 resurrect` for a daemon that is down — a site's apps usually run
 under one of its SSH users, discovered through the `htdocs` symlink, and when that user's daemon is dead the apps are only

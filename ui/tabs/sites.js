@@ -270,8 +270,21 @@ function siteTabSettings(s){
     + siteField('SSH Keys', '<textarea id="stKeys" rows="5" placeholder="ssh-ed25519 AAAA… user@host (one per line)">' + esc(s.ssh_keys || '') + '</textarea>', 'Written to ' + esc('/home/' + s.user + '/.ssh/authorized_keys'))
     + '<div class="site-actions"><button class="btn pri" onclick="siteSaveKeys()">Save</button></div>');
   if (s.type === 'nodejs' && s.nodejs) {
+    if (!siteView.sub.runtimes) siteSub('runtimes', 'api/sites/runtimes?user=' + encodeURIComponent(s.user), () => '');
+    const rtn = siteView.sub.runtimes && siteView.sub.runtimes.data;
+    const avail = rtn && rtn.node && rtn.node.available ? rtn.node.available : [];
+    const recorded = String(s.nodejs.node_version || '');
+    // The recorded version is CloudPanel bookkeeping; keep it selectable so saving does not silently
+    // change it, but show what is installed and what the site's processes actually execute.
+    const opts = avail.map(v => '<option value="' + esc(v.version.replace(/^v/, '')) + '"' + (v.version.replace(/^v/, '') === recorded.replace(/^v/, '') ? ' selected' : '') + '>' + esc(v.version) + ' · ' + esc(v.source === 'nvm' ? 'nvm (' + v.user + ')' : 'system') + '</option>').join('');
+    const known = avail.some(v => v.version.replace(/^v/, '') === recorded.replace(/^v/, ''));
+    const sel = '<select id="stNodeVer">' + (known ? '' : '<option value="' + esc(recorded) + '" selected>' + esc(recorded) + ' · recorded, not installed</option>') + opts + '</select>';
+    const act = (s.nodejs.actual || []);
+    const actNote = act.length
+      ? 'Actually running: ' + act.map(a => (a.stale ? '<b style="color:#f8a306">' + esc(a.path) + ' (deleted — node was upgraded under it; restart to pick up the new one)</b>' : '<b>' + esc(a.version || '?') + '</b> <span class="dim">' + esc(a.path) + '</span>') + ' <span class="dim">(' + esc(a.procs.slice(0, 4).join(', ')) + (a.procs.length > 4 ? ' +' + (a.procs.length - 4) : '') + ')</span>').join(' · ')
+      : 'No running Node process found for this site — the value above is only what is recorded.';
     html += siteCard('Node.js Settings',
-      '<div class="row2">' + siteField('Node.js Version *', '<div style="display:flex;gap:6px"><input id="stNodeVer" value="' + esc(s.nodejs.node_version) + '" style="flex:1"><label class="chip" style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="stNodeInstall" checked> nvm install</label></div>', 'nvm in the site user\'s home (CloudPanel style). Apps run by PM2 use whatever node is on their PATH.')
+      '<div class="row2">' + siteField('Node.js Version *', '<div style="display:flex;gap:6px"><span style="flex:1">' + sel + '</span><label class="chip" style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="stNodeInstall"> nvm install</label></div>', actNote)
       + siteField('App Port *', '<input id="stNodePort" type="number" min="1024" max="65535" value="' + s.nodejs.port + '">', 'nginx proxies / to 127.0.0.1:' + s.nodejs.port + (s.vhost_placeholders.includes('app_port') ? '' : ' — the vhost has a literal port; it will be patched')) + '</div>'
       + '<div class="site-actions"><button class="btn pri" onclick="siteSaveNode()">Save</button></div>');
   }

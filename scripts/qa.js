@@ -135,7 +135,20 @@ const section = (s) => console.log('\n### ' + s);
   const node = sites.find((s) => s.type === 'nodejs');
   const procSite = sites.find((s) => s.canControl) || node;      // a site whose apps this panel can actually control
   await check('GET /api/sites/templates', async () => { const r = await req('GET', '/api/sites/templates'); eq(r.status, 200); ok(r.json.length > 10); return r.json.length + ' templates'; });
-  await check('GET /api/sites/runtimes', async () => { const r = await req('GET', '/api/sites/runtimes'); eq(r.status, 200); ok(r.json.php.length && r.json.nextPoolPort > 20000, 'shape'); return r.json.php.length + ' php versions, next pool port ' + r.json.nextPoolPort; });
+  await check('GET /api/sites/runtimes', async () => { const r = await req('GET', '/api/sites/runtimes'); eq(r.status, 200); ok(r.json.php.length && r.json.nextPoolPort > 20000, 'shape');
+    ok(Array.isArray(r.json.node.available) && r.json.node.available.length, 'no node interpreters discovered');
+    ok(r.json.node.available.every((v) => /^v\d+\./.test(v.version) && v.path && v.source), 'node entry shape');
+    const withUser = await req('GET', '/api/sites/runtimes?user=' + node.user);
+    ok(withUser.json.node.available.length >= r.json.node.available.length, 'per-user list lost the system interpreters');
+    return r.json.php.length + ' php versions, ' + r.json.node.available.map((v) => v.version + '/' + v.source).join(' ') + ', next pool port ' + r.json.nextPoolPort; });
+  await check('site detail reports the interpreter its processes actually run', async () => {
+    const r = await req('GET', '/api/sites/' + procSite.domain);
+    eq(r.status, 200);
+    if (!r.json.nodejs) return 'skip';
+    ok(Array.isArray(r.json.nodejs.actual), 'no measured interpreter list');
+    for (const a of r.json.nodejs.actual) ok(a.path && Array.isArray(a.procs), 'actual entry shape');
+    return r.json.nodejs.actual.map((a) => (a.stale ? a.path + ' (stale)' : a.version)).join(', ') || 'nothing running';
+  });
   await check('GET /api/sites/:domain', async () => { const r = await req('GET', '/api/sites/' + php.domain); eq(r.status, 200); ok(r.json.domain === php.domain && r.json.unix, 'shape'); ok(!('user_password_enc' in r.json), 'leaked the encrypted password'); });
   await check('GET /api/sites/unknown → 404', async () => eq((await req('GET', '/api/sites/nope.example')).status, 404));
   await check('every imported vhost still renders byte-identically', async () => {
