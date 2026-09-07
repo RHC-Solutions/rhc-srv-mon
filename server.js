@@ -406,16 +406,6 @@ const server = http.createServer((req, res) => {
       }
     }
   }
-  if (url === '/api/ssh/install' && req.method === 'POST') {
-    return readJsonBody(req, res, (body) => {
-      try {
-        const job = ssh.sshStartInstall(String(body.hostId || ''), body.opts || {});
-        events.emit('ssh.install', { req, target: job.hostName || body.hostId, message: 'Remote install started on ' + (job.hostName || body.hostId), data: { jobId: job.id, appDir: body.opts && body.opts.appDir } });
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, jobId: job.id }));
-      } catch (e) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
-    });
-  }
   {
     const m = url.match(/^\/api\/ssh\/install\/([a-f0-9]{6,16})$/);
     if (m && req.method === 'GET') {

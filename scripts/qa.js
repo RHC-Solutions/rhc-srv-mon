@@ -6,7 +6,7 @@
  *
  * The dev instance shares /etc/nginx, /etc/cron.d and /home with production, so every mutation here
  * is either a no-op (same values → no file write) or restores what it changed. Long/expensive jobs
- * (module scans, real updates, backups, installs, pm2 actions) are only run with --slow / --net.
+ * (module scans, real updates, backups, deploys, pm2 actions) are only run with --slow / --net.
  */
 'use strict';
 const BASE = (process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : 'http://127.0.0.1:8898').replace(/\/$/, '');
@@ -376,7 +376,7 @@ const section = (s) => console.log('\n### ' + s);
   });
 
   /* -------------------------------------------------------------------- ssh */
-  section('ssh hosts & installs');
+  section('ssh hosts & deploy jobs');
   let tmpHost = null;
   await check('POST /api/ssh/hosts creates, PUT updates, DELETE removes', async () => {
     let r = await req('POST', '/api/ssh/hosts', { name: 'qa-temp', host: '127.0.0.1', port: 22, user: 'root', auth: 'key' });
@@ -391,7 +391,11 @@ const section = (s) => console.log('\n### ' + s);
     eq((await req('PUT', '/api/ssh/hosts/aaaaaaaaaa', { name: 'x', host: 'y' })).status, 404);
     eq((await req('DELETE', '/api/ssh/hosts/aaaaaaaaaa')).status, 404);
   });
-  await check('POST /api/ssh/install with an unknown host → 400', async () => eq((await req('POST', '/api/ssh/install', { hostId: 'aaaaaaaaaa', opts: {} })).status, 400));
+  await check('the rhc-srv-mon remote installer is gone, not merely hidden', async () => {
+    const r = await req('POST', '/api/ssh/install', { hostId: 'aaaaaaaaaa', opts: {} });
+    ok(r.status === 404 || r.status === 405, 'POST /api/ssh/install still answers ' + r.status + ' — a hidden button leaves a callable root installer');
+    return 'POST /api/ssh/install → ' + r.status;
+  });
   await check('GET /api/ssh/install/:id unknown → 404', async () => eq((await req('GET', '/api/ssh/install/aaaaaaaaaaaa')).status, 404));
   await check('DELETE /api/ssh/install/:id unknown is a no-op', async () => { const r = await req('DELETE', '/api/ssh/install/aaaaaaaaaaaa'); eq(r.status, 200); eq(r.json.removed, false); });
   await check('GET /api/ssh/sessions/:id unknown → 404', async () => eq((await req('GET', '/api/ssh/sessions/aaaaaaaaaaaa')).status, 404));

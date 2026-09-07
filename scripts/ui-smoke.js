@@ -111,16 +111,16 @@ const call = (label, fn) => { try { const r = fn(); log('  ok  ' + label); retur
       log('       ' + t + ': ' + html.length + ' chars' + (errs.length ? ' · sub errors: ' + errs.join('; ') : '') + (/Loading…/.test(html) ? ' · STILL LOADING' : ''));
       if (/Loading…/.test(html) && !errs.length) errors.push(t + ': still loading after wait');
     }
-    // SSH install dialogs (terminals are not driven: sshData is fetched straight from the API)
+    // SSH deploy dialogs (terminals are not driven: sshData is fetched straight from the API)
     try {
       const d = await fetch(BASE + '/api/ssh').then((r) => r.json());
       vm.runInContext('sshData = ' + JSON.stringify(d), sandbox);
-      call('sshInstallsDialog', () => sandbox.sshInstallsDialog());
+      call('sshInstallsDialog (deploy jobs)', () => sandbox.sshInstallsDialog());
       await sleep(600);
       log('       installs listed: ' + (byId.get('ssh-installs') ? byId.get('ssh-installs')._html.length : 0) + ' chars, ' + (d.installs || []).length + ' entries');
       const job = (d.installs || [])[0];
       if (job) call('sshRetryInstall', () => sandbox.sshRetryInstall(job.id));
-      if (d.hosts && d.hosts[0]) call('sshInstallDialog', () => sandbox.sshInstallDialog(d.hosts[0].id));
+      if (d.hosts && d.hosts[0]) call('sshDeployVncDialog', () => sandbox.sshDeployVncDialog(d.hosts[0].id));
       sandbox.sshModalClose();
     } catch (e) { errors.push('ssh dialogs: ' + e.message); }
     // dialogs (render only)

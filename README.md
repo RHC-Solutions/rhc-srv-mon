@@ -7,7 +7,7 @@ Runs as root under pm2 (`rhc-srv-mon`, cwd `/root`), binds 127.0.0.1:8899, expos
 
 - `server.js` — entry point: HTTP dispatcher (legacy if/else routes + `lib/http.js` router), `/ws/ssh` upgrade, boot.
 - `lib/` — one module per feature: `auth` (login + TOTP + sessions), `history`/`collect` (PM2 heartbeats), `postgres`,
-  `updates`, `sites` (health), `modules` (scan / auto-update / cleanup), `backups`, `ssh` (terminal + remote installer),
+  `updates`, `sites` (health), `modules` (scan / auto-update / cleanup), `backups`, `ssh` (terminal, VNC/RDP, remote VNC deploy),
   `notify` (Telegram), `cloudpanel` (read-only CLP SQLite), `http` (helpers + router), `page` (UI assembly), `util`, `config`.
 - `ui/` — the browser app: `index.html` shell, `app.css`, `core.js` (helpers, state, tabs, refresh), `tabs/*.js`, `boot.js`,
   `login.html`. `lib/page.js` concatenates all JS into one `<script>` (shared scope) and syntax-checks it at boot.
