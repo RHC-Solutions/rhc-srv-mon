@@ -293,6 +293,65 @@ const section = (s) => console.log('\n### ' + s);
     eq(r.status, 200); eq(r.json.ok, false);
     ok(/not found/i.test(r.json.results.map((x) => x.output).join(' ')), 'pm2 did not say the process is unknown');
   });
+  await check('GET databases: shape, server probes and unmanaged listing', async () => {
+    const r = await req('GET', '/api/sites/' + php.domain + '/databases');
+    eq(r.status, 200);
+    ok(Array.isArray(r.json.databases) && Array.isArray(r.json.servers) && Array.isArray(r.json.unmanaged), 'shape');
+    for (const v of r.json.servers) ok(v.engine && typeof v.ok === 'boolean', 'server probe shape');
+    return r.json.servers.map((v) => v.engine + (v.ok ? ':ok' : ':' + (v.error || 'down'))).join(' · ');
+  });
+  await check('database names are validated, not escaped into SQL', async () => {
+    const u = '/api/sites/' + php.domain + '/databases';
+    for (const name of ['bad name', 'drop;--', "x'y", 'a'.repeat(70), '']) {
+      const r = await req('POST', u, { engine: 'postgres', name, user: 'qa_ok' });
+      eq(r.status, 400, 'name ' + JSON.stringify(name.slice(0, 12)) + ' was not rejected:');
+    }
+    eq((await req('POST', u, { engine: 'nope', name: 'qa_ok' })).status, 400, 'unknown engine');
+    eq((await req('POST', u, { engine: 'postgres', name: 'qa_ok', user: 'qa_ok', password: "a'b\\c" })).status, 400, 'unquotable password');
+  });
+  await check('unknown database id → 404', async () => {
+    const u = '/api/sites/' + php.domain + '/databases/999999';
+    eq((await req('GET', u + '/tables')).status, 404);
+    eq((await req('DELETE', u)).status, 404);
+    eq((await req('POST', u + '/export')).status, 404);
+  });
+  await check('GET /api/db-servers reports both engines', async () => {
+    const r = await req('GET', '/api/db-servers');
+    eq(r.status, 200); eq(r.json.servers.length, 2);
+    ok(r.json.servers.some((v) => v.engine === 'postgres'), 'no postgres entry');
+    return r.json.servers.map((v) => v.engine + (v.ok ? ' ok' : ' unreachable')).join(', ');
+  });
+  await check('an admin credential is verified before it is stored', async () => {
+    const r = await req('PUT', '/api/db-servers/mariadb', { password: 'definitely-not-the-root-password' });
+    ok(r.status >= 400, 'a wrong password was accepted (' + r.status + ')');
+    const after = (await req('GET', '/api/db-servers')).json.servers.find((v) => v.engine === 'mariadb');
+    ok(!after.has_password, 'a rejected password got stored anyway');
+  });
+  await check('full postgres lifecycle: create → write → export → import → drop', async () => {
+    const probe = (await req('GET', '/api/db-servers')).json.servers.find((v) => v.engine === 'postgres');
+    if (!probe || !probe.ok) return 'skip';
+    const u = '/api/sites/' + php.domain + '/databases';
+    const name = 'qa_life_' + Date.now().toString(36).slice(-6);
+    const c = await req('POST', u, { engine: 'postgres', name, user: name });
+    eq(c.status, 200); ok(c.json.password && c.json.password.length >= 20, 'no generated password');
+    const id = c.json.id;
+    try {
+      const t = await req('GET', u + '/' + id + '/tables');
+      eq(t.status, 200); ok(Array.isArray(t.json.tables), 'tables shape');
+      const e = await req('POST', u + '/' + id + '/export');
+      eq(e.status, 200); ok(e.json.size > 0 && /\.sql\.gz$/.test(e.json.file), 'export produced ' + JSON.stringify(e.json));
+      const m = await req('POST', u + '/' + id + '/maintain/vacuum');
+      eq(m.status, 200);
+      eq((await req('POST', u + '/' + id + '/maintain/nonsense')).status, 400, 'unknown maintenance action');
+      const uid = c.json.id && (await req('GET', u)).json.databases.find((x) => x.id === id).users[0].id;
+      eq((await req('PUT', u + '/' + id + '/users/' + uid, { permissions: 'ro' })).status, 200);
+      eq((await req('PUT', u + '/' + id + '/users/' + uid, {})).status, 400, 'empty user update');
+      return 'created, exported ' + e.json.size + 'B, vacuumed, set read-only, dropped';
+    } finally {
+      const d = await req('DELETE', u + '/' + id);
+      if (d.status !== 200) fails.push('lifecycle cleanup failed: ' + d.text.slice(0, 120));
+    }
+  });
   await check('per-site Cloudflare: status shape and fallback source', async () => {
     const r = await req('GET', '/api/sites/' + php.domain + '/cloudflare');
     eq(r.status, 200);

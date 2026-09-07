@@ -22,6 +22,31 @@ Runs as root under pm2 (`rhc-srv-mon`, cwd `/root`), binds 127.0.0.1:8899, expos
   `lib/migrations/` applied at boot. `secret.key` (AES-256-GCM, 0600) encrypts stored credentials — it is excluded from
   git *and* from the config backup on purpose: **back it up out of band**, a restored DB without it cannot decrypt anything.
 
+## Databases (per site, MariaDB + PostgreSQL)
+
+`lib/sites/dbs.js`. DDL cannot be parameterised, so every identifier is checked against
+`^[A-Za-z0-9_]{1,63}$` and every literal is rejected if it contains a quote, backslash or newline;
+generated passwords come from an alphanumeric alphabet for the same reason. The tab creates a database
+with its user and grant, drops it, adopts one that already exists on the server, sets a user to
+read-only or read/write (**enforced by the engine**, verified: `SELECT` works, `INSERT` gives
+*permission denied*), regenerates or reveals a stored password, exports a gzipped dump into the site's
+own `~/backups/databases/<db>/` owned by the site user, streams a `.sql`/`.sql.gz` import straight into
+the client (nothing buffered or staged on disk), lists tables with sizes, and runs maintenance —
+`optimize/analyze/check/repair` on MariaDB, `vacuum/analyze/reindex` on PostgreSQL.
+
+**PostgreSQL needs no stored credential**: the panel connects over the unix socket as root, which
+pg_hba maps to a superuser (`local all postgres peer map=localroot`). **MariaDB does**, and the
+*Root password manager* imports it from CloudPanel or takes a pasted one — always testing it before
+storing it encrypted, so a wrong password is refused rather than saved. The MariaDB client is tried
+over the unix socket first and TCP second, because a Debian default gives unix root socket access
+with no password while CloudPanel switches root to a password over TCP, and the two are different
+accounts (`root@localhost` vs `root@127.0.0.1`).
+
+New grants are made for `localhost` and `127.0.0.1`, never `%` — MariaDB on this host was listening on
+`0.0.0.0:3306`, so a `%` grant would have been reachable from outside. `/etc/mysql/mariadb.conf.d/150-rhc-srv-mon.cnf`
+sets `bind-address = 127.0.0.1` (numbered above CloudPanel's own file so it wins) and applies at the
+next MariaDB restart.
+
 ## The panel's URL
 
 Served at **`https://<panel host>/rhc-admin/`** by the `location ^~ /rhc-admin/` block in
@@ -80,8 +105,7 @@ and a cwd inside that home, because pm2 spawns the app from its own cwd and the 
 `/var/lib/rhc-srv-mon/vhost-bak/`), SSL/TLS (stored certificates, upload PEM, self-signed, activate), Security (basic auth,
 blocked IPs/bots, Cloudflare-only → `{{settings}}`), SSH/FTP (SSH users: own uid, site group, symlinked htdocs/logs/backups),
 File Manager (`bin/fileop.js` runs **as the site user**, so the kernel enforces what can be read/written; uploads/downloads
-stream through it), Cron Jobs (`/etc/cron.d/<siteUser>`), Logs (tail with filter/follow). Databases and New Site/Delete come
-with the next slices. `scripts/ui-smoke.js` drives every tab and sub-tab against a dev instance with a DOM stub.
+stream through it), Cron Jobs (`/etc/cron.d/<siteUser>`), Logs (tail with filter/follow). New Site/Delete comes with the next slice. `scripts/ui-smoke.js` drives every tab and sub-tab against a dev instance with a DOM stub.
 
 ## Settings tab
 

@@ -485,8 +485,195 @@ async function siteVhostReset(){
 }
 
 /* ---- Databases (slice 1c) ---- */
+// Databases for this site on both engines. PostgreSQL needs no stored credential (the panel reaches
+// it over the unix socket as root, which pg_hba maps to a superuser); MariaDB needs an admin
+// password, which is what the Root password manager is for.
 function siteTabDatabases(s){
-  return siteCard('Databases', '<p class="dim">MariaDB and PostgreSQL databases for this site arrive with the next milestone (1c). Existing databases keep working; manage them with the CLI until then.</p>');
+  return siteSub('dbs', siteUrl('/databases'), (d) => {
+    let html = '';
+    // engine strip
+    const strip = d.servers.map(v => '<div class="db-srv ' + (v.ok ? 'up' : 'down') + '">'
+      + '<b>' + (v.engine === 'mariadb' ? 'MariaDB' : 'PostgreSQL') + '</b> '
+      + (v.ok ? '<span class="up">✅ ' + esc((v.version || '').split(' on ')[0].slice(0, 46)) + '</span>'
+              : '<span class="down">⚠ ' + esc(v.error || 'unreachable') + '</span>')
+      + '<span class="dim"> · ' + esc(v.admin_user) + '@' + esc(v.host) + (v.port ? ':' + v.port : '') + (v.has_password ? ' · password stored' : '') + '</span>'
+      + '</div>').join('');
+    const unreachable = d.servers.filter(v => !v.ok);
+    html += siteCard('Database servers', strip
+      + (unreachable.length ? '<div class="site-why">' + esc(unreachable[0].detail || unreachable[0].error || '') + '</div>' : ''),
+      '<button class="btn small" onclick="siteDbRootDialog()">🔑 Root password manager</button>');
+
+    // the databases themselves
+    let body = '';
+    if (!d.databases.length) body += '<p class="dim">No databases are managed for this site yet.</p>';
+    else {
+      body += '<table class="upd-table"><thead><tr><th>Database</th><th>Engine</th><th>Size</th><th>Tables</th><th>Users</th><th></th></tr></thead><tbody>';
+      for (const db of d.databases) {
+        const users = db.users.length
+          ? db.users.map(u => '<div class="db-user"><span class="mono">' + esc(u.username) + '</span>'
+              + '<span class="badge ' + (u.permissions === 'ro' ? 'type' : 'online') + '">' + (u.permissions === 'ro' ? 'read only' : 'read/write') + '</span>'
+              + '<button class="btn small" onclick="siteDbUserPerm(this, ' + db.id + ', ' + u.id + ', \'' + (u.permissions === 'ro' ? 'rw' : 'ro') + '\')">→ ' + (u.permissions === 'ro' ? 'read/write' : 'read only') + '</button>'
+              + (u.has_password ? '<button class="btn small" onclick="siteDbUserReveal(' + db.id + ', ' + u.id + ')" title="Show the stored password">👁</button>' : '')
+              + '<button class="btn small" onclick="siteDbUserRegen(this, ' + db.id + ', ' + u.id + ')" title="Set a new random password">↻</button></div>').join('')
+          : '<span class="dim">none</span>';
+        body += '<tr><td class="mono"><b>' + esc(db.name) + '</b>' + (db.exists === false ? ' <span class="down" title="This row exists here but the database is gone from the server">⚠ missing</span>' : '') + '</td>'
+          + '<td>' + esc(db.engine === 'mariadb' ? 'MariaDB' : 'PostgreSQL') + '</td>'
+          + '<td>' + (db.bytes == null ? '<span class="dim">–</span>' : esc(fmtMem(db.bytes))) + '</td>'
+          + '<td>' + (db.tables == null ? '<span class="dim">–</span>' : db.tables) + '</td>'
+          + '<td>' + users + '</td>'
+          + '<td style="text-align:right;white-space:nowrap">'
+          + '<button class="btn small" onclick="siteDbExport(this, ' + db.id + ')" title="Dump into the site\'s backups/databases/">⬇ Export</button> '
+          + '<button class="btn small" onclick="siteDbImport(' + db.id + ', \'' + esc(db.name) + '\')" title="Load a .sql or .sql.gz dump into this database">⬆ Import</button> '
+          + '<button class="btn small" onclick="siteDbTools(' + db.id + ', \'' + esc(db.name) + '\')">🛠 Tools</button> '
+          + '<button class="btn small danger" onclick="siteDbDrop(this, ' + db.id + ', \'' + esc(db.name) + '\')">Drop</button></td></tr>';
+      }
+      body += '</tbody></table>';
+    }
+    html += siteCard('Databases', body, '<button class="btn pri small" onclick="siteDbAddDialog()">＋ Add database</button> <button class="btn small" onclick="siteSubReload(\'dbs\')">↻</button>');
+
+    if (d.unmanaged.length) {
+      html += siteCard('Not managed here',
+        '<p class="dim">These exist on the server but this panel has no record of them — created by CloudPanel or on the command line. Adopting one only records it here; nothing on the server changes.</p>'
+        + '<table class="upd-table"><tbody>' + d.unmanaged.map(u => '<tr><td class="mono">' + esc(u.name) + '</td><td>' + esc(u.engine === 'mariadb' ? 'MariaDB' : 'PostgreSQL')
+          + '</td><td style="text-align:right"><button class="btn small" onclick="siteDbAdopt(this, \'' + esc(u.engine) + '\', \'' + esc(u.name) + '\')">Adopt</button></td></tr>').join('') + '</tbody></table>');
+    }
+    return html;
+  });
+}
+function siteDbAddDialog(){
+  const s = siteView.data;
+  const bg = sshModal('<h3>＋ Add a database</h3>'
+    + '<div class="row3">' + siteField('Engine', '<select id="dbEngine"><option value="mariadb">MariaDB</option><option value="postgres">PostgreSQL</option></select>')
+    + siteField('Database name *', '<input id="dbName" value="' + esc((s.user || '').replace(/[^A-Za-z0-9_]/g, '_')) + '" autocomplete="off">', 'letters, digits and underscore')
+    + siteField('User name *', '<input id="dbUser" value="' + esc((s.user || '').replace(/[^A-Za-z0-9_]/g, '_')) + '" autocomplete="off">') + '</div>'
+    + '<div class="row2">' + siteField('Permissions', '<select id="dbPerm"><option value="rw">Read / write</option><option value="ro">Read only</option></select>')
+    + siteField('Password', '<input id="dbPw" placeholder="leave empty to generate one" autocomplete="off">', 'stored encrypted; shown once after creation') + '</div>'
+    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" id="dbGo">Create</button></div>');
+  bg.querySelector('#dbGo').onclick = async (e) => {
+    const btn = e.target; btn.disabled = true;
+    const body = { engine: val('dbEngine'), name: val('dbName'), user: val('dbUser'), permissions: val('dbPerm') };
+    const pw = val('dbPw'); if (pw) body.password = pw;
+    try {
+      const r = await siteApi('POST', siteUrl('/databases'), body);
+      sshModalClose();
+      toast('Created ' + r.name + ' (' + r.engine + ')', 'success', { detail: 'user: ' + r.user + '\npassword: ' + r.password + '\npermissions: ' + r.permissions + (r.grant_hosts ? '\ngranted from: ' + r.grant_hosts.join(', ') : ''), duration: 30000 });
+      siteSubReload('dbs');
+    } catch(err){ siteErr(err, 'Create database'); btn.disabled = false; }
+  };
+  function val(id){ const el = document.getElementById(id); return el ? el.value.trim() : ''; }
+}
+function siteDbDrop(btn, id, name){
+  armConfirm(btn, 'drop ' + name + '?', async () => {
+    try { const r = await siteApi('DELETE', siteUrl('/databases/' + id)); toast('Dropped ' + r.name, 'success'); siteSubReload('dbs'); }
+    catch(e){ siteErr(e, 'Drop'); }
+  });
+}
+async function siteDbAdopt(btn, engine, name){
+  if (btn) btn.disabled = true;
+  try { await siteApi('POST', siteUrl('/databases/adopt'), { engine, name }); toast('Now managed: ' + name, 'success'); siteSubReload('dbs'); }
+  catch(e){ siteErr(e, 'Adopt'); if (btn) btn.disabled = false; }
+}
+async function siteDbExport(btn, id){
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try { const r = await siteApi('POST', siteUrl('/databases/' + id + '/export')); toast('Exported ' + r.name + ' · ' + fmtMem(r.size), 'success', { detail: r.file, duration: 12000 }); siteSubReload('dbs'); }
+  catch(e){ siteErr(e, 'Export'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '⬇ Export'; } }
+}
+function siteDbImport(id, name){
+  const bg = sshModal('<h3>⬆ Import into ' + esc(name) + '</h3>'
+    + '<div class="box" style="border-color:#f8a30666"><b style="color:#f8a306">This runs the dump against an existing database.</b> Statements in the file are applied as they are — a dump that starts with DROP TABLE will drop those tables. Export first if you want a way back.</div>'
+    + siteField('Dump file', '<input type="file" id="dbFile" accept=".sql,.gz,.sql.gz">', 'plain .sql or gzipped .sql.gz — streamed straight into the client, never buffered on disk')
+    + '<div id="dbImpProg" class="dim" style="font-size:13px"></div>'
+    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" id="dbImpGo">Import</button></div>');
+  bg.querySelector('#dbImpGo').onclick = async (e) => {
+    const f = document.getElementById('dbFile');
+    const file = f && f.files && f.files[0];
+    if (!file) return toast('Pick a dump file first', 'warn');
+    const btn = e.target; btn.disabled = true;
+    document.getElementById('dbImpProg').textContent = 'Uploading ' + fmtMem(file.size) + '…';
+    try {
+      const r = await fetch(siteUrl('/databases/' + id + '/import'), { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Filename': file.name }, body: file });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw Object.assign(new Error(j.error || ('HTTP ' + r.status)), { detail: j.detail });
+      sshModalClose();
+      toast('Imported into ' + j.name + ' · ' + fmtMem(j.bytes) + ' read', 'success', j.output ? { detail: j.output, duration: 14000 } : {});
+      siteSubReload('dbs');
+    } catch(err){ siteErr(err, 'Import'); btn.disabled = false; }
+  };
+}
+function siteDbTools(id, name){
+  sshModal('<h3>🛠 ' + esc(name) + '</h3><div id="dbToolsBody"><p class="dim">Loading…</p></div>'
+    + '<div class="foot"><button class="btn pri" onclick="sshModalClose()">Close</button></div>');
+  siteApi('GET', siteUrl('/databases/' + id + '/tables')).then(d => {
+    const el = document.getElementById('dbToolsBody'); if (!el) return;
+    const acts = d.actions.map(a => '<button class="btn small" onclick="siteDbMaintain(this, ' + id + ', \'' + a + '\')">' + a + '</button>').join(' ');
+    const rows = d.tables.length
+      ? '<table class="upd-table"><thead><tr><th>Table</th><th>Rows</th><th>Size</th></tr></thead><tbody>'
+        + d.tables.map(t => '<tr><td class="mono">' + esc(t.name) + '</td><td>' + t.rows.toLocaleString() + '</td><td>' + esc(fmtMem(t.bytes)) + '</td></tr>').join('')
+        + '</tbody></table>'
+      : '<p class="dim">No tables.</p>';
+    el.innerHTML = '<div class="site-actions" style="margin-bottom:10px">' + acts + '</div>'
+      + '<div id="dbMaintOut" class="dim" style="font-size:12.5px;white-space:pre-wrap"></div>' + rows;
+  }).catch(e => { const el = document.getElementById('dbToolsBody'); if (el) el.innerHTML = '<p class="down">⚠ ' + esc(e.message) + '</p>'; });
+}
+async function siteDbMaintain(btn, id, action){
+  if (btn) btn.disabled = true;
+  const out = document.getElementById('dbMaintOut'); if (out) out.textContent = action + ' running…';
+  try { const r = await siteApi('POST', siteUrl('/databases/' + id + '/maintain/' + action)); if (out) out.textContent = (r.output || (action + ' done')).slice(0, 2000); toast(action + ' done', 'success'); }
+  catch(e){ if (out) out.textContent = ''; siteErr(e, action); }
+  finally { if (btn) btn.disabled = false; }
+}
+async function siteDbUserPerm(btn, dbId, uid, perms){
+  if (btn) btn.disabled = true;
+  try { await siteApi('PUT', siteUrl('/databases/' + dbId + '/users/' + uid), { permissions: perms }); toast('Permissions set to ' + (perms === 'ro' ? 'read only' : 'read/write'), 'success'); siteSubReload('dbs'); }
+  catch(e){ siteErr(e, 'Permissions'); if (btn) btn.disabled = false; }
+}
+async function siteDbUserReveal(dbId, uid){
+  try { const r = await siteApi('GET', siteUrl('/databases/' + dbId + '/users/' + uid + '/password')); toast('Password for ' + r.username, 'info', { detail: r.password, duration: 30000 }); }
+  catch(e){ siteErr(e); }
+}
+function siteDbUserRegen(btn, dbId, uid){
+  armConfirm(btn, 'new password?', async () => {
+    try { const r = await siteApi('PUT', siteUrl('/databases/' + dbId + '/users/' + uid), { regenerate: true }); toast('New password set', 'success', { detail: r.password, duration: 30000 }); siteSubReload('dbs'); }
+    catch(e){ siteErr(e, 'Password'); }
+  });
+}
+// MariaDB needs an admin credential; PostgreSQL does not (socket + ident mapping).
+function siteDbRootDialog(){
+  const bg = sshModal('<h3>🔑 Database root credentials</h3><div id="dbRootBody"><p class="dim">Checking…</p></div>'
+    + '<div class="foot"><button class="btn pri" onclick="sshModalClose()">Close</button></div>');
+  siteDbRootRender();
+}
+async function siteDbRootRender(){
+  const el = document.getElementById('dbRootBody'); if (!el) return;
+  let d; try { d = await siteApi('GET', 'api/db-servers'); } catch(e){ el.innerHTML = '<p class="down">⚠ ' + esc(e.message) + '</p>'; return; }
+  el.innerHTML = d.servers.map(v => {
+    const head = '<b>' + (v.engine === 'mariadb' ? 'MariaDB' : 'PostgreSQL') + '</b> <span class="dim">' + esc(v.admin_user) + '@' + esc(v.host) + (v.port ? ':' + v.port : '') + '</span>';
+    if (v.ok) return '<div class="db-root ok">' + head + '<br><span class="up">✅ ' + esc((v.version || '').slice(0, 70)) + '</span>'
+      + (v.has_password ? ' <button class="btn small" onclick="siteDbRootReveal(\'' + v.engine + '\')">👁 show stored password</button>' : ' <span class="dim">· no password needed</span>') + '</div>';
+    return '<div class="db-root bad">' + head + '<br><span class="down">⚠ ' + esc(v.error || 'unreachable') + '</span>'
+      + (v.detail ? '<div class="site-why">' + esc(v.detail) + '</div>' : '')
+      + (v.engine === 'mariadb' ? '<div class="site-actions"><button class="btn" onclick="siteDbRootImport(this)">Import from CloudPanel</button></div>'
+          + siteField('Or paste the MariaDB root password', '<div style="display:flex;gap:6px"><input id="dbRootPw" type="password" autocomplete="off" style="flex:1" placeholder="verified before it is stored"><button class="btn pri" onclick="siteDbRootSet(this, \'mariadb\')">Save</button></div>', 'stored encrypted; the panel tests it before keeping it') : '')
+      + '</div>';
+  }).join('');
+}
+async function siteDbRootImport(btn){
+  if (btn) btn.disabled = true;
+  try { const r = await siteApi('POST', 'api/db-servers/mariadb/import-cloudpanel'); toast('Imported and verified · ' + (r.version || '').slice(0, 40), 'success'); siteDbRootRender(); siteSubReload('dbs'); }
+  catch(e){ siteErr(e, 'Import'); if (btn) btn.disabled = false; }
+}
+async function siteDbRootSet(btn, engine){
+  const el = document.getElementById('dbRootPw');
+  const password = el && el.value;
+  if (!password) return toast('Paste the password first', 'warn');
+  if (btn) btn.disabled = true;
+  try { await siteApi('PUT', 'api/db-servers/' + engine, { password }); toast('Verified and stored', 'success'); siteDbRootRender(); siteSubReload('dbs'); }
+  catch(e){ siteErr(e, 'Credential'); if (btn) btn.disabled = false; }
+}
+async function siteDbRootReveal(engine){
+  try { const r = await siteApi('GET', 'api/db-servers/' + engine + '/password'); toast('Stored password for ' + r.admin_user, 'info', { detail: r.password, duration: 30000 }); }
+  catch(e){ siteErr(e); }
 }
 
 /* ---- SSL/TLS ---- */

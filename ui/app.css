@@ -168,6 +168,12 @@
   .site-health { display:flex; flex-direction:column; gap:8px; align-items:flex-start; }
   .site-probe { margin:0; padding-left:18px; font-size:14px; color:#9ca3af; line-height:1.7; }
   .site-probe b { color:#e9e9e9; }
+  /* per-site Databases tab */
+  .db-srv { font-size:13px; color:#9ca3af; padding:5px 0; }
+  .db-srv .up { color:#5cdd8b; } .db-srv .down { color:#ff8088; }
+  .db-user { display:flex; align-items:center; gap:6px; padding:2px 0; font-size:12.5px; flex-wrap:wrap; }
+  .db-root { padding:10px 0; border-bottom:1px solid #2a2f40; font-size:13.5px; }
+  .db-root:last-child { border-bottom:none; }
   /* per-site Cloudflare tab */
   .site-cf-src { font-size:14.5px; color:#9ca3af; margin-bottom:12px; display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
   .site-cf-detail { background:#12151f; border-radius:8px; padding:10px 12px; font-size:13px; color:#9ca3af; white-space:pre-wrap; margin:10px 0; max-height:280px; overflow:auto; }
