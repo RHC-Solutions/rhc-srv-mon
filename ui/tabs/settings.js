@@ -115,9 +115,10 @@ async function testChannel(which){
   toast('Testing ' + which + '…');
   try {
     const r = await stApi('POST', 'api/settings/' + which + '/test', body);
-    toast(which === 'cloudflare'
-      ? 'Token ' + r.status + (r.kind === 'account' ? ' (account-owned)' : '') + (r.saved ? '' : ' (not saved yet — press Save to keep it)') + ' · ' + r.zones + ' zone' + (r.zones === 1 ? '' : 's') + (r.zoneNames && r.zoneNames.length ? ': ' + r.zoneNames.join(', ') : '')
-      : 'Test message sent — check ' + which, 'success', Object.assign({ duration: 9000 }, which === 'cloudflare' && r.note ? { detail: r.note } : {}));
+    const cfMsg = 'Token ' + r.status + (r.kind === 'account' ? ' (account-owned' + (r.account ? ', ' + r.account.name : '') + ')' : '') + (r.saved ? '' : ' (not saved yet — press Save to keep it)') + ' · ' + r.zones + ' zone' + (r.zones === 1 ? '' : 's') + (r.zoneNames && r.zoneNames.length ? ': ' + r.zoneNames.join(', ') : '');
+    toast(which === 'cloudflare' ? cfMsg : 'Test message sent — check ' + which,
+      which === 'cloudflare' && r.warning ? 'warn' : 'success',
+      Object.assign({ duration: 9000 }, which === 'cloudflare' && (r.warning || r.note) ? { detail: [r.warning, r.note].filter(Boolean).join('\n\n'), duration: 14000 } : {}));
   } catch(e){ stErr(e, which); }
 }
 
