@@ -641,7 +641,11 @@ async function sshRenderInstalls(){
     try { const d = await fetch('api/ssh/install/' + j.id).then(r => r.json()); if (d && d.log) sshJobLogs.set(j.id, d.log); } catch(e){}
   }));
   box.innerHTML = jobs.map(j => {
-    const st = j.status === 'running' ? '<span class="upd-badge new">⏳ running' + (j.step ? ' · ' + esc(j.step) : '') + '</span>' : j.status === 'ok' ? '<span class="upd-badge ok">✅ installed</span>' : '<span class="upd-badge err">❌ failed</span>';
+    // 'interrupted' is not a failure: the panel restarted mid-install and the outcome is unknown.
+    const st = j.status === 'running' ? '<span class="upd-badge new">⏳ running' + (j.step ? ' · ' + esc(j.step) : '') + '</span>'
+      : j.status === 'ok' ? '<span class="upd-badge ok">✅ installed</span>'
+      : j.status === 'interrupted' ? '<span class="upd-badge na" title="The panel restarted while this install was running — it may or may not have completed on the remote host.">⚠ interrupted</span>'
+      : '<span class="upd-badge err">❌ failed</span>';
     const log = sshJobLogs.get(j.id);
     const open = j.status === 'running' || window._sshOpenJob === j.id;
     return '<div class="ssh-inst"><div class="top"><b>' + (j.kind === 'vnc' ? '🖵' : '📦') + ' ' + esc(j.hostName || j.target) + '</b>' + st + '</div>'

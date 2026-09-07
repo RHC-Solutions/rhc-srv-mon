@@ -397,6 +397,16 @@ const section = (s) => console.log('\n### ' + s);
   await check('GET /api/ssh/sessions/:id unknown → 404', async () => eq((await req('GET', '/api/ssh/sessions/aaaaaaaaaaaa')).status, 404));
 
   /* ------------------------------------------------------- remote desktops */
+  await check('clearing the install history removes entries a restart froze as "running"', async () => {
+    const before = (await req('GET', '/api/ssh')).json.installs || [];
+    const r = await req('DELETE', '/api/ssh/installs');
+    eq(r.status, 200); ok(typeof r.json.removed === 'number' && typeof r.json.kept === 'number', 'shape');
+    const after = ((await req('GET', '/api/ssh')).json.installs || []);
+    ok(!after.some((j) => j.status !== 'running'), 'a finished/interrupted entry survived the clear: ' + after.map((j) => j.id + ':' + j.status).join(', '));
+    ok(r.json.removed <= before.length, 'removed ' + r.json.removed + ' of ' + before.length + ' — the count is inflated');
+    return 'removed ' + r.json.removed + ', kept ' + r.json.kept;
+  });
+
   section('remote desktops (vnc / rdp)');
   let vncHost = null, rdpHost = null;
   await check('a host can be created as VNC and hides its password', async () => {
