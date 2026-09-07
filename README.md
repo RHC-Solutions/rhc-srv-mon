@@ -45,6 +45,15 @@ read from `/proc/<pid>/exe`. `site_nodejs.node_version` is CloudPanel bookkeepin
 started from an SSH user's login shell runs the system node no matter what the site user's nvm holds. A binary shown
 as `(deleted)` is a process still mapping an inode that was replaced by a node upgrade — it needs a restart.
 
+**Cloudflare is per site, not per panel.** These domains are spread over several Cloudflare accounts, and an
+account-owned (`cfat_`) token is bound to its own account — no permission change lets it see a zone belonging to
+another one. So each site can hold its own token (encrypted, `site_cloudflare`), and a site without one falls back to
+the account-wide token from Settings. The tab shows the resolved zone and account, the apex/www records with their
+proxy state, whether the A record actually points at this server, and offers "point here" (proxied or DNS-only) plus a
+per-record proxy toggle. Connecting refuses a token that cannot see the domain's zone and says so in terms of the
+likely cause — a wrong account rather than a missing permission — and a token that lists zones but cannot read their
+records is told which row to tick (`DNS`, not the similarly-named `Zone DNS Settings`).
+
 Per-site tabs: Settings (root dir, site-user password + authorized_keys, PHP version/limits or Node version/port), **Processes**
 (the site's PM2 apps with start / restart / stop, and `pm2 resurrect` for a daemon that is down — a site's apps usually run
 under one of its SSH users, discovered through the `htdocs` symlink, and when that user's daemon is dead the apps are only

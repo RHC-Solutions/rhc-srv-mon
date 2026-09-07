@@ -2,7 +2,7 @@
 // List (cards with health) → detail with CloudPanel-style sub-tabs. Sub-navigation lives in the
 // query string (sites?d=<domain>&t=<tab>) so every relative api/ URL keeps working behind nginx.
 let lastSites = null;
-const SITE_TABS = [['settings', 'Settings'], ['procs', 'Processes'], ['vhost', 'Vhost'], ['databases', 'Databases'], ['ssl', 'SSL/TLS'], ['security', 'Security'], ['ssh', 'SSH/FTP'], ['files', 'File Manager'], ['cron', 'Cron Jobs'], ['logs', 'Logs']];
+const SITE_TABS = [['settings', 'Settings'], ['procs', 'Processes'], ['vhost', 'Vhost'], ['databases', 'Databases'], ['ssl', 'SSL/TLS'], ['cloudflare', 'Cloudflare'], ['security', 'Security'], ['ssh', 'SSH/FTP'], ['files', 'File Manager'], ['cron', 'Cron Jobs'], ['logs', 'Logs']];
 let siteView = { domain: null, tab: 'settings', data: null, loading: false, sub: {} };   // sub: per-tab fetched data
 let siteQ = state.siteQ || '';
 let siteViewMode = state.siteViewMode || 'cards';      // cards | table
@@ -187,7 +187,7 @@ function renderSiteDetail(){
   // do not clobber a form the user is typing in (10 s refresh)
   if (view.contains(document.activeElement) && ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;
   const s = siteView.data;
-  const body = ({ settings: siteTabSettings, procs: siteTabProcs, vhost: siteTabVhost, databases: siteTabDatabases, ssl: siteTabSsl, security: siteTabSecurity, ssh: siteTabSsh, files: siteTabFiles, cron: siteTabCron, logs: siteTabLogs }[siteView.tab] || siteTabSettings)(s);
+  const body = ({ settings: siteTabSettings, procs: siteTabProcs, vhost: siteTabVhost, databases: siteTabDatabases, ssl: siteTabSsl, cloudflare: siteTabCf, security: siteTabSecurity, ssh: siteTabSsh, files: siteTabFiles, cron: siteTabCron, logs: siteTabLogs }[siteView.tab] || siteTabSettings)(s);
   view.innerHTML = siteHeader(s) + '<div class="site-body">' + body + '</div>';
   if (typeof siteView.afterRender === 'function') { const f = siteView.afterRender; siteView.afterRender = null; f(); }
 }
@@ -254,6 +254,87 @@ async function siteRecheck(btn){
   try { await siteApi('POST', 'api/sites/check'); siteView.data = null; siteSubReload('procs'); toast('Re-checked', 'success'); }
   catch(e){ siteErr(e, 'Re-check'); }
   finally { if (btn) btn.disabled = false; }
+}
+
+/* ---- Cloudflare ---- */
+// One site, one Cloudflare credential. Domains here live in different Cloudflare accounts and an
+// account-owned token cannot see outside its own account, so the token belongs to the site; a site
+// with none falls back to the account-wide token from the Settings tab.
+function siteTabCf(s){
+  return siteSub('cf', siteUrl('/cloudflare'), (d) => {
+    const src = d.source === 'site' ? '<span class="badge online">this site\'s own token</span>'
+      : d.source === 'account' ? '<span class="badge type">account-wide token (Settings)</span>'
+      : '<span class="badge down">not connected</span>';
+    let head = '<div class="site-cf-src">Credential: ' + src
+      + (d.stored && d.stored.account_name ? ' <span class="dim">· account ' + esc(d.stored.account_name) + '</span>' : '')
+      + (d.stored && d.stored.checked_at ? ' <span class="dim">· checked ' + esc(new Date(d.stored.checked_at).toLocaleString()) + '</span>' : '') + '</div>';
+
+    if (!d.source) {
+      return siteCard('Cloudflare', head
+        + '<p class="dim">This site has no Cloudflare credential, and no account-wide token is configured in Settings. '
+        + 'Connect a token created in the Cloudflare account that holds <b>' + esc(s.domain) + '</b>.</p>'
+        + siteCfConnectForm(s));
+    }
+    if (d.error) {
+      return siteCard('Cloudflare', head
+        + '<div class="site-why">' + esc(d.error) + '</div>'
+        + (d.errorDetail ? '<pre class="site-cf-detail">' + esc(d.errorDetail) + '</pre>' : '')
+        + siteCfConnectForm(s), d.hasOwnToken ? '<button class="btn small danger" onclick="siteCfDisconnect(this)">Disconnect</button>' : '');
+    }
+    const ip = d.serverIp;
+    const rows = (list, label) => list.map(r => '<tr><td class="mono">' + esc(r.name) + '</td><td>' + esc(r.type) + '</td><td class="mono">' + esc(r.content) + '</td>'
+      + '<td>' + (r.proxied ? '<span class="up">🟠 proxied</span>' : '<span class="dim">DNS only</span>') + '</td>'
+      + '<td style="text-align:right;white-space:nowrap"><button class="btn small" onclick="siteCfProxy(this, \'' + esc(r.id) + '\', ' + (r.proxied ? 'false' : 'true') + ')">' + (r.proxied ? 'Unproxy' : 'Proxy') + '</button></td></tr>').join('')
+      || '<tr><td colspan="5" class="dim">no ' + label + ' record</td></tr>';
+
+    const zone = d.zone;
+    let body = head
+      + '<div class="row3">'
+      + siteField('Zone', '<input value="' + esc(zone.name) + '" disabled>', 'status ' + esc(zone.status) + (zone.paused ? ' · paused' : '') + (zone.plan ? ' · ' + esc(zone.plan) : ''))
+      + siteField('Cloudflare account', '<input value="' + esc((d.account && d.account.name) || '?') + '" disabled>')
+      + siteField('This server', '<input value="' + esc(ip || '?') + '" disabled>', d.points_here ? '<span class="up">the apex A record points here</span>' : '<span style="color:#f8a306">the apex A record does not point here</span>')
+      + '</div>'
+      + '<table class="upd-table"><thead><tr><th>Name</th><th>Type</th><th>Content</th><th>Proxy</th><th></th></tr></thead><tbody>'
+      + rows(d.records, 'apex') + rows(d.www, 'www') + '</tbody></table>'
+      + '<div class="site-actions"><button class="btn" onclick="siteCfPointHere(this, true)" title="Create or update the apex A record to this server, proxied">Point ' + esc(s.domain) + ' here (proxied)</button>'
+      + '<button class="btn" onclick="siteCfPointHere(this, false)" title="Same, but DNS-only (grey cloud)">Point here (DNS only)</button></div>';
+    if (!d.hasOwnToken) body += '<div class="site-cf-alt"><p class="dim">This site is using the account-wide token. If ' + esc(s.domain) + ' ever moves to another Cloudflare account, connect a token of its own here.</p>' + siteCfConnectForm(s) + '</div>';
+    return siteCard('Cloudflare', body, d.hasOwnToken ? '<button class="btn small danger" onclick="siteCfDisconnect(this)">Disconnect</button>' : '');
+  });
+}
+function siteCfConnectForm(s){
+  return '<div class="site-cf-connect">' + siteField('API token for this site',
+    '<div style="display:flex;gap:6px"><input id="stCfToken" type="password" placeholder="paste a token from the account that owns ' + esc(s.domain) + '" style="flex:1" autocomplete="off"><button class="btn pri" onclick="siteCfConnect(this)">Connect</button></div>',
+    'Needs <b>Zone → Zone → Read</b> and <b>Zone → DNS → Edit</b>, scoped to this zone. Leave Client IP Filtering empty. Stored encrypted.') + '</div>';
+}
+async function siteCfConnect(btn){
+  const el = document.getElementById('stCfToken');
+  const token = el && el.value.trim();
+  if (!token) return toast('Paste a token first', 'warn');
+  if (btn) btn.disabled = true;
+  try { const r = await siteApi('PUT', siteUrl('/cloudflare'), { token }); toast('Connected · zone ' + r.zone.name + (r.account ? ' · account ' + r.account.name : ''), 'success'); siteSubReload('cf'); }
+  catch(e){ siteErr(e, 'Cloudflare'); }
+  finally { if (btn) btn.disabled = false; }
+}
+function siteCfDisconnect(btn){
+  armConfirm(btn, 'remove token?', async () => {
+    try { await siteApi('DELETE', siteUrl('/cloudflare')); toast('Token removed', 'success'); siteSubReload('cf'); }
+    catch(e){ siteErr(e, 'Cloudflare'); }
+  });
+}
+async function siteCfProxy(btn, id, proxied){
+  if (btn) btn.disabled = true;
+  try { await siteApi('POST', siteUrl('/cloudflare/records/' + encodeURIComponent(id) + '/proxy'), { proxied }); toast(proxied ? 'Proxy enabled' : 'Proxy disabled', 'success'); siteSubReload('cf'); }
+  catch(e){ siteErr(e, 'Cloudflare'); }
+  finally { if (btn) btn.disabled = false; }
+}
+function siteCfPointHere(btn, proxied){
+  armConfirm(btn, 'change DNS?', async () => {
+    try { const r = await siteApi('POST', siteUrl('/cloudflare/point-here'), { proxied });
+      toast('DNS updated · ' + r.changes.map(c => c.action).join(', '), 'success', { detail: r.changes.map(c => c.action + (c.from ? ' ' + c.from + ' → ' + c.to : c.to ? ' ' + c.to : '') + (c.note ? ' — ' + c.note : '')).join('\n'), duration: 12000 });
+      siteSubReload('cf'); }
+    catch(e){ siteErr(e, 'Cloudflare'); }
+  });
 }
 
 /* ---- Settings ---- */

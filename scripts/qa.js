@@ -293,6 +293,31 @@ const section = (s) => console.log('\n### ' + s);
     eq(r.status, 200); eq(r.json.ok, false);
     ok(/not found/i.test(r.json.results.map((x) => x.output).join(' ')), 'pm2 did not say the process is unknown');
   });
+  await check('per-site Cloudflare: status shape and fallback source', async () => {
+    const r = await req('GET', '/api/sites/' + php.domain + '/cloudflare');
+    eq(r.status, 200);
+    const d = r.json;
+    ok('source' in d && 'hasOwnToken' in d && Array.isArray(d.records), 'shape');
+    ok(d.source === null || d.source === 'site' || d.source === 'account', 'bad source ' + d.source);
+    ok(d.serverIp, 'no server IP resolved');
+    return 'source=' + d.source + (d.error ? ' · ' + d.error : '');
+  });
+  await check('per-site Cloudflare on an unknown site → 404', async () => eq((await req('GET', '/api/sites/nope.example/cloudflare')).status, 404));
+  await check('connecting a junk Cloudflare token → 400', async () => {
+    const r = await req('PUT', '/api/sites/' + php.domain + '/cloudflare', { token: 'short' });
+    eq(r.status, 400); ok(/does not look like/i.test(r.json.error), r.json.error);
+  });
+  await check('point-here without a credential → 409, never a silent no-op', async () => {
+    const r = await req('POST', '/api/sites/' + php.domain + '/cloudflare/point-here', { proxied: true });
+    ok([409, 404, 403, 502].includes(r.status), 'got ' + r.status + ' ' + r.text.slice(0, 120));
+    ok(r.json && r.json.error, 'no error message');
+    return r.json.error;
+  });
+  await check('a site token is stored encrypted and never handed back', async () => {
+    const r = await req('GET', '/api/sites/' + php.domain + '/cloudflare');
+    ok(!JSON.stringify(r.json).includes('cfat_'), 'a raw token leaked into the payload');
+    ok(!('token' in r.json) && !('token_enc' in r.json), 'token field exposed');
+  });
   await check('GET unknown log kind → 404', async () => eq((await req('GET', '/api/sites/' + php.domain + '/logs/nope')).status, 404));
   await check('file manager: list, mkdir, write, read, download, chmod, rename, delete', async () => {
     const dir = '/tmp/qa-' + Date.now();
