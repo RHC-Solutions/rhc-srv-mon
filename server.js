@@ -6,7 +6,7 @@
  * lib/page.js). This file wires the HTTP dispatcher, the WebSocket upgrade for the SSH terminal,
  * and the boot sequence (state loading + background jobs). Zero npm dependencies.
  *
- * Binds to 127.0.0.1 only; exposed via nginx at /rhc-srv-mon/ (in-app login + TOTP).
+ * Binds to 127.0.0.1 only; exposed via nginx at /rhc-admin/ (in-app login + TOTP).
  */
 'use strict';
 const http = require('http');

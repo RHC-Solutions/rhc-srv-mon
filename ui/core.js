@@ -75,7 +75,7 @@ function sshModal(html){
 function sshModalClose(){ const m = document.getElementById('ssh-modal'); if (m) m.remove(); }
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.getElementById('ssh-modal')) sshModalClose(); });
 function sshField(label, inner, hint){ return '<div class="upd-field"><label>' + label + '</label>' + inner + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</div>'; }
-// Each tab has its own URL (…/rhc-srv-mon/ssh, …/postgres, …). Slugs are single path
+// Each tab has its own URL (…/rhc-admin/ssh, …/postgres, …). Slugs are single path
 // segments so every relative URL in this page (api/…, login, ws/ssh) keeps resolving.
 // Compact status pills on the subtitle line (right side). items: [{ level: ok|warn|bad|info, text, sub }].
 // Green/amber states never use the big banner any more; call showBanner() only for real outages.

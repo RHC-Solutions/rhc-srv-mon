@@ -1,7 +1,7 @@
 # rhc-srv-mon
 
 Zero-dependency Node.js (>= 22) server-management panel, on the road to replacing CloudPanel on this host.
-Runs as root under pm2 (`rhc-srv-mon`, cwd `/root`), binds 127.0.0.1:8899, exposed by nginx at `/rhc-srv-mon/`.
+Runs as root under pm2 (`rhc-srv-mon`, cwd `/root`), binds 127.0.0.1:8899, exposed by nginx at `/rhc-admin/`.
 
 ## Layout
 
@@ -21,6 +21,16 @@ Runs as root under pm2 (`rhc-srv-mon`, cwd `/root`), binds 127.0.0.1:8899, expos
 - `rhc.sqlite` (node:sqlite, WAL) holds the event log and key/value settings; schema changes are numbered migrations in
   `lib/migrations/` applied at boot. `secret.key` (AES-256-GCM, 0600) encrypts stored credentials — it is excluded from
   git *and* from the config backup on purpose: **back it up out of band**, a restored DB without it cannot decrypt anything.
+
+## The panel's URL
+
+Served at **`https://<panel host>/rhc-admin/`** by the `location ^~ /rhc-admin/` block in
+`/etc/nginx/sites-enabled/custom-domain.conf` (proxy to `127.0.0.1:8899`, WebSocket upgrade, 24 h read timeout).
+The former `/rhc-srv-mon/` prefix 301-redirects to it, path preserved, so old bookmarks and deep links keep working.
+
+Nothing in the app hardcodes the prefix — every API call is a relative `api/…` URL and tab slugs are single path
+segments — so moving the panel is an nginx-only change. `custom-domain.conf` is CloudPanel's file: if CLP ever
+regenerates it the block is lost, and a copy of the working config is kept in `/var/lib/rhc-srv-mon/`.
 
 ## Sites tab (CloudPanel replacement, phase 1)
 
