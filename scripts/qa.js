@@ -322,10 +322,26 @@ const section = (s) => console.log('\n### ' + s);
     return r.json.servers.map((v) => v.engine + (v.ok ? ' ok' : ' unreachable')).join(', ');
   });
   await check('an admin credential is verified before it is stored', async () => {
+    // The invariant is that a rejected password changes nothing — not that no password exists, since
+    // a working one may legitimately be stored already.
+    const before = (await req('GET', '/api/db-servers')).json.servers.find((v) => v.engine === 'mariadb');
     const r = await req('PUT', '/api/db-servers/mariadb', { password: 'definitely-not-the-root-password' });
     ok(r.status >= 400, 'a wrong password was accepted (' + r.status + ')');
     const after = (await req('GET', '/api/db-servers')).json.servers.find((v) => v.engine === 'mariadb');
-    ok(!after.has_password, 'a rejected password got stored anyway');
+    eq(after.has_password, before.has_password, 'the stored credential changed after a rejected password:');
+    return before.has_password ? 'existing credential left intact' : 'nothing stored, as expected';
+  });
+  await check('a stopped engine is reported as stopped, not as a bad password', async () => {
+    const r = (await req('GET', '/api/db-servers')).json.servers.find((v) => v.engine === 'mariadb');
+    if (r.ok) return 'skip';
+    ok(r.service && r.service.unit, 'no service state reported');
+    if (r.service.active !== 'active') {
+      ok(r.stopped === true, 'service is ' + r.service.active + ' but the panel did not say stopped: ' + r.error);
+      ok(/not running/i.test(r.error), 'error does not mention the service: ' + r.error);
+      ok(/systemctl/.test(r.detail || ''), 'no start command offered');
+      return r.error;
+    }
+    return 'engine is running; nothing to assert';
   });
   await check('full postgres lifecycle: create → write → export → import → drop', async () => {
     const probe = (await req('GET', '/api/db-servers')).json.servers.find((v) => v.engine === 'postgres');

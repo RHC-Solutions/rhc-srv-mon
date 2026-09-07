@@ -42,6 +42,19 @@ over the unix socket first and TCP second, because a Debian default gives unix r
 with no password while CloudPanel switches root to a password over TCP, and the two are different
 accounts (`root@localhost` vs `root@127.0.0.1`).
 
+**MariaDB is disabled on this host** — nothing uses it (its datadir holds only `mysql`,
+`performance_schema`, `sys`, `test`; CloudPanel's `database` table is empty; every site's config points at
+SQLite or PostgreSQL). The panel therefore reports it as *stopped* rather than as a credential failure, naming the
+unit and the command to start it, and **creating a MySQL database starts and enables the service on demand** so the
+first site that needs one is not blocked.
+
+Root authentication was reset because nobody held the password — not with `--skip-grant-tables`, which drops
+authentication server-wide for the length of the window, but with `--init-file` through the unit's own
+`$MYSQLD_OPTS` (a temporary systemd drop-in, removed in a `finally` so it cannot survive a failure and re-run at
+boot). root now has **`unix_socket` OR a generated password**: the panel, running as root, needs no stored
+credential at all — the same arrangement PostgreSQL has — while TCP clients can still use the password, which is
+verified before being stored encrypted.
+
 New grants are made for `localhost` and `127.0.0.1`, never `%` — MariaDB on this host was listening on
 `0.0.0.0:3306`, so a `%` grant would have been reachable from outside. `/etc/mysql/mariadb.conf.d/150-rhc-srv-mon.cnf`
 sets `bind-address = 127.0.0.1` (numbered above CloudPanel's own file so it wins) and applies at the

@@ -556,7 +556,7 @@ function siteDbAddDialog(){
     try {
       const r = await siteApi('POST', siteUrl('/databases'), body);
       sshModalClose();
-      toast('Created ' + r.name + ' (' + r.engine + ')', 'success', { detail: 'user: ' + r.user + '\npassword: ' + r.password + '\npermissions: ' + r.permissions + (r.grant_hosts ? '\ngranted from: ' + r.grant_hosts.join(', ') : ''), duration: 30000 });
+      toast('Created ' + r.name + ' (' + r.engine + ')' + (r.started ? ' · started ' + r.started.started : ''), 'success', { detail: 'user: ' + r.user + '\npassword: ' + r.password + '\npermissions: ' + r.permissions + (r.grant_hosts ? '\ngranted from: ' + r.grant_hosts.join(', ') : '') + (r.started ? '\n\n' + r.started.started + ' was ' + r.started.was + ' and has been enabled and started for this database.' : ''), duration: 30000 });
       siteSubReload('dbs');
     } catch(err){ siteErr(err, 'Create database'); btn.disabled = false; }
   };
