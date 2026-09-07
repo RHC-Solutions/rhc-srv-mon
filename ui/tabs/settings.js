@@ -54,15 +54,20 @@ function renderSettings(){
   else if (!cfDomains) { html += '<p class="dim">Loading zones…</p>'; if (!cfDomainsLoading) loadCfDomains(); }
   else if (cfDomains.error) html += '<p style="color:#ff8088">⚠ ' + esc(cfDomains.error) + '</p>';
   else {
+    // One cryptic Cloudflare code repeated down every row explains nothing — say it once, in words.
+    const authFails = cfDomains.sites.filter(x => x.error && /\[10000\]/.test(x.error)).length;
+    if (authFails) html += '<div class="site-why">The token can list your zones but not read their DNS records, so every row below fails with Cloudflare\'s <span class="mono">[10000] Authentication error</span>. '
+      + 'It is missing one permission: in the Cloudflare dashboard edit this token and tick the row literally called <b>DNS</b> (“Grants read access to DNS”) → <b>Edit</b>. '
+      + 'Note that <b>Zone DNS Settings</b> is a different permission and does not grant access to records.</div>';
     html += '<table class="upd-table"><tr><th>Site</th><th>Zone</th><th>DNS</th><th>Proxied</th><th>Points here</th><th>www</th></tr>';
     for (const s of cfDomains.sites) {
-      html += '<tr><td><b>' + esc(s.domain) + '</b></td><td>' + (s.zone ? esc(s.zone) + (s.zone_status !== 'active' ? ' <span class="dim">(' + esc(s.zone_status) + ')</span>' : '') : '<span class="dim">not in Cloudflare</span>') + '</td>'
+      html += '<tr><td><b>' + esc(s.domain) + '</b></td><td>' + (s.zone ? esc(s.zone) + (s.zone_status && s.zone_status !== 'active' ? ' <span class="dim">(' + esc(s.zone_status) + ')</span>' : '') : '<span class="dim">not in Cloudflare</span>') + '</td>'
         + '<td class="mono">' + (s.records ? (s.records.length ? s.records.map(r => esc(r.type + ' ' + r.content)).join('<br>') : '<span style="color:#f8a306">no record</span>') : (s.error ? '<span style="color:#ff8088">' + esc(s.error) + '</span>' : '')) + '</td>'
         + '<td>' + (s.proxied == null ? '' : s.proxied ? '☁️ yes' : 'no (DNS only)') + '</td>'
         + '<td>' + (s.records ? (s.points_here ? '✅' : s.proxied ? '<span class="dim">via Cloudflare</span>' : '<span style="color:#f8a306">✗</span>') : '') + '</td>'
         + '<td class="mono dim">' + (s.www ? (s.www.length ? s.www.map(r => esc(r.type + ' ' + r.content)).join('<br>') : '–') : '') + '</td></tr>';
     }
-    html += '</table><div class="dim" style="font-size:14px;margin-top:8px">Zones in this account: ' + cfDomains.zones.map(z => esc(z.name) + (z.status !== 'active' ? ' (' + esc(z.status) + ')' : '')).join(', ') + '</div>';
+    html += '</table><div class="dim" style="font-size:14px;margin-top:8px">Zones this token can see: ' + cfDomains.zones.map(z => esc(z.name) + (z.status !== 'active' ? ' (' + esc(z.status) + ')' : '')).join(', ') + '</div>';
   }
   html += '</div>';
   // Cleanup (moved from Modules)
