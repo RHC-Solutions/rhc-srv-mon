@@ -36,7 +36,7 @@ async function authMfaReset(){
     const d = await authPost('api/auth/mfa/reset', { password: v('am-pw'), code: v('am-code').trim() });
     let qr = '';
     try { await authQrLib(); const q = qrcode(0, 'M'); q.addData(d.uri); q.make(); qr = q.createImgTag(4, 6); } catch(e){}
-    document.getElementById('am-enrol').innerHTML = '<div style="display:flex;gap:14px;align-items:center;margin-bottom:10px"><div style="background:#fff;padding:6px;border-radius:8px;line-height:0">' + qr + '</div><div style="flex:1;min-width:0"><div class="hint" style="font-size:12px;color:#9ca3af">Scan with the new authenticator, or enter the secret:</div><div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break:break-all;background:#12141d;border-radius:6px;padding:6px 8px;margin:6px 0">' + esc(d.secret.replace(/(.{4})/g, '$1 ').trim()) + '</div>'
+    document.getElementById('am-enrol').innerHTML = '<div style="display:flex;gap:14px;align-items:center;margin-bottom:10px"><div style="background:#fff;padding:6px;border-radius:8px;line-height:0">' + qr + '</div><div style="flex:1;min-width:0"><div class="hint" style="font-size:14px;color:#9ca3af">Scan with the new authenticator, or enter the secret:</div><div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;word-break:break-all;background:#12141d;border-radius:6px;padding:6px 8px;margin:6px 0">' + esc(d.secret.replace(/(.{4})/g, '$1 ').trim()) + '</div>'
       + sshField('Code from the NEW app', '<input id="am-new" inputmode="numeric" maxlength="6" autocomplete="one-time-code">') + '<button class="btn pri" onclick="authMfaConfirm()">Confirm new authenticator</button></div></div>';
     document.getElementById('am-new').focus();
   } catch(e){ toast(e.message, 'error'); }

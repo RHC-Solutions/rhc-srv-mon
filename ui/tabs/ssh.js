@@ -426,10 +426,10 @@ function sshSettingsDialog(){
     + '<div class="row2">' + sshField('Font', '<select id="stp-font" onchange="document.getElementById(\'stp-font-custom\').value=\'\';sshPrefLive()">' + fontOpts + '</select>') + sshField('Custom font (CSS font-family)', '<input id="stp-font-custom" value="' + esc(custom) + '" placeholder="e.g. &quot;Cascadia Code&quot;, monospace" oninput="sshPrefLive()">', 'must be installed on your PC') + '</div>'
     + '<div class="row3">' + sshField('Font size', '<input id="stp-size" type="number" min="8" max="32" value="' + p.fontSize + '" oninput="sshPrefLive()">') + sshField('Cursor', sel('stp-cursor', [['block','Block'],['underline','Underline'],['bar','Bar']], p.cursorStyle)) + sshField('Cursor blink', sel('stp-blink', [['1','On'],['0','Off']], p.cursorBlink ? '1' : '0')) + '</div>'
     + '<div class="row3">' + sshField('Color theme', '<select id="stp-theme" onchange="sshPrefLive()">' + themeOpts + '</select>')
-    + sshField('Background', '<div style="display:flex;gap:8px;align-items:center"><input id="stp-bg" type="color" value="' + esc(p.bg || th.background) + '" oninput="document.getElementById(\'stp-bg-on\').checked=true;sshPrefLive()" style="width:44px;padding:0;height:30px"><label style="font-size:12px;display:flex;gap:4px;align-items:center"><input type="checkbox" id="stp-bg-on"' + (p.bg?' checked':'') + ' onchange="sshPrefLive()"> override</label></div>')
-    + sshField('Text', '<div style="display:flex;gap:8px;align-items:center"><input id="stp-fg" type="color" value="' + esc(p.fg || th.foreground) + '" oninput="document.getElementById(\'stp-fg-on\').checked=true;sshPrefLive()" style="width:44px;padding:0;height:30px"><label style="font-size:12px;display:flex;gap:4px;align-items:center"><input type="checkbox" id="stp-fg-on"' + (p.fg?' checked':'') + ' onchange="sshPrefLive()"> override</label></div>') + '</div>'
+    + sshField('Background', '<div style="display:flex;gap:8px;align-items:center"><input id="stp-bg" type="color" value="' + esc(p.bg || th.background) + '" oninput="document.getElementById(\'stp-bg-on\').checked=true;sshPrefLive()" style="width:44px;padding:0;height:30px"><label style="font-size:14px;display:flex;gap:4px;align-items:center"><input type="checkbox" id="stp-bg-on"' + (p.bg?' checked':'') + ' onchange="sshPrefLive()"> override</label></div>')
+    + sshField('Text', '<div style="display:flex;gap:8px;align-items:center"><input id="stp-fg" type="color" value="' + esc(p.fg || th.foreground) + '" oninput="document.getElementById(\'stp-fg-on\').checked=true;sshPrefLive()" style="width:44px;padding:0;height:30px"><label style="font-size:14px;display:flex;gap:4px;align-items:center"><input type="checkbox" id="stp-fg-on"' + (p.fg?' checked':'') + ' onchange="sshPrefLive()"> override</label></div>') + '</div>'
     + sshField('Ctrl+Z', sel('stp-ctrlz', [['ignore','Windows style — does nothing (never suspends the remote program)'],['suspend','Unix style — sends ^Z (suspend; resume with fg)']], p.ctrlZ))
-    + '<div class="box" style="font-size:12px;line-height:1.6"><b>Keys</b> · Ctrl+C: copy when text is selected, otherwise ^C to the remote · Ctrl+V: paste text, or upload a file / screenshot from the clipboard · Ctrl+Shift+C / Ctrl+Shift+V: always copy / paste · Ctrl+Insert / Shift+Insert: copy / paste · Ctrl+Shift+W: close tab · right-click: paste<br><b>Files</b> · drag &amp; drop onto the terminal or Ctrl+V → uploaded to <code>~/rhc-uploads/</code> on the remote host, path typed into the terminal (e.g. for Claude Code).</div>'
+    + '<div class="box" style="font-size:14px;line-height:1.6"><b>Keys</b> · Ctrl+C: copy when text is selected, otherwise ^C to the remote · Ctrl+V: paste text, or upload a file / screenshot from the clipboard · Ctrl+Shift+C / Ctrl+Shift+V: always copy / paste · Ctrl+Insert / Shift+Insert: copy / paste · Ctrl+Shift+W: close tab · right-click: paste<br><b>Files</b> · drag &amp; drop onto the terminal or Ctrl+V → uploaded to <code>~/rhc-uploads/</code> on the remote host, path typed into the terminal (e.g. for Claude Code).</div>'
     + '<div class="foot"><div class="left"><button class="btn" onclick="try{localStorage.removeItem(\'' + SSH_PREF_KEY + '\')}catch(e){};sshApplyPrefs(sshPrefs());sshModalClose();sshSettingsDialog()">Reset to defaults</button></div><button class="btn pri" onclick="sshModalClose()">Done</button></div>');
 }
 function sshPrefLive(){
@@ -472,10 +472,10 @@ function sshEditHost(id){
       + '<div class="row3">' + sshField('VNC address', '<input id="shf-vnchost" value="' + esc(h.vncHost||'127.0.0.1') + '" placeholder="127.0.0.1">', 'as seen from the target')
       + sshField('VNC port', '<input id="shf-vncport" type="number" min="1" max="65535" value="' + (h.vncPort||5901) + '">', ':1 = 5901, :2 = 5902')
       + sshField('VNC password', '<input id="shf-vncpw" type="password" autocomplete="new-password" placeholder="' + (h.hasVncPassword ? '•••••••• (stored)' : 'vnc password') + '">') + '</div>'
-      + '<label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer;margin-bottom:8px"><input type="checkbox" id="shf-vnctunnel"' + (h.vncTunnel === false ? '' : ' checked') + ' style="accent-color:#5cdd8b"> Reach it through SSH (<code>ssh -W</code>) — required for a server bound to localhost, and nothing is exposed to the network</label>'
-      + '<label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer"><input type="checkbox" id="shf-vncview"' + (h.vncViewOnly ? ' checked' : '') + ' style="accent-color:#5cdd8b"> View only (no keyboard or mouse)</label>'
+      + '<label style="display:flex;gap:8px;align-items:center;font-size:15px;cursor:pointer;margin-bottom:8px"><input type="checkbox" id="shf-vnctunnel"' + (h.vncTunnel === false ? '' : ' checked') + ' style="accent-color:#5cdd8b"> Reach it through SSH (<code>ssh -W</code>) — required for a server bound to localhost, and nothing is exposed to the network</label>'
+      + '<label style="display:flex;gap:8px;align-items:center;font-size:15px;cursor:pointer"><input type="checkbox" id="shf-vncview"' + (h.vncViewOnly ? ' checked' : '') + ' style="accent-color:#5cdd8b"> View only (no keyboard or mouse)</label>'
       + '</div>'
-    + sshField('After login', '<label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer"><input type="checkbox" id="shf-root"' + (h.becomeRoot ? ' checked' : '') + ' style="accent-color:#5cdd8b"> Become root (<code>sudo -i</code>) — for non-root users; a sudo password prompt is answered with the stored password, or type it</label>')
+    + sshField('After login', '<label style="display:flex;gap:8px;align-items:center;font-size:15px;cursor:pointer"><input type="checkbox" id="shf-root"' + (h.becomeRoot ? ' checked' : '') + ' style="accent-color:#5cdd8b"> Become root (<code>sudo -i</code>) — for non-root users; a sudo password prompt is answered with the stored password, or type it</label>')
     + '<div id="shf-test"></div>'
     + '<div class="foot"><div class="left">' + (id ? '<button class="btn danger" onclick="sshDeleteHost(\'' + id + '\')">Delete</button>' : '') + (id ? '<button class="btn" onclick="sshTestHost(\'' + id + '\')">🔌 Test connection</button>' : '') + (id ? '<button class="btn" onclick="sshDeployVncDialog(\'' + id + '\')" title="Install a VNC server on this host">🖵 Deploy VNC</button>' : '') + '</div>'
     + '<button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="sshSaveHost(' + (id ? '\'' + id + '\'' : 'null') + ')">' + (id ? 'Save' : 'Add host') + '</button></div>');
@@ -554,19 +554,19 @@ function sshInstallDialog(id, retryJob){
   const pc = po.copy || {};
   const on = (v, dflt) => (v === undefined ? dflt : !!v);
   const dirExists = !!(retryJob && /already exists/i.test(retryJob.error || ''));
-  const chk = (i, label, on, hint) => '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:6px 0;cursor:pointer"><input type="checkbox" id="' + i + '"' + (on ? ' checked' : '') + ' style="accent-color:#5cdd8b;margin-top:3px"><span>' + label + (hint ? '<br><span style="font-size:11px;color:#6b7280">' + hint + '</span>' : '') + '</span></label>';
+  const chk = (i, label, on, hint) => '<label style="display:flex;gap:8px;align-items:flex-start;font-size:15px;margin:6px 0;cursor:pointer"><input type="checkbox" id="' + i + '"' + (on ? ' checked' : '') + ' style="accent-color:#5cdd8b;margin-top:3px"><span>' + label + (hint ? '<br><span style="font-size:12.5px;color:#6b7280">' + hint + '</span>' : '') + '</span></label>';
   sshModal('<h3>📦 Install rhc-srv-mon on ' + esc(h.name) + '</h3>'
     + (retryJob ? '<div class="box" style="border-color:#ff808866"><b style="color:#ff8088">Retrying the install from ' + esc((retryJob.startedAt||'').slice(0,16).replace('T',' ')) + '</b>' + (retryJob.error ? '<br>' + esc(retryJob.error) : '') + (dirExists ? '<br>“Overwrite existing install” has been ticked for you.' : '') + '</div>' : '')
     + '<div class="box">Copies <b>server.js</b> from this server (' + esc(src.host||'') + (src.git ? ', ' + esc(src.git) : '') + ') to <b>' + esc((h.user||'root') + '@' + h.host) + '</b> over SSH, installs Node.js ≥ ' + (src.minNode||20) + ' and pm2 if missing, and starts it under pm2 with your settings. Needs root on the target — or a user with passwordless sudo, or the sudo password below.' + (h.monitor ? '<br>Already installed there on ' + esc((h.monitor.installedAt||'').slice(0,16).replace('T',' ')) + ' (port ' + h.monitor.port + ') — this will update it.' : '') + '</div>'
     + '<div class="row3">' + sshField('Install dir', '<input id="shi-dir" value="' + esc(po.appDir || (h.monitor ? h.monitor.appDir : '/opt/rhc-srv-mon')) + '">') + sshField('Port', '<input id="shi-port" type="number" value="' + (po.port || (h.monitor ? h.monitor.port : (src.port||8899))) + '">') + sshField('pm2 name', '<input id="shi-name" value="' + esc(po.appName || 'rhc-srv-mon') + '">') + '</div>'
-    + '<div style="font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin:4px 0 2px">Copy settings from this server</div>'
+    + '<div style="font-size:14px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin:4px 0 2px">Copy settings from this server</div>'
     + chk('shi-c-modules', 'Modules auto-update + cleanup schedule', on(pc.modules, true), 'severities, time, Telegram flags, cleanup targets — not the project scan')
     + chk('shi-c-updates', 'Updates tab schedule (Node.js, CLI tools)', on(pc.updates, true))
     + chk('shi-c-telegram', 'Telegram bot token + chat id', on(pc.telegram, true), 'so the target notifies the same chat')
     + chk('shi-c-backups', 'Backups schedule + scope + retention', on(pc.backups, true), 'per-DB / per-site selections are reset to "all"; needs rclone remote configured on the target')
     + chk('shi-c-ssh', 'SSH host list (this tab, incl. stored passwords)', on(pc.sshHosts, true))
     + chk('shi-c-auth', 'Login users + authenticator (MFA)', retryJob ? !!pc.auth : !h.monitor, 'same username / password / authenticator entry works on the target; active sessions are not copied')
-    + '<div style="font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin:10px 0 2px">Options</div>'
+    + '<div style="font-size:14px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin:10px 0 2px">Options</div>'
     + chk('shi-privnode', 'Private Node.js ' + esc((src.node||'v22').split('.')[0]) + '.x inside the install dir (system Node.js untouched — pick this for FreePBX / appliances / hosts where other apps depend on node)', on(po.privateNode, true), 'pm2 is installed into that private prefix too')
     + chk('shi-node', 'Otherwise: install Node.js ' + esc((src.node||'v22').split('.')[0]) + '.x system-wide via NodeSource if missing/too old', on(po.installNode, true))
     + chk('shi-pm2', 'Install pm2 globally if missing', on(po.installPm2, true))
@@ -684,7 +684,7 @@ async function sshSessRender(fetchRemote){
 }
 function sshSessHtml(){
   const local = (sshData && sshData.sessions) || [];
-  let h = '<div class="upd-card" style="margin:0 0 12px"><div class="site-card-hd"><h3 style="margin:0;font-size:14px">Terminals open in this panel</h3><span class="dim" style="font-size:12px">' + local.length + ' session' + (local.length === 1 ? '' : 's') + ' — they keep running on the server until closed here</span></div>';
+  let h = '<div class="upd-card" style="margin:0 0 12px"><div class="site-card-hd"><h3 style="margin:0;font-size:16px">Terminals open in this panel</h3><span class="dim" style="font-size:14px">' + local.length + ' session' + (local.length === 1 ? '' : 's') + ' — they keep running on the server until closed here</span></div>';
   if (!local.length) h += '<p class="dim" style="margin:0">No open terminals.</p>';
   else {
     h += '<table class="upd-table"><tr><th>Target</th><th>Label</th><th>Started</th><th>State</th><th></th></tr>';
@@ -697,7 +697,7 @@ function sshSessHtml(){
   }
   h += '</div>';
   const hosts = (sshData && sshData.hosts) || [];
-  h += '<div class="upd-card" style="margin:0"><div class="site-card-hd"><h3 style="margin:0;font-size:14px">Logins on a host</h3>'
+  h += '<div class="upd-card" style="margin:0"><div class="site-card-hd"><h3 style="margin:0;font-size:16px">Logins on a host</h3>'
     + '<select onchange="sshSessView.hostId=this.value||null; sshSessView.data=null; sshSessRender(true)"><option value="">— pick a host —</option>'
     + hosts.map(x => '<option value="' + esc(x.id) + '"' + (x.id === sshSessView.hostId ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select></div>';
   if (!sshSessView.hostId) h += '<p class="dim" style="margin:0">Pick a host to run <code>who</code> and <code>ss</code> on it over SSH. Nothing is polled — this only runs when you ask.</p>';
@@ -708,10 +708,10 @@ function sshSessHtml(){
     const others = d.sessions.filter(x => !x.fromPanel && x.pid > 1);
     const live = others.filter(x => x.leaderAlive !== false);
     const withSvc = others.filter(x => x.hasServices);
-    h += '<p class="dim" style="margin:0 0 8px;font-size:12.5px">' + esc(d.target) + ' · checked ' + esc(String(d.checkedAt).slice(11, 19))
+    h += '<p class="dim" style="margin:0 0 8px;font-size:14.5px">' + esc(d.target) + ' · checked ' + esc(String(d.checkedAt).slice(11, 19))
       + (live.length ? ' <button class="upd-test-btn" style="margin-left:8px" id="sess-killall">⏻ Disconnect all ' + live.length + ' other login' + (live.length === 1 ? '' : 's') + '</button>' : '')
       + (others.length && !live.length ? ' <span style="color:#f8a306">the other ' + others.length + ' entries are ended logins whose processes are still running</span>' : '') + '</p>';
-    if (withSvc.length) h += '<div class="box" style="border-color:#f8a30666;margin-bottom:10px;font-size:12.5px">⚠ ' + withSvc.length + ' of these sessions still run services (' + esc([...new Set(withSvc.flatMap(x => x.services))].slice(0, 6).join(', ')) + '). <b>Disconnect</b> ends the login and leaves them running; <b>kill</b> stops them too.</div>';
+    if (withSvc.length) h += '<div class="box" style="border-color:#f8a30666;margin-bottom:10px;font-size:14.5px">⚠ ' + withSvc.length + ' of these sessions still run services (' + esc([...new Set(withSvc.flatMap(x => x.services))].slice(0, 6).join(', ')) + '). <b>Disconnect</b> ends the login and leaves them running; <b>kill</b> stops them too.</div>';
     h += '<table class="upd-table"><tr><th>User</th><th>TTY</th><th>From</th><th>Since</th><th>Idle</th><th>PID</th><th></th></tr>';
     for (const s of d.sessions) {
       const svc = s.hasServices ? ' <span class="upd-badge na" title="' + esc(s.procCount + ' processes: ' + s.services.join(', ')) + '">' + esc(s.services.slice(0, 2).join(', ')) + (s.services.length > 2 ? '…' : '') + '</span>' : '';
@@ -724,11 +724,11 @@ function sshSessHtml(){
     h += '</table>';
     const extra = (d.connections || []).filter(c => !d.sessions.some(s => s.pid === c.pid));
     if (extra.length) {
-      h += '<div class="dim" style="font-size:12px;margin-top:10px">Other connections on port 22 (sftp, scp, port forwards):</div><table class="upd-table"><tr><th>Peer</th><th>PID</th><th></th></tr>';
+      h += '<div class="dim" style="font-size:14px;margin-top:10px">Other connections on port 22 (sftp, scp, port forwards):</div><table class="upd-table"><tr><th>Peer</th><th>PID</th><th></th></tr>';
       for (const c of extra) h += '<tr><td class="mono">' + esc(c.peer) + '</td><td class="mono dim">' + c.pid + '</td><td style="text-align:right"><button class="upd-test-btn" onclick="armConfirm(this, \'⚠ Disconnect?\', () => sshDisconnectRemote(' + c.pid + '))">Disconnect</button></td></tr>';
       h += '</table>';
     }
-    h += '<div class="dim" style="font-size:11.5px;margin-top:8px"><b>Disconnect</b> hangs up the login and leaves whatever it started running. <b>Kill</b> terminates the whole session, stopping those processes too — on a host where nobody enabled lingering, that includes pm2 daemons and the sites they run. Sessions from this panel are never touched by the bulk action.</div>';
+    h += '<div class="dim" style="font-size:13px;margin-top:8px"><b>Disconnect</b> hangs up the login and leaves whatever it started running. <b>Kill</b> terminates the whole session, stopping those processes too — on a host where nobody enabled lingering, that includes pm2 daemons and the sites they run. Sessions from this panel are never touched by the bulk action.</div>';
   }
   return h + '</div>';
 }
@@ -823,7 +823,7 @@ async function sshRdpLog(id){
   const s = sshSess.get(id); if (!s || !s.rdpDisplay) return;
   try {
     const d = await siteApi('GET', 'api/ssh/rdp/' + s.rdpDisplay + '/log');
-    sshModal('<h3>🪟 RDP client log <span class="dim" style="font-weight:400;font-size:12px">' + esc(d.target) + '</span></h3>'
+    sshModal('<h3>🪟 RDP client log <span class="dim" style="font-weight:400;font-size:14px">' + esc(d.target) + '</span></h3>'
       + (d.error ? '<div class="box" style="border-color:#5a1f25;color:#ff8088">' + esc(d.error) + '</div>' : '')
       + '<pre class="site-code-pre" style="max-height:50vh">' + esc((d.log || []).join('\n') || '(nothing logged yet)') + '</pre>'
       + '<div class="foot"><button class="btn pri" onclick="sshModalClose()">Close</button></div>');

@@ -55,11 +55,11 @@ function renderSitesList(){
   // no banner when everything is fine — problems show as a red banner, counts live in the toolbar pills
   const down = d.sites.filter(s => s.status === 'down').length, degraded = d.sites.filter(s => s.status === 'degraded').length, total = d.sites.length, online = d.sites.filter(s => s.status === 'online').length;
   if (down === 0 && degraded === 0) { showBanner(null); setStatus([{ level:'ok', icon:'✅', text:'All sites operational', sub: total + ' sites' }]); }
-  else { const parts = []; if (down) parts.push(down + ' down'); if (degraded) parts.push(degraded + ' degraded'); showBanner('<span class="ico">🔴</span> ' + parts.join(', ') + ' <span style="margin-left:auto;font-size:13px;font-weight:400">'+(total-down-degraded)+'/'+total+' ok</span>'); setStatus([{ level: down ? 'bad' : 'warn', icon: down ? '🔴' : '🟠', text: parts.join(', '), sub: (total-down-degraded)+'/'+total+' ok' }]); }
+  else { const parts = []; if (down) parts.push(down + ' down'); if (degraded) parts.push(degraded + ' degraded'); showBanner('<span class="ico">🔴</span> ' + parts.join(', ') + ' <span style="margin-left:auto;font-size:15px;font-weight:400">'+(total-down-degraded)+'/'+total+' ok</span>'); setStatus([{ level: down ? 'bad' : 'warn', icon: down ? '🔴' : '🟠', text: parts.join(', '), sub: (total-down-degraded)+'/'+total+' ok' }]); }
   const pill = (st, n) => n ? '<button class="chip' + (siteStatusFilter === st ? ' active' : '') + '" onclick="siteStatusFilter = siteStatusFilter === \'' + st + '\' ? \'\' : \'' + st + '\'; renderSitesList()" title="Show only ' + st + ' sites"><span class="dot ' + st + '"></span>' + n + ' ' + st + '</button>' : '';
 
   let html = '<div class="site-toolbar"><input id="siteQ" type="search" placeholder="Filter sites…" autocomplete="off" value="' + esc(siteQ) + '" oninput="siteQ=this.value; state.siteQ=siteQ; saveState(); renderSitesList()">'
-    + '<div class="site-stats">' + pill('online', online) + pill('degraded', degraded) + pill('down', down) + '<span class="dim" style="font-size:12px;margin-left:4px">' + total + ' sites' + (d.sites.some(s => s.managed_by === 'clp') ? ' · ' + d.sites.filter(s => s.managed_by === 'clp').length + ' owned by CloudPanel' : '') + '</span></div>'
+    + '<div class="site-stats">' + pill('online', online) + pill('degraded', degraded) + pill('down', down) + '<span class="dim" style="font-size:14px;margin-left:4px">' + total + ' sites' + (d.sites.some(s => s.managed_by === 'clp') ? ' · ' + d.sites.filter(s => s.managed_by === 'clp').length + ' owned by CloudPanel' : '') + '</span></div>'
     + '<span style="flex:1"></span>'
     + '<div class="site-viewsw"><button class="chip' + (siteViewMode === 'cards' ? ' active' : '') + '" onclick="siteSetView(\'cards\')" title="Cards">▦</button><button class="chip' + (siteViewMode === 'table' ? ' active' : '') + '" onclick="siteSetView(\'table\')" title="Table">☰</button></div>'
     + '<button class="btn" onclick="siteSyncClp()" title="Re-read CloudPanel\'s database (sites this panel already manages are left alone)">⟳ Sync from CloudPanel</button>'
@@ -365,7 +365,7 @@ function siteTabSettings(s){
       ? 'Actually running: ' + act.map(a => (a.stale ? '<b style="color:#f8a306">' + esc(a.path) + ' (deleted — node was upgraded under it; restart to pick up the new one)</b>' : '<b>' + esc(a.version || '?') + '</b> <span class="dim">' + esc(a.path) + '</span>') + ' <span class="dim">(' + esc(a.procs.slice(0, 4).join(', ')) + (a.procs.length > 4 ? ' +' + (a.procs.length - 4) : '') + ')</span>').join(' · ')
       : 'No running Node process found for this site — the value above is only what is recorded.';
     html += siteCard('Node.js Settings',
-      '<div class="row2">' + siteField('Node.js Version *', '<div style="display:flex;gap:6px"><span style="flex:1">' + sel + '</span><label class="chip" style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="stNodeInstall"> nvm install</label></div>', actNote)
+      '<div class="row2">' + siteField('Node.js Version *', '<div style="display:flex;gap:6px"><span style="flex:1">' + sel + '</span><label class="chip" style="display:flex;align-items:center;gap:6px;font-size:14px"><input type="checkbox" id="stNodeInstall"> nvm install</label></div>', actNote)
       + siteField('App Port *', '<input id="stNodePort" type="number" min="1024" max="65535" value="' + s.nodejs.port + '">', 'nginx proxies / to 127.0.0.1:' + s.nodejs.port + (s.vhost_placeholders.includes('app_port') ? '' : ' — the vhost has a literal port; it will be patched')) + '</div>'
       + '<div class="site-actions"><button class="btn pri" onclick="siteSaveNode()">Save</button></div>');
   }
@@ -430,8 +430,8 @@ function siteTabVhost(s){
   return siteSub('vhost', siteUrl('/vhost'), (v) => {
     const warn = !v.in_sync ? '<div class="banner bad" style="margin-bottom:12px"><span class="ico">⚠</span> The file on disk differs from what this template renders — someone edited ' + esc(v.file) + ' directly. Saving will overwrite it (a backup is kept).</div>' : '';
     const missing = !v.placeholders.includes('settings');
-    return warn + siteCard('Vhost <span class="dim" style="font-weight:400;font-size:12px">' + esc(v.file) + '</span>',
-      '<p class="dim" style="margin:0 0 8px;font-size:12.5px">Edit the <b>template</b>: <code>{{placeholders}}</code> (' + v.placeholders.map(p => '<code>' + esc(p) + '</code>').join(' ') + ') are filled in on save from the site\'s settings. Saving runs <code>nginx -t</code> and reloads nginx; on failure the previous file is restored.'
+    return warn + siteCard('Vhost <span class="dim" style="font-weight:400;font-size:14px">' + esc(v.file) + '</span>',
+      '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Edit the <b>template</b>: <code>{{placeholders}}</code> (' + v.placeholders.map(p => '<code>' + esc(p) + '</code>').join(' ') + ') are filled in on save from the site\'s settings. Saving runs <code>nginx -t</code> and reloads nginx; on failure the previous file is restored.'
         + (missing ? ' <span style="color:#f8a306">No <code>{{settings}}</code> placeholder: Security features (basic auth, blocked IPs…) need it — the Security tab can insert it.</span>' : '') + '</p>'
       + '<textarea id="vhEditor" class="site-code" spellcheck="false" rows="28">' + esc(v.template) + '</textarea>'
       + '<div class="site-actions" style="justify-content:space-between"><div><button class="btn" onclick="siteVhostPreview()">Preview rendered</button> <button class="btn" onclick="siteVhostReset()">Reset to template…</button></div><div><button class="btn pri" onclick="siteVhostSave()">Save</button></div></div>'
@@ -471,10 +471,10 @@ function siteTabDatabases(s){
 /* ---- SSL/TLS ---- */
 function siteTabSsl(s){
   return siteSub('ssl', siteUrl('/certificates'), (v) => {
-    const rows = v.certificates.map(c => { const days = siteDays(c.expires_at); return '<tr' + (c.is_active ? ' style="background:#20242f"' : '') + '><td>' + (c.is_active ? '<span class="upd-badge ok">active</span>' : '<span class="upd-badge na">stored</span>') + '</td><td>' + esc(c.type.replace('_', ' ')) + '</td><td>' + esc(c.subject || '') + '<div class="dim" style="font-size:11.5px">' + esc((c.sans || []).join(', ')) + '</div></td><td>' + esc((c.issuer || '').split(',')[1] || c.issuer || '') + '</td><td' + (days != null && days < 30 ? ' style="color:#ff8088"' : '') + '>' + (c.expires_at ? c.expires_at.slice(0, 10) + (days != null ? ' <span class="dim">(' + (days < 0 ? 'expired' : days + 'd') + ')</span>' : '') : '') + '</td><td style="text-align:right;white-space:nowrap">'
+    const rows = v.certificates.map(c => { const days = siteDays(c.expires_at); return '<tr' + (c.is_active ? ' style="background:#20242f"' : '') + '><td>' + (c.is_active ? '<span class="upd-badge ok">active</span>' : '<span class="upd-badge na">stored</span>') + '</td><td>' + esc(c.type.replace('_', ' ')) + '</td><td>' + esc(c.subject || '') + '<div class="dim" style="font-size:13px">' + esc((c.sans || []).join(', ')) + '</div></td><td>' + esc((c.issuer || '').split(',')[1] || c.issuer || '') + '</td><td' + (days != null && days < 30 ? ' style="color:#ff8088"' : '') + '>' + (c.expires_at ? c.expires_at.slice(0, 10) + (days != null ? ' <span class="dim">(' + (days < 0 ? 'expired' : days + 'd') + ')</span>' : '') : '') + '</td><td style="text-align:right;white-space:nowrap">'
       + (!c.is_active && c.has_key ? '<button class="btn small" onclick="siteCertActivate(' + c.id + ')">Activate</button> ' : '') + (!c.is_active ? '<button class="btn small" onclick="armConfirm(this, \'⚠ Delete?\', () => siteCertDelete(' + c.id + '))">Delete</button>' : '') + '</td></tr>'; }).join('');
     const inst = v.installed;
-    return siteCard('Certificates', '<p class="dim" style="margin:0 0 8px;font-size:12.5px">nginx serves ' + (inst ? '<b>' + esc(inst.subject) + '</b> from ' + esc((inst.issuer || '').split(',')[1] || inst.issuer) + ', valid until ' + inst.expires_at.slice(0, 10) : '<span style="color:#ff8088">no certificate file</span>') + '. Let\'s Encrypt and Cloudflare-issued origin certificates come with the Settings → Cloudflare phase; upload a PEM pair for now.</p>'
+    return siteCard('Certificates', '<p class="dim" style="margin:0 0 8px;font-size:14.5px">nginx serves ' + (inst ? '<b>' + esc(inst.subject) + '</b> from ' + esc((inst.issuer || '').split(',')[1] || inst.issuer) + ', valid until ' + inst.expires_at.slice(0, 10) : '<span style="color:#ff8088">no certificate file</span>') + '. Let\'s Encrypt and Cloudflare-issued origin certificates come with the Settings → Cloudflare phase; upload a PEM pair for now.</p>'
       + '<table class="upd-table"><tr><th></th><th>Type</th><th>Subject / SANs</th><th>Issuer</th><th>Expires</th><th></th></tr>' + (rows || '<tr><td colspan="6" class="dim">No certificates stored</td></tr>') + '</table>'
       + '<div class="site-actions"><button class="btn" onclick="siteCertSelfSigned()">Self-signed</button><button class="btn pri" onclick="siteCertUpload()">Upload certificate…</button></div>');
   });
@@ -516,7 +516,7 @@ function siteTabSecurity(s){
     + siteCard('Blocked Bots', siteField('User-Agent substrings, one per line — answered with 444 (connection closed)', '<textarea id="seBots" rows="4" class="mono">' + esc(v.blocked_bots.join('\n')) + '</textarea>', 'Case-insensitive. Ignored while basic authentication is active (CloudPanel behaviour).'))
     + siteCard('Cloudflare', '<label class="upd-toggle"><span class="switch"><input type="checkbox" id="seCf"' + (v.cf_only ? ' checked' : '') + '><span class="slider"></span></span> Allow traffic from Cloudflare only (include /etc/nginx/cloudflare/ips; access log in <code>cloudflare</code> format)</label>')
     + '<div class="site-actions"><button class="btn pri" onclick="siteSecuritySave(false)">Save security settings</button></div>'
-    + (v.preview ? '<details style="margin-top:10px"><summary class="dim" style="cursor:pointer;font-size:12.5px">Rendered {{settings}} block</summary><pre class="site-code-pre">' + esc(v.preview) + '</pre></details>' : '');
+    + (v.preview ? '<details style="margin-top:10px"><summary class="dim" style="cursor:pointer;font-size:14.5px">Rendered {{settings}} block</summary><pre class="site-code-pre">' + esc(v.preview) + '</pre></details>' : '');
   });
 }
 async function siteSecuritySave(insertPlaceholder){
@@ -536,7 +536,7 @@ function siteTabSsh(s){
   return siteSub('ssh', siteUrl('/ssh-users'), (list) => {
     const rows = list.map(u => '<tr><td class="mono">' + esc(u.username) + (u.unix ? '' : ' <span style="color:#ff8088">(unix user missing)</span>') + '</td><td class="dim">' + (u.unix ? 'uid ' + u.unix.uid + ' · ' + esc(u.unix.home) : '') + '</td><td>' + (u.ssh_keys ? u.ssh_keys.split('\n').filter(x => x.trim()).length + ' key(s)' : '<span class="dim">no keys</span>') + '</td><td style="text-align:right;white-space:nowrap">'
       + (u.has_password ? '<button class="btn small" onclick="siteSshPw(' + u.id + ')">Show password</button> ' : '') + '<button class="btn small" onclick="siteSshEdit(' + u.id + ')">Edit</button> <button class="btn small" onclick="armConfirm(this, \'⚠ Delete user + home?\', () => siteSshDelete(' + u.id + '))">Delete</button></td></tr>').join('');
-    return siteCard('SSH Users', '<p class="dim" style="margin:0 0 8px;font-size:12.5px">Separate logins with their own home that see this site\'s <code>htdocs</code>, <code>logs</code> and <code>backups</code> (symlinks; group = site user, umask 007 so files stay shared).</p>'
+    return siteCard('SSH Users', '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Separate logins with their own home that see this site\'s <code>htdocs</code>, <code>logs</code> and <code>backups</code> (symlinks; group = site user, umask 007 so files stay shared).</p>'
       + '<table class="upd-table"><tr><th>User</th><th></th><th>Keys</th><th></th></tr>' + (rows || '<tr><td colspan="4" class="dim">No SSH users</td></tr>') + '</table>'
       + '<div class="site-actions"><button class="btn pri" onclick="siteSshAdd()">Add SSH user…</button></div>')
     + siteCard('FTP Users', '<p class="dim">FTP accounts (proftpd) come with the Instance phase. None exist on this host today.</p>');
@@ -605,7 +605,7 @@ function siteTabFiles(s){
       + '<label class="btn small" style="cursor:pointer">Upload <input id="fmFile" type="file" multiple style="display:none"></label>'
       + '<button class="btn small" onclick="siteFmDeleteSelected(this)">Delete selected</button><button class="btn small" onclick="siteSubReload(\'' + esc(key) + '\')">↻</button></div></div>'
       + '<table class="upd-table fm-table"><tr><th style="width:24px"></th><th>Name</th><th>Size</th><th>Modified</th><th>Mode</th><th></th></tr>' + (rows || '<tr><td colspan="6" class="dim">Empty directory</td></tr>') + '</table>'
-      + '<div class="dim" style="font-size:11.5px;margin-top:8px">Operations run as <code>' + esc(s.user) + '</code> — what that user cannot read or write, this panel cannot either. Drop files anywhere on this card to upload.</div></div>';
+      + '<div class="dim" style="font-size:13px;margin-top:8px">Operations run as <code>' + esc(s.user) + '</code> — what that user cannot read or write, this panel cannot either. Drop files anywhere on this card to upload.</div></div>';
   });
 }
 function siteFmGo(p){ siteView.sub.fmPath = p; renderSiteDetail(); }
@@ -643,7 +643,7 @@ async function siteFmUpload(fileList){
 async function siteFmEdit(p){
   try {
     const r = await siteApi('POST', siteUrl('/files/op'), { op: 'read', path: p });
-    const bg = sshModal('<h3 class="mono" style="font-size:14px">' + esc(p) + '</h3><textarea id="fmEd" class="site-code" spellcheck="false" rows="26">' + esc(r.content) + '</textarea><div class="foot"><span class="dim" style="margin-right:auto;font-size:12px">' + bkBytes(r.size) + ' · Ctrl+S saves</span><button class="btn" onclick="sshModalClose()">Close</button><button class="btn pri" id="fmSave">Save</button></div>');
+    const bg = sshModal('<h3 class="mono" style="font-size:16px">' + esc(p) + '</h3><textarea id="fmEd" class="site-code" spellcheck="false" rows="26">' + esc(r.content) + '</textarea><div class="foot"><span class="dim" style="margin-right:auto;font-size:14px">' + bkBytes(r.size) + ' · Ctrl+S saves</span><button class="btn" onclick="sshModalClose()">Close</button><button class="btn pri" id="fmSave">Save</button></div>');
     bg.classList.add('wide');
     const save = async () => { try { await siteApi('POST', siteUrl('/files/op'), { op: 'write', path: p, content: bg.querySelector('#fmEd').value }); toast('Saved ' + p, 'success'); } catch(e){ siteErr(e, 'Save'); } };
     bg.querySelector('#fmSave').onclick = save;
@@ -655,11 +655,11 @@ async function siteFmEdit(p){
 function siteTabCron(s){
   return siteSub('cron', siteUrl('/cron'), (v) => {
     const rows = v.jobs.map(j => '<tr><td class="mono">' + esc([j.minute, j.hour, j.day, j.month, j.weekday].join(' ')) + '</td><td class="mono" style="word-break:break-all">' + esc(j.command) + '</td><td style="text-align:right;white-space:nowrap"><button class="btn small" onclick="siteCronEdit(' + j.id + ')">Edit</button> <button class="btn small" onclick="armConfirm(this, \'⚠ Delete?\', () => siteCronDelete(' + j.id + '))">Delete</button></td></tr>').join('');
-    return siteCard('Cron Jobs <span class="dim" style="font-weight:400;font-size:12px">' + esc(v.file) + '</span>',
-      '<p class="dim" style="margin:0 0 8px;font-size:12.5px">Jobs run as <code>' + esc(s.user) + '</code>. Output is discarded (MAILTO="") — redirect to a file inside the site if you need it.</p>'
+    return siteCard('Cron Jobs <span class="dim" style="font-weight:400;font-size:14px">' + esc(v.file) + '</span>',
+      '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Jobs run as <code>' + esc(s.user) + '</code>. Output is discarded (MAILTO="") — redirect to a file inside the site if you need it.</p>'
       + '<table class="upd-table"><tr><th>Schedule</th><th>Command</th><th></th></tr>' + (rows || '<tr><td colspan="3" class="dim">No cron jobs</td></tr>') + '</table>'
       + '<div class="site-actions"><button class="btn pri" onclick="siteCronEdit(null)">Add cron job…</button></div>'
-      + (v.on_disk ? '<details style="margin-top:10px"><summary class="dim" style="cursor:pointer;font-size:12.5px">File on disk</summary><pre class="site-code-pre">' + esc(v.on_disk) + '</pre></details>' : ''));
+      + (v.on_disk ? '<details style="margin-top:10px"><summary class="dim" style="cursor:pointer;font-size:14.5px">File on disk</summary><pre class="site-code-pre">' + esc(v.on_disk) + '</pre></details>' : ''));
   });
 }
 function siteCronEdit(id){
@@ -694,10 +694,10 @@ function siteTabLogs(s){
     return '<div class="upd-card"><div class="fm-bar"><select id="lgKind" onchange="siteView.sub.logKind=this.value; siteView.sub.logData=null; siteLogFetch()">' + opts + '</select>'
       + '<select id="lgLines" onchange="siteLogFetch()">' + [100, 200, 500, 1000, 2000].map(n => '<option' + (n === (siteView.sub.logLines || 200) ? ' selected' : '') + '>' + n + '</option>').join('') + '</select>'
       + '<input id="lgQ" type="search" placeholder="filter…" value="' + esc(siteView.sub.logQ || '') + '" onkeydown="if(event.key===\'Enter\') siteLogFetch()" style="flex:1;min-width:160px">'
-      + '<label class="chip" style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="lgFollow" onchange="siteLogFollow(this.checked)"' + (siteLogTimer ? ' checked' : '') + '> follow</label>'
+      + '<label class="chip" style="display:flex;align-items:center;gap:6px;font-size:14px"><input type="checkbox" id="lgFollow" onchange="siteLogFollow(this.checked)"' + (siteLogTimer ? ' checked' : '') + '> follow</label>'
       + '<button class="btn small" onclick="siteLogFetch()">↻</button></div>'
       + '<pre id="lgOut" class="site-code-pre log">' + (d ? (d.error ? '⚠ ' + esc(d.error) : esc(d.lines.join('\n')) || '<span class="dim">(empty)</span>') : 'Loading…') + '</pre>'
-      + (d && !d.error ? '<div class="dim" style="font-size:11.5px;margin-top:6px">' + esc(d.file) + ' · ' + bkBytes(d.size) + (d.truncated ? ' · showing the tail' : '') + '</div>' : '') + '</div>';
+      + (d && !d.error ? '<div class="dim" style="font-size:13px;margin-top:6px">' + esc(d.file) + ' · ' + bkBytes(d.size) + (d.truncated ? ' · showing the tail' : '') + '</div>' : '') + '</div>';
   });
 }
 async function siteLogFetch(){

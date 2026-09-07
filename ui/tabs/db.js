@@ -24,7 +24,7 @@ function renderDb(){
   const d = lastDb;
   document.getElementById('host').textContent = '';
   if (d.error) {
-    showBanner('<span class="ico">🔴</span> PostgreSQL unreachable <span style="margin-left:auto;font-size:13px;font-weight:400">'+esc(d.error)+'</span>');
+    showBanner('<span class="ico">🔴</span> PostgreSQL unreachable <span style="margin-left:auto;font-size:15px;font-weight:400">'+esc(d.error)+'</span>');
     setStatus([{ level:'bad', icon:'🔴', text:'PostgreSQL unreachable' }]);
   } else {
     showBanner(null);
@@ -62,7 +62,7 @@ function renderDb(){
     if (d.sqlite.error) {
       html += '<div class="err">⚠ ' + esc(d.sqlite.error) + '</div>';
     } else {
-      html += '<div class="row" style="background:#1a1d23;border-bottom:1px solid #2d3139"><div class="meta"><div class="name">Location</div><div class="info">file</div></div><div class="col" style="flex:0 0 auto;word-break:break-all;font-size:11px;max-width:400px">' + esc(d.sqlite.path || '') + '</div></div>';
+      html += '<div class="row" style="background:#1a1d23;border-bottom:1px solid #2d3139"><div class="meta"><div class="name">Location</div><div class="info">file</div></div><div class="col" style="flex:0 0 auto;word-break:break-all;font-size:12.5px;max-width:400px">' + esc(d.sqlite.path || '') + '</div></div>';
       html += '<div class="hdr"><div class="meta">Name</div><div class="col" style="flex:0 0 auto">Size</div></div>';
       html += '<div class="row"><div class="meta"><div class="name">CloudPanel DB</div><div class="info">' + d.sqlite.tables + ' tables · ' + d.sqlite.pageCount.toLocaleString() + ' pages</div></div><div class="col" style="flex:0 0 auto">' + fmtMem(d.sqlite.size) + '</div></div>';
     }

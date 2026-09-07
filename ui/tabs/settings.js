@@ -44,7 +44,7 @@ function renderSettings(){
     + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'slack\')">📨 Send test</button><button class="btn pri" onclick="saveSlackSettings()">Save</button></div></div>';
   // Cloudflare
   html += '<div class="upd-card"><h3>Cloudflare</h3>'
-    + '<p class="dim" style="margin:0 0 8px;font-size:12.5px">API token with <b>Zone:Read</b> and <b>DNS:Edit</b> (Cloudflare dashboard → My Profile → API Tokens). Stored encrypted. Powers the domains overview below; DNS records for new sites and origin certificates come next.</p>'
+    + '<p class="dim" style="margin:0 0 8px;font-size:14.5px">API token with <b>Zone:Read</b> and <b>DNS:Edit</b> (Cloudflare dashboard → My Profile → API Tokens). Stored encrypted. Powers the domains overview below; DNS records for new sites and origin certificates come next.</p>'
     + stField('API token', '<input type="password" id="cfToken" placeholder="' + (cf.configured ? esc(cf.token) + ' (leave empty to keep, type REMOVE to delete)' : 'paste token') + '">')
     + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'cloudflare\')">Verify token</button><button class="btn pri" onclick="saveCloudflareSettings()">Save</button></div></div>';
   html += '</div>';
@@ -62,7 +62,7 @@ function renderSettings(){
         + '<td>' + (s.records ? (s.points_here ? '✅' : s.proxied ? '<span class="dim">via Cloudflare</span>' : '<span style="color:#f8a306">✗</span>') : '') + '</td>'
         + '<td class="mono dim">' + (s.www ? (s.www.length ? s.www.map(r => esc(r.type + ' ' + r.content)).join('<br>') : '–') : '') + '</td></tr>';
     }
-    html += '</table><div class="dim" style="font-size:12px;margin-top:8px">Zones in this account: ' + cfDomains.zones.map(z => esc(z.name) + (z.status !== 'active' ? ' (' + esc(z.status) + ')' : '')).join(', ') + '</div>';
+    html += '</table><div class="dim" style="font-size:14px;margin-top:8px">Zones in this account: ' + cfDomains.zones.map(z => esc(z.name) + (z.status !== 'active' ? ' (' + esc(z.status) + ')' : '')).join(', ') + '</div>';
   }
   html += '</div>';
   // Cleanup (moved from Modules)
@@ -136,8 +136,8 @@ function cleanupCardHtml(d){
   let cuSel = 0;
   html += '<div class="auto-card">';
   html += '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px">';
-  html += '<h3 style="margin:0;font-size:15px;font-weight:700">🧹 Cleanup</h3>';
-  html += '<span class="hint" style="font-size:12px">regenerable caches + build leftovers · only under /home/*/ and /root · refuses to run while an install is active</span>';
+  html += '<h3 style="margin:0;font-size:17px;font-weight:700">🧹 Cleanup</h3>';
+  html += '<span class="hint" style="font-size:14px">regenerable caches + build leftovers · only under /home/*/ and /root · refuses to run while an install is active</span>';
   if (cuLast) html += '<span class="auto-stat" style="margin-left:auto" title="Last run">last run <span class="v">'+new Date(cuLast.timestamp).toLocaleString()+'</span> · freed <span class="v">'+bkBytes(cuLast.freedBytes||0)+'</span>'+((cuLast.errors||[]).length?' · ⚠ <span class="v">'+cuLast.errors.length+'</span> errors':'')+'</span>';
   else html += '<span class="auto-stat" style="margin-left:auto">never run</span>';
   html += '</div>';
@@ -147,22 +147,22 @@ function cleanupCardHtml(d){
     const on = !!cuCfg[k];
     if (on && t && !t.prune) cuSel += (t.bytes||0);
     const size = t ? (t.count ? bkBytes(t.bytes)+(t.prune?' in store':'')+' · '+t.count+(t.count===1?' path':' paths') : 'nothing found') : '';
-    html += '<label title="'+esc(cuHints[k])+'" style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="cuOpt" data-key="'+k+'" '+(on?'checked':'')+'><span>'+esc(cuLabels[k])+'</span><span style="margin-left:auto;color:#9ca3af;font-size:11.5px;font-family:ui-monospace,Menlo,Consolas,monospace;white-space:nowrap">'+esc(size)+'</span></label>';
+    html += '<label title="'+esc(cuHints[k])+'" style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="cuOpt" data-key="'+k+'" '+(on?'checked':'')+'><span>'+esc(cuLabels[k])+'</span><span style="margin-left:auto;color:#9ca3af;font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace;white-space:nowrap">'+esc(size)+'</span></label>';
   }
   html += '</div>';
   if (cuPrev && cuPrev.targets) {
     const lo = cuPrev.targets.find(x => x.key==='leftovers');
-    if (lo && lo.items && lo.items.length) html += '<div class="hint" style="font-size:11.5px;margin-top:8px;line-height:1.7">leftovers: '+lo.items.map(i => '<code style="background:#12141d;padding:1px 6px;border-radius:4px">'+esc(i.path.replace(/^\/home\//,'~'))+'</code> '+bkBytes(i.bytes)).join(' · ')+'</div>';
+    if (lo && lo.items && lo.items.length) html += '<div class="hint" style="font-size:13px;margin-top:8px;line-height:1.7">leftovers: '+lo.items.map(i => '<code style="background:#12141d;padding:1px 6px;border-radius:4px">'+esc(i.path.replace(/^\/home\//,'~'))+'</code> '+bkBytes(i.bytes)).join(' · ')+'</div>';
   }
   html += '<div class="auto-row" style="margin-top:10px"><label class="switch"><input type="checkbox" id="cuAfterAuto" '+(cuCfg.afterAutoUpdate?'checked':'')+'><span class="slider"></span></label>';
   html += '<label for="cuAfterAuto">Run after the nightly auto-update pass</label>';
   html += '<span class="hint" style="margin-left:auto">'+(cuPrev?('measured '+new Date(cuPrev.measuredAt).toLocaleString()+' · selected ≈ '+bkBytes(cuSel)):'not measured yet — click Measure')+'</span></div>';
-  html += '<div class="auto-row"><button class="btn" id="cuSave" style="background:#5cdd8b;color:#0b2818;padding:8px 16px;font-size:12px">💾 Save</button>';
-  html += '<button class="btn" id="cuMeasure" style="padding:8px 16px;font-size:12px">📏 Measure</button>';
-  html += '<button class="btn" id="cuRun" '+(cu.running?'disabled':'')+' style="padding:8px 16px;font-size:12px">'+(cu.running?'⏳ cleaning…':'🧹 Clean now')+'</button>';
+  html += '<div class="auto-row"><button class="btn" id="cuSave" style="background:#5cdd8b;color:#0b2818;padding:8px 16px;font-size:14px">💾 Save</button>';
+  html += '<button class="btn" id="cuMeasure" style="padding:8px 16px;font-size:14px">📏 Measure</button>';
+  html += '<button class="btn" id="cuRun" '+(cu.running?'disabled':'')+' style="padding:8px 16px;font-size:14px">'+(cu.running?'⏳ cleaning…':'🧹 Clean now')+'</button>';
   if (cuLast && cuLast.results && cuLast.results.length) html += '<span class="hint" style="margin-left:auto">'+cuLast.results.map(r => esc(cuLabels[r.key]||r.key)+': '+bkBytes(r.freed||0)).join(' · ')+'</span>';
   html += '</div>';
-  if (cuLast && cuLast.errors && cuLast.errors.length) html += '<div class="hint" style="color:#ff8088;font-size:11.5px;margin-top:6px">'+cuLast.errors.slice(0,5).map(esc).join('<br>')+'</div>';
+  if (cuLast && cuLast.errors && cuLast.errors.length) html += '<div class="hint" style="color:#ff8088;font-size:13px;margin-top:6px">'+cuLast.errors.slice(0,5).map(esc).join('<br>')+'</div>';
   html += '</div>';
 
   return html;

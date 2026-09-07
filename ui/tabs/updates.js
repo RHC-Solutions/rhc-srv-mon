@@ -20,7 +20,7 @@ function renderUpdates(){
   html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
   html += '<h3 style="margin:0">Components</h3>';
   if (updCount) {
-    html += '<button class="btn update" onclick="triggerUpdateAll()" style="font-size:12px;padding:4px 14px">⬆ Update All (' + updCount + ')</button>';
+    html += '<button class="btn update" onclick="triggerUpdateAll()" style="font-size:14px;padding:4px 14px">⬆ Update All (' + updCount + ')</button>';
   }
   html += '</div>';
   html += '<table class="upd-table"><tr><th>Component</th><th>Current</th><th>Latest</th><th>Status</th><th></th></tr>';
@@ -61,9 +61,9 @@ function renderUpdates(){
     }
     html += '<div class="upd-card" style="grid-column:1/-1">';
     html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
-    html += '<h3 style="margin:0">By User <span style="font-weight:400;font-size:12px;color:#6b7280">' + userKeys.length + ' users</span></h3>';
+    html += '<h3 style="margin:0">By User <span style="font-weight:400;font-size:14px;color:#6b7280">' + userKeys.length + ' users</span></h3>';
     if (userOutdatedCount) {
-      html += '<button class="btn update" onclick="triggerUpdateAllUsers()" style="font-size:12px;padding:4px 14px">⬆ Update All Users (' + userOutdatedCount + ')</button>';
+      html += '<button class="btn update" onclick="triggerUpdateAllUsers()" style="font-size:14px;padding:4px 14px">⬆ Update All Users (' + userOutdatedCount + ')</button>';
     }
     html += '</div>';
     html += '<div style="overflow-x:auto"><table class="upd-table">';
@@ -103,11 +103,11 @@ function renderUpdates(){
           const latestC = d.components.find(x => x.key === c.key);
           const isUpd = userV && latestC && latestC.latestVersion && userV !== latestC.latestVersion;
           if (isUpd) {
-            html += '<button class="btn update small" style="margin:1px;font-size:11px" onclick="triggerUserUpdate(\'' + esc(u) + '\',\'' + c.key + '\')">⬆ ' + c.key + '</button> ';
+            html += '<button class="btn update small" style="margin:1px;font-size:12.5px" onclick="triggerUserUpdate(\'' + esc(u) + '\',\'' + c.key + '\')">⬆ ' + c.key + '</button> ';
           }
         }
       } else {
-        html += '<span class="upd-badge ok" style="font-size:11px">✓ up to date</span>';
+        html += '<span class="upd-badge ok" style="font-size:12.5px">✓ up to date</span>';
       }
       html += '</td>';
       html += '</tr>';
@@ -138,12 +138,12 @@ function renderUpdates(){
   // Update log
   html += '<div class="upd-card" style="grid-column:1/-1">';
   html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
-  html += '<h3 style="margin:0">Update Log <span style="font-weight:400;font-size:12px;color:#6b7280">last ' + d.log.length + ' entries</span></h3>';
-  html += '<button class="btn" onclick="clearUpdateLog()" style="font-size:11px;padding:3px 10px;background:#3a2020;color:#ff8088;border:none;border-radius:5px;cursor:pointer">🗑 Clear log</button>';
+  html += '<h3 style="margin:0">Update Log <span style="font-weight:400;font-size:14px;color:#6b7280">last ' + d.log.length + ' entries</span></h3>';
+  html += '<button class="btn" onclick="clearUpdateLog()" style="font-size:12.5px;padding:3px 10px;background:#3a2020;color:#ff8088;border:none;border-radius:5px;cursor:pointer">🗑 Clear log</button>';
   html += '</div>';
   html += '<div class="upd-log">';
   if (!d.log.length) {
-    html += '<div style="color:#6b7280;padding:10px 0;font-size:13px">No updates have been run yet.</div>';
+    html += '<div style="color:#6b7280;padding:10px 0;font-size:15px">No updates have been run yet.</div>';
   } else {
     for (const entry of d.log.slice().reverse()) {
       const icon = entry.success ? '✅' : '❌';

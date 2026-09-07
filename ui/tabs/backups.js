@@ -20,19 +20,19 @@ function renderBackup(){
   html += '<div class="upd-card" style="grid-column:1/-1">';
   html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">';
   html += '<h3 style="margin:0">💾 Backup to Wasabi</h3>';
-  html += '<span style="font-size:12px;color:#6b7280">remote:rhcsolutions/web01-backups · s3.eu-central-1.wasabisys.com</span>';
+  html += '<span style="font-size:14px;color:#6b7280">remote:rhcsolutions/web01-backups · s3.eu-central-1.wasabisys.com</span>';
   html += '<div style="margin-left:auto;display:flex;gap:8px">';
   if (d.running) html += '<button class="btn running" disabled>⏳ backing up…</button>';
   else html += '<button class="btn update" id="bkRun">▶ Back up now</button>';
   html += '<button class="btn" id="bkList">↻ List remote</button>';
   html += '</div></div>';
   if (lr){
-    html += '<div style="margin-top:10px;font-size:13px">';
+    html += '<div style="margin-top:10px;font-size:15px">';
     html += '<span class="upd-badge '+(lr.success?'ok':'na')+'">'+(lr.success?'✓ last backup ok':'⚠ last backup had errors')+'</span> ';
     html += '<span style="color:#9ca3af"> '+new Date(lr.finishedAt||lr.startedAt).toLocaleString()+' · '+lr.itemCount+' items · '+bkBytes(lr.bytes)+' · '+Math.round((lr.duration_ms||0)/1000)+'s · '+esc(lr.trigger)+'</span>';
     if (lr.errors && lr.errors.length) html += '<ul style="margin:6px 0 0;color:#f87171">'+lr.errors.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>';
     html += '</div>';
-  } else { html += '<div style="margin-top:10px;color:#9ca3af;font-size:13px">No backups run yet.</div>'; }
+  } else { html += '<div style="margin-top:10px;color:#9ca3af;font-size:15px">No backups run yet.</div>'; }
   html += '</div>';
 
   html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px">';
@@ -41,8 +41,8 @@ function renderBackup(){
   const pgSel = Array.isArray(sc.pgDatabases) ? sc.pgDatabases : null;
   const siteSel = Array.isArray(sc.siteDomains) ? sc.siteDomains : null;
   const box = '<div style="background:#12141d;border:1px solid #232838;border-radius:8px;padding:12px">';
-  const sub = '<div style="margin:8px 0 0 22px;display:flex;flex-direction:column;gap:4px;font-size:12.5px;max-height:220px;overflow:auto">';
-  const mono = 'font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px';
+  const sub = '<div style="margin:8px 0 0 22px;display:flex;flex-direction:column;gap:4px;font-size:14.5px;max-height:220px;overflow:auto">';
+  const mono = 'font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px';
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-bottom:14px">';
   // Postgres
   html += box + scopeChk('bkScopePg','<strong>Postgres databases</strong> <span class="hint">pg_dump -Fc, one file per DB</span>',sc.postgres);
@@ -65,7 +65,7 @@ function renderBackup(){
   // Extra paths
   html += box + '<strong>Extra paths</strong> <span class="hint">one absolute path per line → extra/extra.tar.zst</span>';
   html += '<textarea id="bkExtraPaths" rows="6" spellcheck="false" style="width:100%;box-sizing:border-box;margin-top:8px;'+mono+';background:#0b0d14;color:#e5e7eb;border:1px solid #2a2f3d;border-radius:6px;padding:6px" placeholder="/etc/letsencrypt&#10;/opt/some-app/config">'+esc((sc.extraPaths||[]).join('\n'))+'</textarea>';
-  html += '<div class="hint" style="font-size:11.5px;margin-top:4px">missing paths are reported in the run errors, never fatal · /proc, /sys, /dev, /run, /tmp are refused</div>';
+  html += '<div class="hint" style="font-size:13px;margin-top:4px">missing paths are reported in the run errors, never fatal · /proc, /sys, /dev, /run, /tmp are refused</div>';
   html += '</div>';
   html += '</div>';
   html += '<h3 style="margin:0 0 10px">Schedule &amp; retention</h3>';
@@ -81,7 +81,7 @@ function renderBackup(){
   {
     const sites = (d.available && d.available.sites) || [];
     const lastFor = (dom) => (d.log || []).slice().reverse().find(e => e.site === dom);
-    html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><div class="site-card-hd"><h3 style="margin:0">Back up a single site</h3><span class="dim" style="font-size:12px">files under htdocs (node_modules, .next, cache… excluded) → Wasabi <code>' + esc((d.lastRun && d.lastRun.stamp ? '' : '') + 'web01-backups/&lt;stamp&gt;-&lt;domain&gt;') + '</code>, same retention</span></div>'
+    html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><div class="site-card-hd"><h3 style="margin:0">Back up a single site</h3><span class="dim" style="font-size:14px">files under htdocs (node_modules, .next, cache… excluded) → Wasabi <code>' + esc((d.lastRun && d.lastRun.stamp ? '' : '') + 'web01-backups/&lt;stamp&gt;-&lt;domain&gt;') + '</code>, same retention</span></div>'
       + '<table class="upd-table bk-sites"><tr><th>Site</th><th>Type</th><th>Last site backup</th><th></th></tr>';
     for (const st of sites.slice().sort((a, b) => a.domain.localeCompare(b.domain))) {
       const l = lastFor(st.domain);
@@ -95,7 +95,7 @@ function renderBackup(){
 
   if (window._bkRemote){
     html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><h3 style="margin:0 0 8px">In Wasabi ('+window._bkRemote.length+')</h3>';
-    html += '<div style="font-size:12.5px;color:#cbd5e1;max-height:220px;overflow:auto">'+(window._bkRemote.length?window._bkRemote.map(n=>'<div>📁 '+esc(n)+'</div>').join(''):'<span style="color:#6b7280">none yet</span>')+'</div></div>';
+    html += '<div style="font-size:14.5px;color:#cbd5e1;max-height:220px;overflow:auto">'+(window._bkRemote.length?window._bkRemote.map(n=>'<div>📁 '+esc(n)+'</div>').join(''):'<span style="color:#6b7280">none yet</span>')+'</div></div>';
   }
   if (d.log && d.log.length){
     html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><h3 style="margin:0 0 8px">Recent runs</h3><table class="upd-table"><tr><th>When</th><th>Trigger</th><th>Scope</th><th>Items</th><th>Size</th><th>Duration</th><th>Status</th></tr>';

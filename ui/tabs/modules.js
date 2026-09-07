@@ -57,9 +57,9 @@ function renderModules(){
   const tel = (d.telegramAvailable !== undefined) ? d.telegramAvailable : true; // hint
   html += '<div class="auto-card '+(au.enabled?'':'disabled')+'">';
   html += '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px">';
-  html += '<h3 style="margin:0;font-size:15px;font-weight:700">🤖 Auto Update</h3>';
+  html += '<h3 style="margin:0;font-size:17px;font-weight:700">🤖 Auto Update</h3>';
   html += '<label class="switch" title="Master switch"><input type="checkbox" id="auEnabled" '+(au.enabled?'checked':'')+'><span class="slider"></span></label>';
-  html += '<span class="hint" style="font-size:12px">'+(au.enabled?'Enabled — runs at '+String(au.hour).padStart(2,'0')+':'+String(au.min).padStart(2,'0')+' server time':'Disabled')+'</span>';
+  html += '<span class="hint" style="font-size:14px">'+(au.enabled?'Enabled — runs at '+String(au.hour).padStart(2,'0')+':'+String(au.min).padStart(2,'0')+' server time':'Disabled')+'</span>';
   if (lastAu) {
     const fail = lastAu.projectsFailed || 0;
     const ok = lastAu.projectsSucceeded || 0;
@@ -101,20 +101,20 @@ function renderModules(){
     html += '<div class="auto-projlist">';
     for (const p of auProjects) {
       const ch = (au.excludedDirs||[]).includes(p.dir)?'checked':'';
-      html += '<label><input type="checkbox" class="auExclDir" data-dir="'+esc(p.dir)+'" '+ch+'><span style="color:#6b7280;font-size:11.5px;font-family:ui-monospace,Menlo,Consolas,monospace">'+esc(p.relDir)+'</span></label>';
+      html += '<label><input type="checkbox" class="auExclDir" data-dir="'+esc(p.dir)+'" '+ch+'><span style="color:#6b7280;font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace">'+esc(p.relDir)+'</span></label>';
     }
     html += '</div></div>';
   }
 
-  html += '<div class="auto-row" style="margin-top:6px"><button class="btn" id="auSave" style="background:#5cdd8b;color:#0b2818;padding:8px 16px;font-size:12px">💾 Save settings</button>';
-  html += '<button class="btn" id="auRunNow" '+(auRunning?'disabled':'')+' style="padding:8px 16px;font-size:12px">'+(auRunning?'⏳ running…':'⏱ Run now (one pass)')+'</button>';
+  html += '<div class="auto-row" style="margin-top:6px"><button class="btn" id="auSave" style="background:#5cdd8b;color:#0b2818;padding:8px 16px;font-size:14px">💾 Save settings</button>';
+  html += '<button class="btn" id="auRunNow" '+(auRunning?'disabled':'')+' style="padding:8px 16px;font-size:14px">'+(auRunning?'⏳ running…':'⏱ Run now (one pass)')+'</button>';
   html += '<span class="hint" id="auRunHint" style="margin-left:auto"></span></div>';
   html += '</div>';
 
   // Toolbar (Orient): filter chips + search + refresh
   html += '<div class="mod-card"><div class="head">';
   html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1">';
-  html += '<input id="modQ" type="search" placeholder="Filter package, project, user…" value="'+esc(state.modQ||'')+'" style="background:#12141d;border:1px solid #2a2f40;color:#e9e9e9;border-radius:10px;padding:8px 12px;font-size:13px;outline:none;flex:1 1 220px;min-width:160px">';
+  html += '<input id="modQ" type="search" placeholder="Filter package, project, user…" value="'+esc(state.modQ||'')+'" style="background:#12141d;border:1px solid #2a2f40;color:#e9e9e9;border-radius:10px;padding:8px 12px;font-size:15px;outline:none;flex:1 1 220px;min-width:160px">';
   for (const f of [['all','All'],['major','Major'],['minor','Minor'],['patch','Patch']]) {
     const cls = (state.modFilter===f[0])?'chip active'+(f[0]==='major'?' down-chip':''):'chip';
     html += '<button class="'+cls+'" data-modf="'+f[0]+'">'+f[1]+'</button>';
@@ -130,8 +130,8 @@ function renderModules(){
     upAllLabel = '⬆ Update all' + (totalOutdated ? ' (' + totalOutdated + ')' : '');
   }
   const upAllDisabled = upAllBusy || totalOutdated === 0;
-  html += '<button class="btn" id="modUpdateAll" '+(upAllDisabled?'disabled':'')+' title="Update every outdated package in every scanned project to @latest" style="padding:7px 14px;font-size:12px;background:#3a2d10;color:#f8a306;border-color:#5a4e1f">'+upAllLabel+'</button>';
-  html += '<button class="btn" id="modRefresh" '+(d.scanInProgress?'disabled':'')+' style="padding:7px 14px;font-size:12px">'+(d.scanInProgress?'⏳ Scanning…':'🔄 Rescan')+'</button>';
+  html += '<button class="btn" id="modUpdateAll" '+(upAllDisabled?'disabled':'')+' title="Update every outdated package in every scanned project to @latest" style="padding:7px 14px;font-size:14px;background:#3a2d10;color:#f8a306;border-color:#5a4e1f">'+upAllLabel+'</button>';
+  html += '<button class="btn" id="modRefresh" '+(d.scanInProgress?'disabled':'')+' style="padding:7px 14px;font-size:14px">'+(d.scanInProgress?'⏳ Scanning…':'🔄 Rescan')+'</button>';
   html += '</div>';
 
   // Outdated table (Decide)
@@ -175,13 +175,13 @@ function renderModules(){
       const cpyBtn = '<button class="mod-cmd" data-cmd="'+esc(cmd)+'" title="Copy command">📋</button>';
       html += '<tr>'
         + '<td><span class="sev '+sev+'">'+(r.severity||'—')+'</span></td>'
-        + '<td><span class="mod-pkg'+(isDev?' dev':'')+'">'+esc(r.package)+'</span>'+(isDev?' <span style="color:#6b7280;font-size:10.5px;text-transform:uppercase">dev</span>':'')+'</td>'
+        + '<td><span class="mod-pkg'+(isDev?' dev':'')+'">'+esc(r.package)+'</span>'+(isDev?' <span style="color:#6b7280;font-size:12px;text-transform:uppercase">dev</span>':'')+'</td>'
         + '<td class="mod-ver">'+esc(r.current||'—')+'</td>'
         + '<td class="mod-ver">'+esc(r.wanted||'—')+'</td>'
         + '<td class="mod-ver new">'+esc(r.latest||'—')+'</td>'
         + '<td>'+esc(r.user)+'</td>'
         + '<td><span class="mod-path" title="'+esc(r.dir)+'">'+esc(r.relDir)+'</span></td>'
-        + '<td style="color:#6b7280;font-size:11px;text-transform:uppercase">'+esc(pm)+'</td>'
+        + '<td style="color:#6b7280;font-size:12.5px;text-transform:uppercase">'+esc(pm)+'</td>'
         + '<td style="text-align:right;white-space:nowrap">'+upBtn+' '+cpyBtn+'</td>'
         + '</tr>';
     }
@@ -196,7 +196,7 @@ function renderModules(){
     return bo - ao || a.user.localeCompare(b.user) || a.relDir.localeCompare(b.relDir);
   });
   if (projects.length) {
-    html += '<div class="mod-card"><h3>Scanned Projects <span style="font-weight:400;font-size:12px;color:#6b7280">'+projects.length+' total</span></h3>';
+    html += '<div class="mod-card"><h3>Scanned Projects <span style="font-weight:400;font-size:14px;color:#6b7280">'+projects.length+' total</span></h3>';
     html += '<div style="overflow-x:auto"><table class="mod-table">';
     html += '<tr><th>User</th><th>Project</th><th>Path</th><th>PM</th><th>Deps</th><th>Outdated</th><th>Last scan</th><th style="text-align:right"></th></tr>';
     for (const p of projects) {
@@ -211,12 +211,12 @@ function renderModules(){
               : '');
       html += '<tr>'
         + '<td>'+esc(p.user)+'</td>'
-        + '<td><span class="mod-pkg">'+esc(p.pkgName||'—')+'</span>'+(p.pkgVersion?' <span style="color:#6b7280;font-size:11px">'+esc(p.pkgVersion)+'</span>':'')+'</td>'
+        + '<td><span class="mod-pkg">'+esc(p.pkgName||'—')+'</span>'+(p.pkgVersion?' <span style="color:#6b7280;font-size:12.5px">'+esc(p.pkgVersion)+'</span>':'')+'</td>'
         + '<td><span class="mod-path" title="'+esc(p.dir)+'">'+esc(p.relDir)+'</span></td>'
-        + '<td style="color:#6b7280;font-size:11px;text-transform:uppercase">'+esc(p.pm||'npm')+'</td>'
+        + '<td style="color:#6b7280;font-size:12.5px;text-transform:uppercase">'+esc(p.pm||'npm')+'</td>'
         + '<td>'+(p.depCount||0)+'</td>'
         + '<td>'+odLabel+'</td>'
-        + '<td><span style="color:#6b7280;font-size:11.5px">'+(p.scannedAt? new Date(p.scannedAt).toLocaleString() : '—')+'</span></td>'
+        + '<td><span style="color:#6b7280;font-size:13px">'+(p.scannedAt? new Date(p.scannedAt).toLocaleString() : '—')+'</span></td>'
         + '<td style="text-align:right">'+allBtn+'</td>'
         + '</tr>';
     }
@@ -226,10 +226,10 @@ function renderModules(){
   // Recent updates log
   const log = (d.updateLog || []).slice().reverse();
   const detail = !!state.modShowDetailLog;
-  html += '<div class="mod-card"><div class="head"><h3 style="margin:0">Recent Updates <span style="font-weight:400;font-size:12px;color:#6b7280">'+log.length+' entries</span></h3>';
+  html += '<div class="mod-card"><div class="head"><h3 style="margin:0">Recent Updates <span style="font-weight:400;font-size:14px;color:#6b7280">'+log.length+' entries</span></h3>';
   html += '<div style="display:flex;gap:8px;align-items:center">';
-  if (log.length) html += '<button class="btn" id="modDetailToggle" title="Show full command output for each update" style="font-size:11px;padding:4px 10px;'+(detail?'background:#1f3a4e;color:#7cc7ff;border-color:#2e5a6e':'')+'">'+(detail?'▾ Detailed log':'▸ Show detailed log')+'</button>';
-  if (log.length) html += '<button class="btn" id="modClearLog" style="font-size:11px;padding:4px 10px;background:#3a2020;color:#ff8088">🗑 Clear</button>';
+  if (log.length) html += '<button class="btn" id="modDetailToggle" title="Show full command output for each update" style="font-size:12.5px;padding:4px 10px;'+(detail?'background:#1f3a4e;color:#7cc7ff;border-color:#2e5a6e':'')+'">'+(detail?'▾ Detailed log':'▸ Show detailed log')+'</button>';
+  if (log.length) html += '<button class="btn" id="modClearLog" style="font-size:12.5px;padding:4px 10px;background:#3a2020;color:#ff8088">🗑 Clear</button>';
   html += '</div>';
   html += '</div>';
   if (!log.length) {
@@ -244,8 +244,8 @@ function renderModules(){
       html += '<div class="upd-log-detail '+cls+'">';
       html += '<div class="top"><span class="ic">'+icon+'</span>'
         + '<span class="when">'+new Date(e.timestamp).toLocaleString()+'</span>'
-        + '<strong>'+esc(e.user)+'</strong> · <span style="color:#9ca3af;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px">'+esc(e.relDir)+'</span>'
-        + (e.pm?' <span style="color:#6b7280;font-size:11px;text-transform:uppercase">'+esc(e.pm)+'</span>':'')
+        + '<strong>'+esc(e.user)+'</strong> · <span style="color:#9ca3af;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">'+esc(e.relDir)+'</span>'
+        + (e.pm?' <span style="color:#6b7280;font-size:12.5px;text-transform:uppercase">'+esc(e.pm)+'</span>':'')
         + (dur?'<span class="auto-stat" style="margin-left:auto">⏱ <span class="v">'+dur+'</span></span>':'')
         + '</div>';
       if (allPkgs) html += '<div class="att">📦 '+esc(allPkgs)+'</div>';
@@ -278,8 +278,8 @@ function renderModules(){
 
   // Auto-update log (newest first)
   const auReversed = auLog.slice().reverse();
-  html += '<div class="mod-card"><div class="head"><h3 style="margin:0">🤖 Auto-Update Log <span style="font-weight:400;font-size:12px;color:#6b7280">'+auReversed.length+' pass'+(auReversed.length===1?'':'es')+'</span></h3>';
-  if (auReversed.length) html += '<button class="btn" id="auClearLog" style="font-size:11px;padding:4px 10px;background:#3a2020;color:#ff8088">🗑 Clear</button>';
+  html += '<div class="mod-card"><div class="head"><h3 style="margin:0">🤖 Auto-Update Log <span style="font-weight:400;font-size:14px;color:#6b7280">'+auReversed.length+' pass'+(auReversed.length===1?'':'es')+'</span></h3>';
+  if (auReversed.length) html += '<button class="btn" id="auClearLog" style="font-size:12.5px;padding:4px 10px;background:#3a2020;color:#ff8088">🗑 Clear</button>';
   html += '</div>';
   if (!auReversed.length) {
     html += '<div class="mod-empty">No auto-update passes have run yet. Use <strong>Run now</strong> above to test.</div>';
@@ -312,7 +312,7 @@ function renderModules(){
           const cls = r.skipped ? '' : (r.success ? 'ok' : 'fail');
           const ic = r.skipped ? '⏭' : (r.success ? '✅' : '❌');
           html += '<div class="child '+cls+'">';
-          html += '<div>'+ic+' <strong>'+esc(r.user)+'</strong> · <span style="color:#9ca3af;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px">'+esc(r.relDir)+'</span>';
+          html += '<div>'+ic+' <strong>'+esc(r.user)+'</strong> · <span style="color:#9ca3af;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">'+esc(r.relDir)+'</span>';
           if (r.skipped) html += ' — <em style="color:#6b7280">skipped: '+esc(r.reason||'')+'</em>';
           html += '</div>';
           if (!r.skipped) {

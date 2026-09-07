@@ -54,7 +54,7 @@ function render(){
     showBanner(null);
     setStatus([{ level:'ok', icon:'✅', text:'All systems operational', sub: d.summary.total + ' services · ' + fmtMem(d.summary.memory) }]);
   } else {
-    showBanner('<span class="ico">🔴</span> ' + d.summary.down + ' service' + (d.summary.down>1?'s':'') + ' down <span style="margin-left:auto;font-size:13px;font-weight:400">'+d.summary.online+'/'+d.summary.total+' up</span>');
+    showBanner('<span class="ico">🔴</span> ' + d.summary.down + ' service' + (d.summary.down>1?'s':'') + ' down <span style="margin-left:auto;font-size:15px;font-weight:400">'+d.summary.online+'/'+d.summary.total+' up</span>');
     setStatus([{ level:'bad', icon:'🔴', text: d.summary.down + ' down', sub: d.summary.online + '/' + d.summary.total + ' up' }]);
   }
   // chip labels with live counts
