@@ -54,11 +54,13 @@ function renderSettings(){
   else if (!cfDomains) { html += '<p class="dim">Loading zones…</p>'; if (!cfDomainsLoading) loadCfDomains(); }
   else if (cfDomains.error) html += '<p style="color:#ff8088">⚠ ' + esc(cfDomains.error) + '</p>';
   else {
-    // One cryptic Cloudflare code repeated down every row explains nothing — say it once, in words.
-    const authFails = cfDomains.sites.filter(x => x.error && /\[10000\]/.test(x.error)).length;
-    if (authFails) html += '<div class="site-why">The token can list your zones but not read their DNS records, so every row below fails with Cloudflare\'s <span class="mono">[10000] Authentication error</span>. '
-      + 'It is missing one permission: in the Cloudflare dashboard edit this token and tick the row literally called <b>DNS</b> (“Grants read access to DNS”) → <b>Edit</b>. '
-      + 'Note that <b>Zone DNS Settings</b> is a different permission and does not grant access to records.</div>';
+    // One cryptic Cloudflare code repeated down every row explains nothing. The server probes the
+    // zone per permission and returns which of the two causes it actually is — show that verdict.
+    const failed = cfDomains.sites.filter(x => x.error);
+    const diag = (failed.find(x => x.diagnosis) || {}).diagnosis;
+    if (failed.length) html += '<div class="site-why">' + failed.length + ' of ' + cfDomains.sites.length + ' domains could not be read — Cloudflare answered <span class="mono">' + esc(failed[0].error) + '</span>.'
+      + (diag ? '<br><br><b>' + esc(diag.verdict === 'dns-permission-missing' ? 'The DNS permission is missing from this token.' : diag.verdict === 'zone-not-in-scope' ? 'The zone is outside this token\'s resources.' : 'Diagnosis') + '</b> ' + esc(diag.message) : '')
+      + '</div>';
     html += '<table class="upd-table"><tr><th>Site</th><th>Zone</th><th>DNS</th><th>Proxied</th><th>Points here</th><th>www</th></tr>';
     for (const s of cfDomains.sites) {
       html += '<tr><td><b>' + esc(s.domain) + '</b></td><td>' + (s.zone ? esc(s.zone) + (s.zone_status && s.zone_status !== 'active' ? ' <span class="dim">(' + esc(s.zone_status) + ')</span>' : '') : '<span class="dim">not in Cloudflare</span>') + '</td>'

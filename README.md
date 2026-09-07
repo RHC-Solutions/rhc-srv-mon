@@ -51,8 +51,12 @@ another one. So each site can hold its own token (encrypted, `site_cloudflare`),
 the account-wide token from Settings. The tab shows the resolved zone and account, the apex/www records with their
 proxy state, whether the A record actually points at this server, and offers "point here" (proxied or DNS-only) plus a
 per-record proxy toggle. Connecting refuses a token that cannot see the domain's zone and says so in terms of the
-likely cause — a wrong account rather than a missing permission — and a token that lists zones but cannot read their
-records is told which row to tick (`DNS`, not the similarly-named `Zone DNS Settings`).
+likely cause — a wrong account rather than a missing permission — and a `10000 Authentication error` is
+diagnosed rather than guessed at: Cloudflare returns it both for an absent permission and for a zone outside the
+token's resources, which are opposite fixes, so `diagnoseZone()` probes endpoints needing *different* permissions on
+the same zone. `Zone:Read` working proves the zone is in scope and the DNS records permission is simply missing (name
+the row: `DNS`, not the similarly-named `Zone DNS Settings`, and the tick has to be saved through Continue to summary
+→ Update token); `Zone:Read` failing proves the opposite, and no permission change will help.
 
 Per-site tabs: Settings (root dir, site-user password + authorized_keys, PHP version/limits or Node version/port), **Processes**
 (the site's PM2 apps with start / restart / stop, and `pm2 resurrect` for a daemon that is down — a site's apps usually run

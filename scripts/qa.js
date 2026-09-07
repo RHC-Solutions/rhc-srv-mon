@@ -302,6 +302,16 @@ const section = (s) => console.log('\n### ' + s);
     ok(d.serverIp, 'no server IP resolved');
     return 'source=' + d.source + (d.error ? ' · ' + d.error : '');
   });
+  await check('a 10000 is diagnosed as permission-vs-scope, not guessed', async () => {
+    const r = await req('GET', '/api/sites/' + php.domain + '/cloudflare');
+    eq(r.status, 200);
+    if (!r.json.error) return 'skip';
+    if (!/\[10000\]/.test(r.json.error)) return 'skip';
+    ok(r.json.diagnosis, 'a 10000 came back with no diagnosis');
+    ok(['dns-permission-missing', 'zone-not-in-scope', 'ok'].includes(r.json.diagnosis.verdict), 'bad verdict ' + r.json.diagnosis.verdict);
+    ok(r.json.diagnosis.probes && 'zoneRead' in r.json.diagnosis.probes, 'no per-permission probes');
+    return r.json.diagnosis.verdict;
+  });
   await check('per-site Cloudflare on an unknown site → 404', async () => eq((await req('GET', '/api/sites/nope.example/cloudflare')).status, 404));
   await check('connecting a junk Cloudflare token → 400', async () => {
     const r = await req('PUT', '/api/sites/' + php.domain + '/cloudflare', { token: 'short' });
