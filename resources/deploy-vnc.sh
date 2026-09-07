@@ -8,43 +8,109 @@ set -u
 # It always installs one predictable systemd unit (rhc-vnc@:N) rather than the distro's own wrapper,
 # because Debian and RHEL disagree about config format, password path and session selection.
 log(){ echo "[remote] $*"; }
+have(){ command -v "$1" >/dev/null 2>&1; }
 PORT=$((5900+DISPLAY_NUM))
 id "$VNC_USER" >/dev/null 2>&1 || { log "no such user on the target: $VNC_USER"; exit 3; }
 HOME_DIR=$(getent passwd "$VNC_USER" | cut -d: -f6)
 [ -n "$HOME_DIR" ] || { log "user $VNC_USER has no home directory"; exit 3; }
-log "display :$DISPLAY_NUM (port $PORT) for $VNC_USER, home $HOME_DIR"
 
-# 1. the VNC server
-if command -v Xvnc >/dev/null 2>&1 || command -v Xtigervnc >/dev/null 2>&1; then
+# Identify the target before touching it, so a failure names the distro it happened on.
+OS_ID=""; OS_VER=""; OS_NAME="unknown"
+if [ -r /etc/os-release ]; then
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  OS_ID="${ID:-}"; OS_VER="${VERSION_ID:-}"; OS_NAME="${PRETTY_NAME:-$OS_ID $OS_VER}"
+fi
+log "target: $OS_NAME · display :$DISPLAY_NUM (port $PORT) for $VNC_USER, home $HOME_DIR"
+
+# The unit is systemd — say so plainly rather than failing later with something cryptic.
+have systemctl || { log "this target has no systemd (systemctl not found); the deploy installs a systemd unit and cannot continue"; exit 2; }
+[ -d /run/systemd/system ] || log "WARN: systemd does not look like the running init - the unit may not start"
+
+# ---- one package-manager abstraction, so every distro gets the same prerequisites ----
+PM=""
+for c in apt-get dnf yum zypper pacman; do if have "$c"; then PM="$c"; break; fi; done
+[ -n "$PM" ] || { log "no supported package manager (apt-get/dnf/yum/zypper/pacman) - install a VNC server manually"; exit 2; }
+log "package manager: $PM"
+PM_UPDATED=0
+pm_refresh(){
+  [ "$PM_UPDATED" = 1 ] && return 0
+  PM_UPDATED=1
+  case "$PM" in
+    apt-get) DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || log "WARN: apt-get update failed; continuing with the cached index" ;;
+    zypper)  zypper --non-interactive refresh >/dev/null 2>&1 || log "WARN: zypper refresh failed" ;;
+    pacman)  pacman -Sy --noconfirm >/dev/null 2>&1 || log "WARN: pacman -Sy failed" ;;
+  esac
+}
+# Install packages, tolerating names that do not exist on this distro (they are listed per-family
+# below, but minor versions move things around). Returns non-zero only if nothing could be installed.
+pm_install(){
+  [ $# -gt 0 ] || return 0
+  pm_refresh
+  case "$PM" in
+    apt-get) DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "$@" >/dev/null 2>&1 ;;
+    dnf)     dnf install -y -q --setopt=install_weak_deps=False "$@" >/dev/null 2>&1 ;;
+    yum)     yum install -y -q "$@" >/dev/null 2>&1 ;;
+    zypper)  zypper --non-interactive install -y --no-recommends "$@" >/dev/null 2>&1 ;;
+    pacman)  pacman -S --noconfirm --needed "$@" >/dev/null 2>&1 ;;
+  esac
+}
+# Same, one package at a time, so one bad name does not sink the whole set.
+pm_install_each(){
+  for p in "$@"; do pm_install "$p" || log "WARN: could not install $p (not available on $OS_NAME?)"; done
+}
+is_rhel(){ case "$PM" in dnf|yum) return 0 ;; *) return 1 ;; esac; }
+
+# ---- 1. prerequisites ----
+# Xvnc will not start without fonts ("could not open default font 'fixed'") and X sessions expect
+# xauth; neither is guaranteed by the VNC package on any of these distros. xterm is the fallback
+# session when no desktop is installed, so without it a DESKTOP=none deploy shows a blank screen.
+if have Xvnc || have Xtigervnc; then
   log "VNC server already installed"
-elif command -v apt-get >/dev/null 2>&1; then
-  log "installing tigervnc with apt..."
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq >/dev/null 2>&1 || true
-  apt-get install -y -qq --no-install-recommends tigervnc-standalone-server tigervnc-common >/dev/null 2>&1 || { log "apt install failed"; exit 2; }
-elif command -v dnf >/dev/null 2>&1; then
-  log "installing tigervnc with dnf..."
-  dnf install -y -q tigervnc-server >/dev/null 2>&1 || { log "dnf install failed"; exit 2; }
-elif command -v yum >/dev/null 2>&1; then
-  yum install -y -q tigervnc-server >/dev/null 2>&1 || { log "yum install failed"; exit 2; }
 else
-  log "no apt/dnf/yum on the target - install a VNC server manually"; exit 2
+  log "installing a VNC server with $PM..."
+  case "$PM" in
+    apt-get) pm_install tigervnc-standalone-server tigervnc-common || { log "apt install of tigervnc failed"; exit 2; } ;;
+    dnf|yum) pm_install tigervnc-server || { log "$PM install of tigervnc-server failed"; exit 2; } ;;
+    zypper)  pm_install tigervnc xorg-x11-Xvnc || { log "zypper install of tigervnc failed"; exit 2; } ;;
+    pacman)  pm_install tigervnc || { log "pacman install of tigervnc failed"; exit 2; } ;;
+  esac
 fi
 XVNC=$(command -v Xvnc || command -v Xtigervnc)
 [ -n "$XVNC" ] || { log "no Xvnc binary after install"; exit 2; }
+log "Xvnc: $XVNC"
 
-# 2. desktop (optional)
-if [ "$DESKTOP" != none ] && ! command -v startxfce4 >/dev/null 2>&1; then
-  if command -v apt-get >/dev/null 2>&1; then
-    log "installing xfce - this can take several minutes..."
-    apt-get install -y -qq --no-install-recommends xfce4 xfce4-terminal dbus-x11 >/dev/null 2>&1 || log "WARN: xfce install failed, falling back to a bare session"
-  elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y -q @xfce-desktop >/dev/null 2>&1 || log "WARN: xfce install failed"
-  fi
+log "installing prerequisites (fonts, xauth, xterm)..."
+case "$PM" in
+  apt-get) pm_install_each xfonts-base xauth xterm dbus-x11 ;;
+  dnf|yum) pm_install_each xorg-x11-fonts-misc xorg-x11-xauth xterm dbus-daemon ;;
+  zypper)  pm_install_each xorg-x11-fonts-core xauth xterm dbus-1-x11 ;;
+  pacman)  pm_install_each xorg-fonts-misc xorg-xauth xterm dbus ;;
+esac
+have xauth || log "WARN: no xauth on the target; the X session may refuse to start"
+
+# ---- 2. desktop (optional) ----
+if [ "$DESKTOP" != none ] && ! have startxfce4; then
+  log "installing xfce - this can take several minutes..."
+  case "$PM" in
+    apt-get) pm_install xfce4 xfce4-terminal dbus-x11 || log "WARN: xfce install failed, falling back to a bare session" ;;
+    dnf|yum)
+      # On RHEL rebuilds the xfce group's packages come from EPEL. `group info` can list the group
+      # from base metadata and still fail to install it, so try first and add EPEL only if needed.
+      if ! pm_install "@xfce-desktop" && ! pm_install "@Xfce"; then
+        log "xfce group not installable; enabling EPEL and retrying..."
+        if pm_install epel-release; then
+          PM_UPDATED=0
+          pm_install "@xfce-desktop" || pm_install "@Xfce" || log "WARN: xfce install failed even with EPEL, falling back to a bare session"
+        else
+          log "WARN: could not enable EPEL, falling back to a bare session"
+        fi
+      fi ;;
+    zypper)  pm_install xfce4-session xfce4-panel xfdesktop || log "WARN: xfce install failed" ;;
+    pacman)  pm_install xfce4 || log "WARN: xfce install failed" ;;
+  esac
 fi
-if ! command -v xterm >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
-  apt-get install -y -qq --no-install-recommends xterm >/dev/null 2>&1 || true
-fi
+if ! have xterm && ! have startxfce4; then log "WARN: neither xfce nor xterm is installed - the display will come up empty"; fi
 
 # 3. password (classic path + the one Debian's tigervnc reads) and session script
 install -d -m 700 -o "$VNC_USER" "$HOME_DIR/.vnc"
@@ -111,6 +177,10 @@ rm -f "/tmp/.X$DISPLAY_NUM-lock" "/tmp/.X11-unix/X$DISPLAY_NUM" 2>/dev/null || t
 systemctl daemon-reload
 systemctl enable "$INSTANCE" >/dev/null 2>&1 || log "WARN: could not enable $INSTANCE"
 systemctl restart "$INSTANCE" || { log "failed to start $INSTANCE"; systemctl status "$INSTANCE" --no-pager -l 2>&1 | tail -15; exit 5; }
+if ! have ss && ! have netstat; then
+  log "no ss/netstat to verify the port with; installing iproute..."
+  case "$PM" in apt-get) pm_install iproute2 ;; dnf|yum) pm_install iproute ;; zypper) pm_install iproute2 ;; pacman) pm_install iproute2 ;; esac
+fi
 i=0
 while [ $i -lt 15 ]; do
   if command -v ss >/dev/null 2>&1 && ss -tln 2>/dev/null | grep -q ":$PORT "; then

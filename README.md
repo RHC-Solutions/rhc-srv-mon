@@ -106,10 +106,24 @@ bridge (`lib/vnc.js`) that reaches the server either directly or — the default
 existing SSH credentials, so a VNC server bound to localhost needs nothing exposed. The target is probed before
 the viewer opens, so a wrong port or a stopped server is reported with its reason.
 
-**🖵 Deploy VNC** (in a host's edit dialog) installs a VNC server on that host over SSH: tigervnc via apt/dnf/yum,
-optionally XFCE, a password file generated locally (`lib/vnc-passwd.js` — Debian ships no `vncpasswd`), and one
-predictable `rhc-vnc@:N` systemd unit (`resources/deploy-vnc.sh`) listening on loopback only. On success the host
-entry is switched to VNC with the password stored, so it opens with a click.
+**🖵 Deploy VNC** (in a host's edit dialog) installs a VNC server on that host over SSH: tigervnc, optionally XFCE,
+a password file generated locally (`lib/vnc-passwd.js` — Debian ships no `vncpasswd`), and one predictable
+`rhc-vnc@:N` systemd unit (`resources/deploy-vnc.sh`) listening on loopback only. On success the host entry is
+switched to VNC with the password stored, so it opens with a click.
+
+The script installs the **prerequisites**, not just the VNC package, because none of these distros pull them in:
+`xfonts-base` / `xorg-x11-fonts-misc` (without fonts Xvnc dies with *could not open default font 'fixed'*), `xauth`,
+`xterm` (the fallback session — a `DESKTOP=none` deploy without it comes up as a blank screen), `dbus`, and `iproute`
+if the target has neither `ss` nor `netstat` to verify the port with. One `pm_install` abstraction covers
+**apt-get / dnf / yum / zypper / pacman**, so Debian, Ubuntu, RHEL rebuilds (Rocky, Alma), openSUSE and Arch take the
+same path; each prerequisite is installed individually so one name that does not exist on a given release cannot sink
+the rest. On RHEL rebuilds the xfce group comes from EPEL — the script tries the group first and enables
+`epel-release` only if that fails, since `group info` can list a group it cannot install. It also refuses up front,
+with a clear message, on a target that has no systemd or no supported package manager, and logs the target's
+`PRETTY_NAME` so a failure names the distro it happened on.
+
+Package names were verified to resolve on **Ubuntu 24.04, Rocky 9 and AlmaLinux 9** (and this host runs Debian 13);
+the systemd unit itself is only exercised against Debian so far.
 
 **RDP** has no pure-JS client and Debian ships no `guacd`, so each RDP viewer gets a throwaway X display on
 *this* server: `Xvnc` on a free loopback port (`:60`–`:99`, random per-session password) with `xfreerdp3` drawing
@@ -166,7 +180,7 @@ server {
   set $rhc_connection_upgrade "";
   if ($http_upgrade) { set $rhc_connection_upgrade "Upgrade"; }
 
-  location ^~ /rhc-srv-mon/ {
+  location ^~ /rhc-admin/ {
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection $rhc_connection_upgrade;
