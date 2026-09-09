@@ -185,6 +185,8 @@ function siteNewDialog(){
     + '<div class="row2" id="nsTypeFields"></div>'
     + siteField('Site user password', '<input id="nsPw" placeholder="leave empty to generate one" autocomplete="off">', 'shown once after creation and stored encrypted')
     + '<label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsSelfSigned" checked> install a self-signed certificate so https answers immediately</label>'
+    + ' <label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsCf" checked> allow traffic from Cloudflare only (and log the real client IP)</label>'
+    + ' <label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsSqlite" checked> create a SQLite database for it</label>'
     + '<div id="nsSteps" class="site-cf-detail" style="display:none"></div>'
     + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" id="nsGo" onclick="siteNewGo(this)">Create site</button></div>');
   siteNewType();
@@ -224,7 +226,9 @@ function siteNewSuggest(){
 async function siteNewGo(btn){
   const v = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
   const body = { domain: v('nsDomain'), type: v('nsType'), template: v('nsTpl') || undefined, user: v('nsUser') || undefined,
-    self_signed: !!(document.getElementById('nsSelfSigned') || {}).checked };
+    self_signed: !!(document.getElementById('nsSelfSigned') || {}).checked,
+    cf_only: !!(document.getElementById('nsCf') || {}).checked,
+    sqlite: !!(document.getElementById('nsSqlite') || {}).checked };
   if (v('nsPw')) body.password = v('nsPw');
   if (body.type === 'nodejs' && v('nsPort')) body.port = Number(v('nsPort'));
   if (body.type === 'reverse-proxy') body.reverse_proxy_url = v('nsProxy');
@@ -694,15 +698,17 @@ async function siteVhostReset(){
 // Databases for this site on both engines. PostgreSQL needs no stored credential (the panel reaches
 // it over the unix socket as root, which pg_hba maps to a superuser); MariaDB needs an admin
 // password, which is what the Root password manager is for.
+const DB_ENGINE_LABEL = { mariadb: 'MariaDB', postgres: 'PostgreSQL', sqlite: 'SQLite' };
+const dbEngineLabel = (e) => DB_ENGINE_LABEL[e] || e;
 function siteTabDatabases(s){
   return siteSub('dbs', siteUrl('/databases'), (d) => {
     let html = '';
     // engine strip
     const strip = d.servers.map(v => '<div class="db-srv ' + (v.ok ? 'up' : 'down') + '">'
-      + '<b>' + (v.engine === 'mariadb' ? 'MariaDB' : 'PostgreSQL') + '</b> '
+      + '<b>' + dbEngineLabel(v.engine) + '</b> '
       + (v.ok ? '<span class="up">✅ ' + esc((v.version || '').split(' on ')[0].slice(0, 46)) + '</span>'
               : '<span class="down">⚠ ' + esc(v.error || 'unreachable') + '</span>')
-      + '<span class="dim"> · ' + esc(v.admin_user) + '@' + esc(v.host) + (v.port ? ':' + v.port : '') + (v.has_password ? ' · password stored' : '') + '</span>'
+      + '<span class="dim"> · ' + (v.serverless ? 'owned by ' + esc(v.admin_user) + ' · no daemon, no account' : esc(v.admin_user) + '@' + esc(v.host) + (v.port ? ':' + v.port : '') + (v.has_password ? ' · password stored' : '')) + '</span>'
       + '</div>').join('');
     const unreachable = d.servers.filter(v => !v.ok);
     html += siteCard('Database servers', strip
@@ -713,9 +719,13 @@ function siteTabDatabases(s){
     let body = '';
     if (!d.databases.length) body += '<p class="dim">No databases are managed for this site yet.</p>';
     else {
-      body += '<table class="upd-table"><thead><tr><th>Database</th><th>Engine</th><th>Size</th><th>Tables</th><th>Users</th><th></th></tr></thead><tbody>';
+      const anyServer = d.databases.some(x => x.engine !== 'sqlite');
+      body += '<table class="upd-table"><thead><tr><th>Database</th><th>Engine</th><th>Size</th><th>Tables</th><th>' + (anyServer ? 'Users' : 'File') + '</th><th></th></tr></thead><tbody>';
       for (const db of d.databases) {
-        const users = db.users.length
+        const sqlite = db.engine === 'sqlite';
+        const users = sqlite
+          ? '<span class="dim mono" title="Access is decided by unix permissions on this file">' + esc(db.file || '–') + (db.mode ? ' · ' + esc(db.mode) : '') + '</span>'
+          : db.users.length
           ? db.users.map(u => '<div class="db-user"><span class="mono">' + esc(u.username) + '</span>'
               + '<span class="badge ' + (u.permissions === 'ro' ? 'type' : 'online') + '">' + (u.permissions === 'ro' ? 'read only' : 'read/write') + '</span>'
               + '<button class="btn small" onclick="siteDbUserPerm(this, ' + db.id + ', ' + u.id + ', \'' + (u.permissions === 'ro' ? 'rw' : 'ro') + '\')">→ ' + (u.permissions === 'ro' ? 'read/write' : 'read only') + '</button>'
@@ -723,13 +733,13 @@ function siteTabDatabases(s){
               + '<button class="btn small" onclick="siteDbUserRegen(this, ' + db.id + ', ' + u.id + ')" title="Set a new random password">↻</button></div>').join('')
           : '<span class="dim">none</span>';
         body += '<tr><td class="mono"><b>' + esc(db.name) + '</b>' + (db.exists === false ? ' <span class="down" title="This row exists here but the database is gone from the server">⚠ missing</span>' : '') + '</td>'
-          + '<td>' + esc(db.engine === 'mariadb' ? 'MariaDB' : 'PostgreSQL') + '</td>'
+          + '<td>' + esc(dbEngineLabel(db.engine)) + '</td>'
           + '<td>' + (db.bytes == null ? '<span class="dim">–</span>' : esc(fmtMem(db.bytes))) + '</td>'
           + '<td>' + (db.tables == null ? '<span class="dim">–</span>' : db.tables) + '</td>'
           + '<td>' + users + '</td>'
           + '<td style="text-align:right;white-space:nowrap">'
           + '<button class="btn small" onclick="siteDbExport(this, ' + db.id + ')" title="Dump into the site\'s backups/databases/">⬇ Export</button> '
-          + '<button class="btn small" onclick="siteDbImport(' + db.id + ', \'' + esc(db.name) + '\')" title="Load a .sql or .sql.gz dump into this database">⬆ Import</button> '
+          + (sqlite ? '' : '<button class="btn small" onclick="siteDbImport(' + db.id + ', \'' + esc(db.name) + '\')" title="Load a .sql or .sql.gz dump into this database">⬆ Import</button> ')
           + '<button class="btn small" onclick="siteDbTools(' + db.id + ', \'' + esc(db.name) + '\')">🛠 Tools</button> '
           + '<button class="btn small danger" onclick="siteDbDrop(this, ' + db.id + ', \'' + esc(db.name) + '\')">Drop</button></td></tr>';
       }
@@ -740,7 +750,7 @@ function siteTabDatabases(s){
     if (d.unmanaged.length) {
       html += siteCard('Not managed here',
         '<p class="dim">These exist on the server but this panel has no record of them — created by CloudPanel or on the command line. Adopting one only records it here; nothing on the server changes.</p>'
-        + '<table class="upd-table"><tbody>' + d.unmanaged.map(u => '<tr><td class="mono">' + esc(u.name) + '</td><td>' + esc(u.engine === 'mariadb' ? 'MariaDB' : 'PostgreSQL')
+        + '<table class="upd-table"><tbody>' + d.unmanaged.map(u => '<tr><td class="mono">' + esc(u.name) + '</td><td>' + esc(dbEngineLabel(u.engine))
           + '</td><td style="text-align:right"><button class="btn small" onclick="siteDbAdopt(this, \'' + esc(u.engine) + '\', \'' + esc(u.name) + '\')">Adopt</button></td></tr>').join('') + '</tbody></table>');
     }
     return html;
@@ -748,25 +758,40 @@ function siteTabDatabases(s){
 }
 function siteDbAddDialog(){
   const s = siteView.data;
+  const defName = esc((s.user || '').replace(/[^A-Za-z0-9_]/g, '_'));
   const bg = sshModal('<h3>＋ Add a database</h3>'
-    + '<div class="row3">' + siteField('Engine', '<select id="dbEngine"><option value="mariadb">MariaDB</option><option value="postgres">PostgreSQL</option></select>')
-    + siteField('Database name *', '<input id="dbName" value="' + esc((s.user || '').replace(/[^A-Za-z0-9_]/g, '_')) + '" autocomplete="off">', 'letters, digits and underscore')
-    + siteField('User name *', '<input id="dbUser" value="' + esc((s.user || '').replace(/[^A-Za-z0-9_]/g, '_')) + '" autocomplete="off">') + '</div>'
-    + '<div class="row2">' + siteField('Permissions', '<select id="dbPerm"><option value="rw">Read / write</option><option value="ro">Read only</option></select>')
-    + siteField('Password', '<input id="dbPw" placeholder="leave empty to generate one" autocomplete="off">', 'stored encrypted; shown once after creation') + '</div>'
+    + '<div class="row2">' + siteField('Engine', '<select id="dbEngine" onchange="siteDbEngineChanged()"><option value="sqlite" selected>SQLite (file, no server)</option><option value="mariadb">MariaDB</option><option value="postgres">PostgreSQL</option></select>')
+    + siteField('Database name *', '<input id="dbName" value="' + defName + '" autocomplete="off">', 'letters, digits and underscore') + '</div>'
+    // SQLite has no accounts at all, so the account half of this dialog is not "disabled" for it —
+    // it is absent, and the note says what takes its place.
+    + '<div id="dbAccount" style="display:none">'
+    + '<div class="row3">' + siteField('User name *', '<input id="dbUser" value="' + defName + '" autocomplete="off">')
+    + siteField('Permissions', '<select id="dbPerm"><option value="rw">Read / write</option><option value="ro">Read only</option></select>')
+    + siteField('Password', '<input id="dbPw" placeholder="leave empty to generate one" autocomplete="off">', 'stored encrypted; shown once after creation') + '</div></div>'
+    + '<div id="dbSqliteNote" class="dim" style="font-size:13px;padding:2px 0 6px">A file under <code>/home/' + esc(s.user || '') + '/databases/</code>, owned by the site user and writable by its SSH users — no server to start, no account, nothing listening on a port.</div>'
     + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" id="dbGo">Create</button></div>');
   bg.querySelector('#dbGo').onclick = async (e) => {
     const btn = e.target; btn.disabled = true;
-    const body = { engine: val('dbEngine'), name: val('dbName'), user: val('dbUser'), permissions: val('dbPerm') };
-    const pw = val('dbPw'); if (pw) body.password = pw;
+    const engine = val('dbEngine');
+    const body = engine === 'sqlite' ? { engine, name: val('dbName') }
+      : { engine, name: val('dbName'), user: val('dbUser'), permissions: val('dbPerm') };
+    const pw = val('dbPw'); if (pw && engine !== 'sqlite') body.password = pw;
     try {
       const r = await siteApi('POST', siteUrl('/databases'), body);
       sshModalClose();
-      toast('Created ' + r.name + ' (' + r.engine + ')' + (r.started ? ' · started ' + r.started.started : ''), 'success', { detail: 'user: ' + r.user + '\npassword: ' + r.password + '\npermissions: ' + r.permissions + (r.grant_hosts ? '\ngranted from: ' + r.grant_hosts.join(', ') : '') + (r.started ? '\n\n' + r.started.started + ' was ' + r.started.was + ' and has been enabled and started for this database.' : ''), duration: 30000 });
+      if (r.engine === 'sqlite') toast('Created ' + r.name + ' (SQLite)', 'success', { detail: r.file + '\nowner: ' + r.user + ' · mode 0660 (the site group can write)', duration: 20000 });
+      else toast('Created ' + r.name + ' (' + r.engine + ')' + (r.started ? ' · started ' + r.started.started : ''), 'success', { detail: 'user: ' + r.user + '\npassword: ' + r.password + '\npermissions: ' + r.permissions + (r.grant_hosts ? '\ngranted from: ' + r.grant_hosts.join(', ') : '') + (r.started ? '\n\n' + r.started.started + ' was ' + r.started.was + ' and has been enabled and started for this database.' : ''), duration: 30000 });
       siteSubReload('dbs');
     } catch(err){ siteErr(err, 'Create database'); btn.disabled = false; }
   };
   function val(id){ const el = document.getElementById(id); return el ? el.value.trim() : ''; }
+}
+function siteDbEngineChanged(){
+  const sel = document.getElementById('dbEngine'); if (!sel) return;
+  const sqlite = sel.value === 'sqlite';
+  const acc = document.getElementById('dbAccount'), note = document.getElementById('dbSqliteNote');
+  if (acc) acc.style.display = sqlite ? 'none' : '';
+  if (note) note.style.display = sqlite ? '' : 'none';
 }
 function siteDbDrop(btn, id, name){
   armConfirm(btn, 'drop ' + name + '?', async () => {
