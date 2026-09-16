@@ -187,6 +187,26 @@ warning naming the Zone permissions to add, rather than saving quietly and leavi
 temporary auth block; the Domains card shows every site's DNS record / proxy state per zone; DNS management and
 origin certificates are next), and the **Cleanup** card that used to sit on the Modules tab.
 
+### Turnstile on the login page
+
+`lib/turnstile.js` puts a Cloudflare Turnstile challenge in front of the sign-in form. Keys live in the kv table under
+`turnstile` (`{ enabled, siteKey, secretKey }`, the secret encrypted by `lib/secrets.js`); the site key is public and is
+handed to the browser by `GET /api/auth/state`, which returns `turnstile: null` when the challenge is off. The login page
+loads `challenges.cloudflare.com` only when a key comes back, and renders the widget lazily — Turnstile cannot lay itself
+out inside the `display:none` step it starts in.
+
+`POST /api/auth/login` and `POST /api/auth/setup` verify the solved token against `/turnstile/v0/siteverify` **before**
+the password is hashed, so guessers never reach scrypt. A rejection spends one of the six attempts an IP gets before the
+ten-minute lockout, except for `timeout-or-duplicate` / `internal-error`, which are what a human hitting a stale widget
+looks like. Two deliberate escape hatches keep a wrong key from locking the panel out: **loopback without proxy headers
+is never challenged** (`isLocalDirect`, i.e. curl on the box or an SSH tunnel), and if `challenges.cloudflare.com` itself
+is unreachable the gate fails *open* with a console warning — password and TOTP still stand behind it.
+
+The widget must list the panel's hostname in the Cloudflare dashboard, or the browser gets error `110200` and no token;
+the login page says so by name rather than showing an empty box. Settings → Turnstile stores the keys, and its **Verify
+secret** button sends a deliberately invalid response to siteverify: a good secret answers `invalid-input-response`, a
+bad one `invalid-input-secret`.
+
 ## Remote desktops (VNC) and SSH sessions
 
 An SSH host entry can open either a **terminal** or a **VNC viewer** (`protocol` on the host record).

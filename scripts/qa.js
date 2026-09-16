@@ -54,6 +54,31 @@ const store2 = () => require('/opt/rhc-srv-mon-v2/lib/sites/store');
     const r = await req('POST', '/api/auth/login', { username: 'nobody-qa', password: 'wrong-password' }, { 'X-Real-IP': '203.0.113.9' });
     ok(r.status >= 400 || r.json.error, 'bad login was accepted: ' + r.text.slice(0, 120));
   });
+  // Turnstile, when the panel has keys: the challenge is hidden from loopback and enforced for
+  // anyone arriving through the proxy. Skipped entirely when no widget is configured.
+  await check('GET /api/auth/state hides the Turnstile key from loopback, shows it to a visitor', async () => {
+    const proxied = await req('GET', '/api/auth/state', undefined, { 'X-Real-IP': '203.0.113.20' });
+    if (!proxied.json.turnstile) return 'skip';
+    ok(/^0x/.test(proxied.json.turnstile), 'site key looks wrong: ' + proxied.json.turnstile);
+    eq((await req('GET', '/api/auth/state')).json.turnstile, null, 'loopback');
+    return 'site key ' + proxied.json.turnstile.slice(0, 10) + '…';
+  });
+  // Both password entry points are gated; which one exists depends on whether this instance has
+  // an admin account yet, so ask the state first.
+  const tsProbe = async (ip, extra) => {
+    const st = (await req('GET', '/api/auth/state', undefined, { 'X-Real-IP': ip })).json;
+    if (!st.turnstile) return null;
+    const body = Object.assign(st.setupRequired ? { username: 'nobody-qa', password: 'a-long-enough-password' } : { username: 'nobody-qa', password: 'wrong-password' }, extra);
+    return req('POST', st.setupRequired ? '/api/auth/setup' : '/api/auth/login', body, { 'X-Real-IP': ip });
+  };
+  await check('a proxied sign-in without a solved Turnstile challenge is refused', async () => {
+    const r = await tsProbe('203.0.113.21'); if (!r) return 'skip';
+    eq(r.status, 403); eq(r.json.turnstile, 'retry');
+  });
+  await check('a proxied sign-in with a junk Turnstile token is refused', async () => {
+    const r = await tsProbe('203.0.113.22', { turnstile: 'qa-not-a-real-token' }); if (!r) return 'skip';
+    eq(r.status, 403); ok(/verification/i.test(r.json.error || ''), 'unexpected error: ' + r.text.slice(0, 120));
+  });
 
   /* -------------------------------------------------------------- payloads */
   section('core payloads');

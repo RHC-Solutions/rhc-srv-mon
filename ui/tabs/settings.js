@@ -18,7 +18,7 @@ function renderSettings(){
   showBanner(null); setStatus([]);
   if (!lastSettings) { view.innerHTML = '<div class="upd-card">Loading…</div>'; loadSettings(); return; }
   if (view.contains(document.activeElement) && ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;
-  const d = lastSettings, g = d.general, tg = d.telegram, sl = d.slack, cf = d.cloudflare;
+  const d = lastSettings, g = d.general, tg = d.telegram, sl = d.slack, cf = d.cloudflare, ts = d.turnstile || { enabled: false, siteKey: '' };
   document.getElementById('updated').textContent = g.panelDomain + ' · ' + g.hostname + ' · ' + g.timezone + ' · node ' + g.node;
   let html = '<div class="upd-grid">';
   // General
@@ -47,6 +47,15 @@ function renderSettings(){
     + '<p class="dim" style="margin:0 0 8px;font-size:14.5px">API token with <b>Zone:Read</b> and <b>DNS:Edit</b> (Cloudflare dashboard → My Profile → API Tokens). Stored encrypted. Powers the domains overview below; DNS records for new sites and origin certificates come next.</p>'
     + stField('API token', '<input type="password" id="cfToken" placeholder="' + (cf.configured ? esc(cf.token) + ' (leave empty to keep, type REMOVE to delete)' : 'paste token') + '">')
     + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'cloudflare\')">Verify token</button><button class="btn pri" onclick="saveCloudflareSettings()">Save</button></div></div>';
+  // Turnstile (login page challenge)
+  html += '<div class="upd-card"><h3>Turnstile (login page)</h3>'
+    + '<div class="upd-toggle"><label class="switch"><input type="checkbox" id="tsOn"' + (ts.enabled ? ' checked' : '') + '><span class="slider"></span></label><label>Challenge visitors on the sign-in form</label></div>'
+    + '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Cloudflare dashboard → Turnstile → add a widget for <b>' + esc(g.panelDomain) + '</b> (Managed mode). '
+    + 'It keeps password guessers off the login endpoint; a wrong challenge is refused before the password is ever checked. '
+    + 'Requests over an SSH tunnel / loopback are never challenged, so a bad key cannot lock you out.</p>'
+    + '<div class="row2">' + stField('Site key', '<input id="tsSite" value="' + esc(ts.siteKey || '') + '" placeholder="0x4AAAAAAA…">', 'public — the login page ships it to the browser')
+    + stField('Secret key', '<input type="password" id="tsSecret" placeholder="' + (ts.hasSecret ? esc(ts.secretKey) + ' (leave empty to keep, type REMOVE to delete)' : '0x4AAAAAAA…') + '">', 'stored encrypted') + '</div>'
+    + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'turnstile\')">Verify secret</button><button class="btn pri" onclick="saveTurnstileSettings()">Save</button></div></div>';
   html += '</div>';
   // Domains (Cloudflare zones × our sites)
   html += '<div class="upd-card" style="margin-top:14px"><div class="site-card-hd"><h3>Domains</h3>' + (cf.configured ? '<button class="btn small" onclick="cfDomains=null; loadCfDomains()">↻</button>' : '') + '</div>';
@@ -113,19 +122,29 @@ async function saveCloudflareSettings(){
   try { const r = await stApi('PUT', 'api/settings/cloudflare', { token: v === 'REMOVE' ? '' : v }); toast(r.configured ? 'Cloudflare token verified and saved' : 'Cloudflare token removed', 'success'); cfDomains = null; lastSettings = null; renderSettings(); }
   catch(e){ stErr(e, 'Cloudflare'); }
 }
+async function saveTurnstileSettings(){
+  const g = (id) => document.getElementById(id);
+  const body = { enabled: g('tsOn').checked, siteKey: g('tsSite').value.trim() };
+  if (g('tsSecret').value.trim()) body.secretKey = g('tsSecret').value.trim();
+  try { const r = await stApi('PUT', 'api/settings/turnstile', body);
+    toast(r.turnstile.active ? 'Turnstile is now live on the login page' : 'Turnstile settings saved (challenge off)', 'success');
+    lastSettings = null; renderSettings(); }
+  catch(e){ stErr(e, 'Turnstile'); }
+}
 // Tests use whatever is typed in the form, so a credential can be checked before it is saved.
 async function testChannel(which){
   const val = (id) => { const el = document.getElementById(id); return el && el.value.trim() ? el.value.trim() : undefined; };
   const body = which === 'cloudflare' ? { token: val('cfToken') }
+    : which === 'turnstile' ? { secretKey: val('tsSecret') }
     : which === 'telegram' ? { botToken: val('tgToken'), chatId: val('tgChat') }
     : { webhookUrl: val('slUrl') };
   toast('Testing ' + which + '…');
   try {
     const r = await stApi('POST', 'api/settings/' + which + '/test', body);
     const cfMsg = 'Token ' + r.status + (r.kind === 'account' ? ' (account-owned' + (r.account ? ', ' + r.account.name : '') + ')' : '') + (r.saved ? '' : ' (not saved yet — press Save to keep it)') + ' · ' + r.zones + ' zone' + (r.zones === 1 ? '' : 's') + (r.zoneNames && r.zoneNames.length ? ': ' + r.zoneNames.join(', ') : '');
-    toast(which === 'cloudflare' ? cfMsg : 'Test message sent — check ' + which,
+    toast(which === 'cloudflare' ? cfMsg : which === 'turnstile' ? 'Cloudflare accepted the secret key' : 'Test message sent — check ' + which,
       which === 'cloudflare' && r.warning ? 'warn' : 'success',
-      Object.assign({ duration: 9000 }, which === 'cloudflare' && (r.warning || r.note) ? { detail: [r.warning, r.note].filter(Boolean).join('\n\n'), duration: 14000 } : {}));
+      Object.assign({ duration: 9000 }, (which === 'cloudflare' || which === 'turnstile') && (r.warning || r.note) ? { detail: [r.warning, r.note].filter(Boolean).join('\n\n'), duration: 14000 } : {}));
   } catch(e){ stErr(e, which); }
 }
 

@@ -17,6 +17,8 @@
   .qr { display:flex; justify-content:center; margin:14px 0 6px; } .qr canvas, .qr img { border-radius:10px; background:#fff; padding:10px; }
   .secret { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:15px; letter-spacing:1px; background:#12141d; border-radius:8px; padding:8px 10px; word-break:break-all; text-align:center; color:#cbd5e1; }
   .step { display:none; } .step.on { display:block; }
+  .ts { display:none; justify-content:center; margin-top:16px; min-height:65px; }
+  .ts.on { display:flex; }
   footer { text-align:center; color:#4b5563; font-size:12.5px; margin-top:18px; }
 </style></head><body>
 <div class="card">
@@ -26,6 +28,7 @@
   <form class="step" id="s-login" autocomplete="on">
     <label>Username</label><input id="l-user" autocomplete="username" required autofocus>
     <label>Password</label><input id="l-pass" type="password" autocomplete="current-password" required>
+    <div class="ts" id="ts-login"></div>
     <button type="submit" id="l-btn">Continue</button>
   </form>
 
@@ -42,6 +45,7 @@
     <label>Password</label><input id="u-pass" type="password" autocomplete="new-password" required minlength="10">
     <label>Repeat password</label><input id="u-pass2" type="password" autocomplete="new-password" required minlength="10">
     <div class="hint">At least 10 characters. Stored as scrypt hash in auth.json (mode 600) on the server.</div>
+    <div class="ts" id="ts-setup"></div>
     <button type="submit">Create account →</button>
   </form>
 
@@ -60,7 +64,52 @@
 <script>
 const $ = (i) => document.getElementById(i);
 let pending = null, setupToken = null;
-function show(id){ document.querySelectorAll('.step').forEach(s => s.classList.toggle('on', s.id === id)); $('err').style.display='none';
+
+/* --- Cloudflare Turnstile (only when the server hands us a site key; skipped over a tunnel) --- */
+const TS_BOX = { 's-login': 'ts-login', 's-setup1': 'ts-setup' };
+let tsKey = null, tsStep = null; const tsWidget = {}, tsTok = {}, tsBad = {};
+function tsLoad(key){ tsKey = key;
+  const el = document.createElement('script');
+  el.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=tsReady';
+  el.async = el.defer = true;
+  el.onerror = () => { tsBad['*'] = 'script-blocked'; };
+  document.head.appendChild(el); }
+// Widgets are rendered when their step first becomes visible — Turnstile cannot lay itself out
+// inside a display:none form, and only one of the four steps is ever on screen.
+function tsMount(step){
+  const box = TS_BOX[step];
+  if (!box || !tsKey || !window.turnstile || tsWidget[box] != null) return;
+  const el = $(box); if (!el) return;
+  el.classList.add('on');
+  tsWidget[box] = turnstile.render(el, { sitekey: tsKey, theme: 'dark', action: step === 's-login' ? 'login' : 'setup',
+    callback: (t) => { tsTok[box] = t; tsBad[box] = null; },
+    'expired-callback': () => { tsTok[box] = null; },
+    'error-callback': (code) => { tsTok[box] = null; tsBad[box] = code || 'error'; } });
+}
+window.tsReady = () => tsMount(tsStep);
+// The challenge usually solves itself in a second or two; a submit that beats it waits briefly,
+// then says what is actually wrong instead of hanging on a disabled button.
+async function tsToken(step){
+  const box = TS_BOX[step];
+  if (!tsKey || !box) return undefined;
+  for (let i = 0; i < 20 && !tsTok[box] && !tsBad[box]; i++) await new Promise((r) => setTimeout(r, 150));
+  return tsTok[box] || '';
+}
+// 110200 is Cloudflare's "this hostname is not on the widget's list" — by far the likeliest way
+// for this to break, and impossible to guess from a blank widget.
+function tsWhy(step){
+  const box = TS_BOX[step], code = tsBad[box];
+  if (tsBad['*'] || tsWidget[box] == null)
+    return 'The human-verification widget did not load — this browser could not reach challenges.cloudflare.com. Reload the page, or reach the panel over an SSH tunnel, where the challenge is skipped.';
+  if (!code) return 'Complete the verification challenge above, then press the button again.';
+  return 'Human verification could not load (Cloudflare code ' + code + ')'
+    + (String(code).indexOf('110200') === 0 ? ' — this panel\'s hostname is missing from the Turnstile widget in the Cloudflare dashboard.' : '.')
+    + ' Reload the page; if it keeps failing, reach the panel over an SSH tunnel, where the challenge is skipped.';
+}
+// Every token is single-use, so a rejected submit needs a fresh one.
+function tsReset(step){ const box = TS_BOX[step]; if (!box) return; tsTok[box] = null;
+  if (window.turnstile && tsWidget[box] != null) { try { turnstile.reset(tsWidget[box]); } catch(e){} } }
+function show(id){ document.querySelectorAll('.step').forEach(s => s.classList.toggle('on', s.id === id)); $('err').style.display='none'; tsStep = id; tsMount(id);
   const f = document.querySelector('#' + id + ' input:not([value]), #' + id + ' input'); if (f) setTimeout(() => f.focus(), 30);
   $('sub').textContent = id === 's-login' ? 'Sign in' : id === 's-totp' ? 'Two-factor authentication' : id === 's-setup1' ? 'Initial setup (1/2)' : 'Set up authenticator (2/2)'; }
 function err(m){ $('err').textContent = m; $('err').style.display = ''; }
@@ -68,22 +117,26 @@ function err(m){ $('err').textContent = m; $('err').style.display = ''; }
 const NEXT = (function(){ const n = new URLSearchParams(location.search).get('next') || ''; return /^[a-z0-9-]{1,20}$/.test(n) ? './' + n : './'; })();
 async function post(url, body){ const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{}) }); let d = {}; try { d = await r.json(); } catch(e){} if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }
 function busy(b, on){ b.disabled = on; }
-fetch('api/auth/state').then(r => r.json()).then(s => { if (s.setupRequired) show('s-setup1'); else show('s-login'); if (s.locked) $('lock').textContent = 'too many attempts — locked'; }).catch(() => show('s-login'));
+fetch('api/auth/state').then(r => r.json()).then(s => { if (s.turnstile) tsLoad(s.turnstile); if (s.setupRequired) show('s-setup1'); else show('s-login'); if (s.locked) $('lock').textContent = 'too many attempts — locked'; }).catch(() => show('s-login'));
 
 $('s-login').addEventListener('submit', async (e) => { e.preventDefault(); const b = $('l-btn'); busy(b, true);
-  try { const d = await post('api/auth/login', { username: $('l-user').value.trim(), password: $('l-pass').value });
+  try { const ts = await tsToken('s-login');
+    if (ts === '') { const w = tsWhy('s-login'); tsReset('s-login'); return err(w); }
+    const d = await post('api/auth/login', { username: $('l-user').value.trim(), password: $('l-pass').value, turnstile: ts });
     if (d.ok) return location.replace(NEXT); pending = d.pending; $('t-code').value=''; show('s-totp'); }
-  catch(x){ if (/setup/.test(x.message)) return show('s-setup1'); err(x.message); } finally { busy(b, false); } });
+  catch(x){ tsReset('s-login'); if (/setup/.test(x.message)) return show('s-setup1'); err(x.message); } finally { busy(b, false); } });
 $('s-totp').addEventListener('submit', async (e) => { e.preventDefault(); const b = $('t-btn'); busy(b, true);
   try { await post('api/auth/totp', { pending, code: $('t-code').value.trim() }); location.replace(NEXT); }
   catch(x){ err(x.message); $('t-code').select(); } finally { busy(b, false); } });
 $('t-code').addEventListener('input', () => { if ($('t-code').value.replace(/\D/g,'').length === 6) $('s-totp').requestSubmit(); });
 $('s-setup1').addEventListener('submit', async (e) => { e.preventDefault();
   if ($('u-pass').value !== $('u-pass2').value) return err('Passwords do not match');
-  try { const d = await post('api/auth/setup', { username: $('u-user').value.trim(), password: $('u-pass').value });
+  try { const ts = await tsToken('s-setup1');
+    if (ts === '') { const w = tsWhy('s-setup1'); tsReset('s-setup1'); return err(w); }
+    const d = await post('api/auth/setup', { username: $('u-user').value.trim(), password: $('u-pass').value, turnstile: ts });
     setupToken = d.setupToken; $('secret').textContent = d.secret.replace(/(.{4})/g, '$1 ').trim();
     $('qr').innerHTML = ''; try { const q = qrcode(0, 'M'); q.addData(d.uri); q.make(); $('qr').innerHTML = q.createImgTag(5, 8); } catch(x){ $('qr').innerHTML = '<div class="hint">(QR unavailable — enter the secret manually)</div>'; }
-    show('s-setup2'); } catch(x){ err(x.message); } });
+    show('s-setup2'); } catch(x){ tsReset('s-setup1'); err(x.message); } });
 $('s-setup2').addEventListener('submit', async (e) => { e.preventDefault();
   try { await post('api/auth/setup/verify', { setupToken, code: $('u-code').value.trim() }); location.replace(NEXT); } catch(x){ err(x.message); } });
 $('u-code').addEventListener('input', () => { if ($('u-code').value.replace(/\D/g,'').length === 6) $('s-setup2').requestSubmit(); });

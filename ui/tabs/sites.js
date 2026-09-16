@@ -504,13 +504,13 @@ function siteTabCf(s){
       return siteCard('Cloudflare', head
         + '<p class="dim">This site has no Cloudflare credential, and no account-wide token is configured in Settings. '
         + 'Connect a token created in the Cloudflare account that holds <b>' + esc(s.domain) + '</b>.</p>'
-        + siteCfConnectForm(s));
+        + siteCfConnectForm(s, d));
     }
     if (d.error) {
       return siteCard('Cloudflare', head
         + '<div class="site-why">' + esc(d.error) + '</div>'
         + (d.errorDetail ? '<pre class="site-cf-detail">' + esc(d.errorDetail) + '</pre>' : '')
-        + siteCfConnectForm(s), d.hasOwnToken ? '<button class="btn small danger" onclick="siteCfDisconnect(this)">Disconnect</button>' : '');
+        + siteCfConnectForm(s, d), d.hasOwnToken ? '<button class="btn small danger" onclick="siteCfDisconnect(this)">Disconnect</button>' : '');
     }
     const ip = d.serverIp;
     const rows = (list, label) => list.map(r => '<tr><td class="mono">' + esc(r.name) + '</td><td>' + esc(r.type) + '</td><td class="mono">' + esc(r.content) + '</td>'
@@ -529,12 +529,32 @@ function siteTabCf(s){
       + rows(d.records, 'apex') + rows(d.www, 'www') + '</tbody></table>'
       + '<div class="site-actions"><button class="btn" onclick="siteCfPointHere(this, true)" title="Create or update the apex A record to this server, proxied">Point ' + esc(s.domain) + ' here (proxied)</button>'
       + '<button class="btn" onclick="siteCfPointHere(this, false)" title="Same, but DNS-only (grey cloud)">Point here (DNS only)</button></div>';
-    if (!d.hasOwnToken) body += '<div class="site-cf-alt"><p class="dim">This site is using the account-wide token. If ' + esc(s.domain) + ' ever moves to another Cloudflare account, connect a token of its own here.</p>' + siteCfConnectForm(s) + '</div>';
+    if (!d.hasOwnToken) body += '<div class="site-cf-alt"><p class="dim">This site is using the account-wide token. If ' + esc(s.domain) + ' ever moves to another Cloudflare account, connect a token of its own here.</p>' + siteCfConnectForm(s, d) + '</div>';
     return siteCard('Cloudflare', body, d.hasOwnToken ? '<button class="btn small danger" onclick="siteCfDisconnect(this)">Disconnect</button>' : '');
   });
 }
-function siteCfConnectForm(s){
-  return '<div class="site-cf-connect">' + siteField('API token for this site',
+// Exactly what to click in the Cloudflare dashboard. Every line here is a mistake this panel has
+// had to diagnose: the wrong permission row, a zone left out of the resources, an IP filter, a TTL.
+function siteCfHowTo(s, ip){
+  return '<details class="site-cf-howto"><summary>Which Cloudflare token does this need?</summary>'
+    + '<p>Create it in the Cloudflare account that owns <b>' + esc(s.domain) + '</b> — a token can never see zones outside its own account.</p>'
+    + '<ol>'
+    + '<li><b>My Profile → API Tokens → Create Token → Create Custom Token</b> (the "Edit zone DNS" template also works once you add the Zone→Read row below).</li>'
+    + '<li><b>Permissions</b> — these two rows, nothing else:'
+    + '<div class="site-cf-perms"><span>Zone</span><span>Zone</span><span>Read</span><span>Zone</span><span>DNS</span><span>Edit</span></div>'
+    + 'Pick the row called plainly <b>DNS</b> ("Grants read access to DNS") — <i>Zone DNS Settings</i> is a different permission and never gives access to records. '
+    + 'It must be <b>Edit</b>, not Read: the buttons on this tab create the A record and flip the orange cloud.</li>'
+    + '<li><b>Zone Resources → Include → Specific zone → ' + esc(s.domain) + '</b>, or <i>Include → All zones</i> of that account if one token should cover several sites.</li>'
+    + '<li><b>Client IP Address Filtering: leave it empty.</b> If your policy demands one, the only address to allow is this server, <span class="mono">' + esc(ip || 'its public IP') + '</span> — otherwise Cloudflare answers "not permitted from location" and nothing on this tab works.</li>'
+    + '<li><b>TTL: leave the end date unset.</b> An expiring token silently stops DNS management on the day it lapses.</li>'
+    + '<li><b>Continue to summary → Create Token</b>, then copy the value: Cloudflare shows it once and cannot show it again.</li>'
+    + '</ol>'
+    + '<p class="dim">Account-owned tokens (<span class="mono">cfat_…</span>) work too. The token is stored encrypted on this server and used only for ' + esc(s.domain) + '. '
+    + 'When editing an existing token, finish with <b>Continue to summary → Update token</b> — ticking a permission box alone does not save it.</p>'
+    + '</details>';
+}
+function siteCfConnectForm(s, d){
+  return '<div class="site-cf-connect">' + siteCfHowTo(s, d && d.serverIp) + siteField('API token for this site',
     '<div style="display:flex;gap:6px"><input id="stCfToken" type="password" placeholder="paste a token from the account that owns ' + esc(s.domain) + '" style="flex:1" autocomplete="off"><button class="btn pri" onclick="siteCfConnect(this)">Connect</button></div>',
     'Needs <b>Zone → Zone → Read</b> and <b>Zone → DNS → Edit</b>, scoped to this zone. Leave Client IP Filtering empty. Stored encrypted.') + '</div>';
 }
