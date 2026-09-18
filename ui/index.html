@@ -23,8 +23,8 @@
     <div class="userbar" id="userbar"></div>
   </nav>
   <main class="content">
-  <div class="hdr-row"><h1><span id="pagetitle">Sites</span> <span id="host" class="sub" style="margin:0"></span></h1></div>
-  <div class="subrow"><div class="sub" id="updated">loading…</div><div class="statuses" id="statuses"></div></div>
+  <header class="hdr-row"><h1><span id="pagetitle">Sites</span> <span id="host" class="sub"></span></h1><div class="statuses" id="statuses"></div></header>
+  <div class="subrow"><div class="sub" id="updated">loading…</div></div>
   <div id="banner" class="banner ok" style="display:none"></div>
   <div id="pm2view">
   <div class="toolbar">
@@ -52,7 +52,7 @@
   <div id="sshview" style="display:none">
     <div class="ssh-layout">
       <aside class="ssh-side">
-        <div class="ssh-side-hd"><span onclick="sshSideToggle()">🖥️ Hosts <span class="ssh-side-toggle">▾</span></span><span style="display:flex;gap:6px"><button class="upd-test-btn" style="padding:4px 10px" onclick="sshSessionsDialog()" title="Open terminals here + who is logged in on each host">👥</button><button class="upd-test-btn" id="ssh-inst-btn" style="padding:4px 10px" onclick="sshInstallsDialog()" title="rhc-srv-mon install history / running installs">📦</button><button class="upd-test-btn" style="padding:4px 10px" onclick="sshEditHost()">＋ Add host</button></span></div>
+        <div class="ssh-side-hd"><span onclick="sshSideToggle()">🖥️ Hosts <span class="ssh-side-toggle">▾</span></span><span class="ssh-side-acts"><button class="upd-test-btn icon" onclick="sshSessionsDialog()" title="Open terminals here + who is logged in on each host">👥</button><button class="upd-test-btn icon" id="ssh-inst-btn" onclick="sshInstallsDialog()" title="rhc-srv-mon install history / running installs">📦</button><button class="upd-test-btn" onclick="sshEditHost()">＋ Add host</button></span></div>
         <input class="q" id="ssh-q" type="search" placeholder="Filter hosts…" autocomplete="off" oninput="sshRenderHosts()">
         <div class="ssh-hostlist" id="ssh-hostlist"><div class="ssh-grp">loading…</div></div>
         <div class="ssh-side-ft" id="ssh-side-ft"></div>

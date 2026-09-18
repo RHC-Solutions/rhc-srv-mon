@@ -30,7 +30,7 @@ async function renderSsh(){
   const src = sshData.source || {};
   document.getElementById('ssh-side-ft').innerHTML = 'source: <b>' + esc(src.host || '') + '</b> · node ' + esc(src.node || '') + (src.git ? ' · ' + esc(src.git) : '')
     + '<br>' + sshData.hosts.length + ' host' + (sshData.hosts.length===1?'':'s') + ' · ' + (sshData.sessions||[]).length + ' running session' + ((sshData.sessions||[]).length===1?'':'s') + ((sshData.sessions||[]).some(x => !x.attached) ? ' (' + (sshData.sessions||[]).filter(x => !x.attached).length + ' detached)' : '')
-    + (sshData.helperOk ? '' : '<br><span style="color:#ff8088">⚠ pty helper missing</span>');
+    + (sshData.helperOk ? '' : '<br><span style="color:var(--md-error-bright)">⚠ pty helper missing</span>');
   if (sshSess.size) sshRenderTabs();
   const running = (sshData.installs||[]).some(j => j.status === 'running');
   if (running && !sshPollTimer) sshPollTimer = setInterval(() => { if (state.tab === 'ssh') renderSsh(); }, 2000);
@@ -525,10 +525,10 @@ function sshEditHost(id){
       + '<div class="row3">' + sshField('VNC address', '<input id="shf-vnchost" value="' + esc(h.vncHost||'127.0.0.1') + '" placeholder="127.0.0.1">', 'as seen from the target')
       + sshField('VNC port', '<input id="shf-vncport" type="number" min="1" max="65535" value="' + (h.vncPort||5901) + '">', ':1 = 5901, :2 = 5902')
       + sshField('VNC password', '<input id="shf-vncpw" type="password" autocomplete="new-password" placeholder="' + (h.hasVncPassword ? '•••••••• (stored)' : 'vnc password') + '">') + '</div>'
-      + '<label style="display:flex;gap:8px;align-items:center;font-size:15px;cursor:pointer;margin-bottom:8px"><input type="checkbox" id="shf-vnctunnel"' + (h.vncTunnel === false ? '' : ' checked') + ' style="accent-color:#5cdd8b"> Reach it through SSH (<code>ssh -W</code>) — required for a server bound to localhost, and nothing is exposed to the network</label>'
-      + '<label style="display:flex;gap:8px;align-items:center;font-size:15px;cursor:pointer"><input type="checkbox" id="shf-vncview"' + (h.vncViewOnly ? ' checked' : '') + ' style="accent-color:#5cdd8b"> View only (no keyboard or mouse)</label>'
+      + '<label style="display:flex;gap:8px;align-items:center;font-size:15px;cursor:pointer;margin-bottom:8px"><input type="checkbox" id="shf-vnctunnel"' + (h.vncTunnel === false ? '' : ' checked') + ' style="accent-color:var(--md-primary)"> Reach it through SSH (<code>ssh -W</code>) — required for a server bound to localhost, and nothing is exposed to the network</label>'
+      + '<label style="display:flex;gap:8px;align-items:center;font-size:15px;cursor:pointer"><input type="checkbox" id="shf-vncview"' + (h.vncViewOnly ? ' checked' : '') + ' style="accent-color:var(--md-primary)"> View only (no keyboard or mouse)</label>'
       + '</div>'
-    + sshField('After login', '<label style="display:flex;gap:8px;align-items:center;font-size:15px;cursor:pointer"><input type="checkbox" id="shf-root"' + (h.becomeRoot ? ' checked' : '') + ' style="accent-color:#5cdd8b"> Become root (<code>sudo -i</code>) — for non-root users; a sudo password prompt is answered with the stored password, or type it</label>')
+    + sshField('After login', '<label style="display:flex;gap:8px;align-items:center;font-size:15px;cursor:pointer"><input type="checkbox" id="shf-root"' + (h.becomeRoot ? ' checked' : '') + ' style="accent-color:var(--md-primary)"> Become root (<code>sudo -i</code>) — for non-root users; a sudo password prompt is answered with the stored password, or type it</label>')
     + '<div id="shf-test"></div>'
     + '<div class="foot"><div class="left">' + (id ? '<button class="btn danger" onclick="sshDeleteHost(\'' + id + '\')">Delete</button>' : '') + (id ? '<button class="btn" onclick="sshTestHost(\'' + id + '\')">🔌 Test connection</button>' : '') + (id ? '<button class="btn" onclick="sshDeployVncDialog(\'' + id + '\')" title="Install a VNC server on this host">🖵 Deploy VNC</button>' : '') + '</div>'
     + '<button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="sshSaveHost(' + (id ? '\'' + id + '\'' : 'null') + ')">' + (id ? 'Save' : 'Add host') + '</button></div>');
@@ -638,7 +638,7 @@ function sshRetryInstall(id){
 function sshInstallsBadge(){
   const b = document.getElementById('ssh-inst-btn'); if (!b || !sshData) return;
   const jobs = sshData.installs || [], running = jobs.filter(j => j.status === 'running').length, failed = jobs.filter(j => j.status === 'failed').length;
-  b.innerHTML = '📦' + (running ? '<span class="bd">⏳' + running + '</span>' : '') + (!running && failed ? '<span class="bd" style="color:#ff8088">✖' + failed + '</span>' : '') + (!running && !failed && jobs.length ? '<span class="bd">' + jobs.length + '</span>' : '');
+  b.innerHTML = '📦' + (running ? '<span class="bd">⏳' + running + '</span>' : '') + (!running && failed ? '<span class="bd" style="color:var(--md-error-bright)">✖' + failed + '</span>' : '') + (!running && !failed && jobs.length ? '<span class="bd">' + jobs.length + '</span>' : '');
   b.title = jobs.length ? jobs.length + ' install' + (jobs.length === 1 ? '' : 's') + (running ? ' · ' + running + ' running' : '') + (failed ? ' · ' + failed + ' failed' : '') + ' — click to open' : 'rhc-srv-mon install history / running installs';
 }
 async function sshRenderInstalls(){
@@ -659,7 +659,7 @@ async function sshRenderInstalls(){
     const log = sshJobLogs.get(j.id);
     const open = j.status === 'running' || window._sshOpenJob === j.id;
     return '<div class="ssh-inst"><div class="top"><b>' + (j.kind === 'vnc' ? '🖵' : '📦') + ' ' + esc(j.hostName || j.target) + '</b>' + st + '</div>'
-      + '<div class="meta">' + esc(j.target) + ' → ' + esc(j.kind === 'vnc' ? 'VNC :' + j.opts.display + ' (' + j.opts.geometry + ', ' + j.opts.desktop + ')' + (j.result ? ' → port ' + j.result.port : '') : (j.opts ? j.opts.appDir + ' :' + j.opts.port : '')) + ' · ' + esc((j.startedAt||'').slice(0,16).replace('T',' ')) + (j.finishedAt ? ' · ' + Math.round((new Date(j.finishedAt) - new Date(j.startedAt))/1000) + 's' : '') + (j.error ? '<br><span style="color:#ff8088">' + esc(j.error) + '</span>' : '') + '</div>'
+      + '<div class="meta">' + esc(j.target) + ' → ' + esc(j.kind === 'vnc' ? 'VNC :' + j.opts.display + ' (' + j.opts.geometry + ', ' + j.opts.desktop + ')' + (j.result ? ' → port ' + j.result.port : '') : (j.opts ? j.opts.appDir + ' :' + j.opts.port : '')) + ' · ' + esc((j.startedAt||'').slice(0,16).replace('T',' ')) + (j.finishedAt ? ' · ' + Math.round((new Date(j.finishedAt) - new Date(j.startedAt))/1000) + 's' : '') + (j.error ? '<br><span style="color:var(--md-error-bright)">' + esc(j.error) + '</span>' : '') + '</div>'
       + (open && log ? '<pre id="ssh-log-' + j.id + '">' + log.map(l => '<span class="t">' + esc(l.t.slice(11,19)) + '</span> <span class="' + esc(l.k) + '">' + esc(l.m) + '</span>').join('\n') + '</pre>' : '')
       + '<div class="acts">'
       + (open ? (j.status === 'running' ? '' : '<button class="upd-test-btn" onclick="window._sshOpenJob=null;sshRenderInstalls()">Hide log</button>')
@@ -716,7 +716,7 @@ function sshSessHtml(){
     + hosts.map(x => '<option value="' + esc(x.id) + '"' + (x.id === sshSessView.hostId ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select></div>';
   if (!sshSessView.hostId) h += '<p class="dim" style="margin:0">Pick a host to run <code>who</code> and <code>ss</code> on it over SSH. Nothing is polled — this only runs when you ask.</p>';
   else if (sshSessView.loading) h += '<p class="dim" style="margin:0">Asking the host…</p>';
-  else if (sshSessView.error) h += '<p style="margin:0;color:#ff8088">⚠ ' + esc(sshSessView.error) + '</p>';
+  else if (sshSessView.error) h += '<p style="margin:0;color:var(--md-error-bright)">⚠ ' + esc(sshSessView.error) + '</p>';
   else if (sshSessView.data) {
     const d = sshSessView.data;
     const others = d.sessions.filter(x => !x.fromPanel && x.pid > 1);
@@ -724,8 +724,8 @@ function sshSessHtml(){
     const withSvc = others.filter(x => x.hasServices);
     h += '<p class="dim" style="margin:0 0 8px;font-size:14.5px">' + esc(d.target) + ' · checked ' + esc(String(d.checkedAt).slice(11, 19))
       + (live.length ? ' <button class="upd-test-btn" style="margin-left:8px" id="sess-killall">⏻ Disconnect all ' + live.length + ' other login' + (live.length === 1 ? '' : 's') + '</button>' : '')
-      + (others.length && !live.length ? ' <span style="color:#f8a306">the other ' + others.length + ' entries are ended logins whose processes are still running</span>' : '') + '</p>';
-    if (withSvc.length) h += '<div class="box" style="border-color:#f8a30666;margin-bottom:10px;font-size:14.5px">⚠ ' + withSvc.length + ' of these sessions still run services (' + esc([...new Set(withSvc.flatMap(x => x.services))].slice(0, 6).join(', ')) + '). <b>Disconnect</b> ends the login and leaves them running; <b>kill</b> stops them too.</div>';
+      + (others.length && !live.length ? ' <span style="color:var(--md-warning)">the other ' + others.length + ' entries are ended logins whose processes are still running</span>' : '') + '</p>';
+    if (withSvc.length) h += '<div class="box" style="border-color:var(--md-warning);margin-bottom:10px;font-size:14.5px">⚠ ' + withSvc.length + ' of these sessions still run services (' + esc([...new Set(withSvc.flatMap(x => x.services))].slice(0, 6).join(', ')) + '). <b>Disconnect</b> ends the login and leaves them running; <b>kill</b> stops them too.</div>';
     h += '<table class="upd-table"><tr><th>User</th><th>TTY</th><th>From</th><th>Since</th><th>Idle</th><th>PID</th><th></th></tr>';
     for (const s of d.sessions) {
       const svc = s.hasServices ? ' <span class="upd-badge na" title="' + esc(s.procCount + ' processes: ' + s.services.join(', ')) + '">' + esc(s.services.slice(0, 2).join(', ')) + (s.services.length > 2 ? '…' : '') + '</span>' : '';
@@ -773,7 +773,7 @@ function sshDeployVncDialog(id){
     + sshField('Screen size', '<input id="dv-geom" value="1280x800">') + '</div>'
     + '<div class="row2">' + sshField('Desktop', '<select id="dv-desktop"><option value="xfce">XFCE (installs it if missing — several minutes)</option><option value="none">None — bare X (xterm if available)</option></select>')
     + sshField('VNC password', '<input id="dv-pw" placeholder="leave empty to generate">', 'VNC passwords are truncated to 8 characters by the protocol') + '</div>'
-    + '<label class="upd-toggle"><input type="checkbox" id="dv-link" checked style="accent-color:#5cdd8b"> Make this host open as a VNC viewer afterwards</label>'
+    + '<label class="upd-toggle"><input type="checkbox" id="dv-link" checked style="accent-color:var(--md-primary)"> Make this host open as a VNC viewer afterwards</label>'
     + ((h.user||'root') !== 'root' ? sshField('sudo password for ' + esc(h.user), '<input id="dv-sudo" type="password" autocomplete="new-password" placeholder="needed unless ' + esc(h.user) + ' has passwordless sudo">') : '')
     + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" id="dv-go">🚀 Deploy</button></div>');
   bg.querySelector('#dv-disp').addEventListener('input', (e) => { const f = bg.querySelector('#dv-disp').parentElement.querySelector('.hint'); if (f) f.textContent = 'port ' + (5900 + (parseInt(e.target.value) || 1)) + ' on the target'; });
@@ -838,7 +838,7 @@ async function sshRdpLog(id){
   try {
     const d = await siteApi('GET', 'api/ssh/rdp/' + s.rdpDisplay + '/log');
     sshModal('<h3>🪟 RDP client log <span class="dim" style="font-weight:400;font-size:14px">' + esc(d.target) + '</span></h3>'
-      + (d.error ? '<div class="box" style="border-color:#5a1f25;color:#ff8088">' + esc(d.error) + '</div>' : '')
+      + (d.error ? '<div class="box" style="border-color:var(--md-error-container);color:var(--md-error-bright)">' + esc(d.error) + '</div>' : '')
       + '<pre class="site-code-pre" style="max-height:50vh">' + esc((d.log || []).join('\n') || '(nothing logged yet)') + '</pre>'
       + '<div class="foot"><button class="btn pri" onclick="sshModalClose()">Close</button></div>');
   } catch(e){ toast('Log: ' + e.message, 'error'); }

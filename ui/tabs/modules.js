@@ -84,14 +84,14 @@ function renderModules(){
 
   html += '<div class="auto-row"><label class="switch"><input type="checkbox" id="auAutoFix" '+(au.autoFix?'checked':'')+'><span class="slider"></span></label>';
   html += '<label for="auAutoFix">Auto-fix common npm errors</label>';
-  html += '<span class="hint">retry with <code style="background:#12141d;padding:1px 6px;border-radius:4px">--force</code> on ERESOLVE; resync lockfile on EUSAGE; one retry on network errors; pnpm build scripts (ERR_PNPM_IGNORED_BUILDS) are always approved + rebuilt</span></div>';
+  html += '<span class="hint">retry with <code style="background:var(--md-surface-04dp);padding:1px 6px;border-radius:4px">--force</code> on ERESOLVE; resync lockfile on EUSAGE; one retry on network errors; pnpm build scripts (ERR_PNPM_IGNORED_BUILDS) are always approved + rebuilt</span></div>';
 
   html += '<div class="auto-row"><label class="switch"><input type="checkbox" id="auNotify" '+(au.notifyTelegram?'checked':'')+'><span class="slider"></span></label>';
   html += '<label for="auNotify">Telegram notify</label>';
   html += '<label style="display:flex;align-items:center;gap:6px;font-weight:500"><input type="checkbox" id="auFailOnly" '+(au.notifyOnFailureOnly?'checked':'')+'> failures only</label>';
   html += '<span class="hint">uses bot config from the Updates tab</span></div>';
 
-  html += '<div class="auto-row" style="flex-direction:column;align-items:stretch"><label style="margin-bottom:6px">Excluded packages <span class="hint">never auto-update these (comma-separated, e.g. <code style="background:#12141d;padding:1px 6px;border-radius:4px">next, react, react-dom</code>)</span></label>';
+  html += '<div class="auto-row" style="flex-direction:column;align-items:stretch"><label style="margin-bottom:6px">Excluded packages <span class="hint">never auto-update these (comma-separated, e.g. <code style="background:var(--md-surface-04dp);padding:1px 6px;border-radius:4px">next, react, react-dom</code>)</span></label>';
   html += '<input type="text" id="auExclPkgs" value="'+esc((au.excludedPackages||[]).join(', '))+'" placeholder="next, react, react-dom"></div>';
 
   // Excluded projects
@@ -101,12 +101,12 @@ function renderModules(){
     html += '<div class="auto-projlist">';
     for (const p of auProjects) {
       const ch = (au.excludedDirs||[]).includes(p.dir)?'checked':'';
-      html += '<label><input type="checkbox" class="auExclDir" data-dir="'+esc(p.dir)+'" '+ch+'><span style="color:#6b7280;font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace">'+esc(p.relDir)+'</span></label>';
+      html += '<label><input type="checkbox" class="auExclDir" data-dir="'+esc(p.dir)+'" '+ch+'><span style="color:var(--md-on-surface-dis);font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace">'+esc(p.relDir)+'</span></label>';
     }
     html += '</div></div>';
   }
 
-  html += '<div class="auto-row" style="margin-top:6px"><button class="btn" id="auSave" style="background:#5cdd8b;color:#0b2818;padding:8px 16px;font-size:14px">💾 Save settings</button>';
+  html += '<div class="auto-row" style="margin-top:6px"><button class="btn" id="auSave" style="background:var(--md-primary);color:var(--md-on-primary);padding:8px 16px;font-size:14px">💾 Save settings</button>';
   html += '<button class="btn" id="auRunNow" '+(auRunning?'disabled':'')+' style="padding:8px 16px;font-size:14px">'+(auRunning?'⏳ running…':'⏱ Run now (one pass)')+'</button>';
   html += '<span class="hint" id="auRunHint" style="margin-left:auto"></span></div>';
   html += '</div>';
@@ -114,7 +114,7 @@ function renderModules(){
   // Toolbar (Orient): filter chips + search + refresh
   html += '<div class="mod-card"><div class="head">';
   html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1">';
-  html += '<input id="modQ" type="search" placeholder="Filter package, project, user…" value="'+esc(state.modQ||'')+'" style="background:#12141d;border:1px solid #2a2f40;color:#e9e9e9;border-radius:10px;padding:8px 12px;font-size:15px;outline:none;flex:1 1 220px;min-width:160px">';
+  html += '<input id="modQ" type="search" placeholder="Filter package, project, user…" value="'+esc(state.modQ||'')+'" style="background:var(--md-surface-04dp);border:1px solid var(--md-divider);color:var(--md-on-surface);border-radius:10px;padding:8px 12px;font-size:15px;outline:none;flex:1 1 220px;min-width:160px">';
   for (const f of [['all','All'],['major','Major'],['minor','Minor'],['patch','Patch']]) {
     const cls = (state.modFilter===f[0])?'chip active'+(f[0]==='major'?' down-chip':''):'chip';
     html += '<button class="'+cls+'" data-modf="'+f[0]+'">'+f[1]+'</button>';
@@ -130,7 +130,7 @@ function renderModules(){
     upAllLabel = '⬆ Update all' + (totalOutdated ? ' (' + totalOutdated + ')' : '');
   }
   const upAllDisabled = upAllBusy || totalOutdated === 0;
-  html += '<button class="btn" id="modUpdateAll" '+(upAllDisabled?'disabled':'')+' title="Update every outdated package in every scanned project to @latest" style="padding:7px 14px;font-size:14px;background:#3a2d10;color:#f8a306;border-color:#5a4e1f">'+upAllLabel+'</button>';
+  html += '<button class="btn" id="modUpdateAll" '+(upAllDisabled?'disabled':'')+' title="Update every outdated package in every scanned project to @latest" style="padding:7px 14px;font-size:14px;background:var(--md-warn-container);color:var(--md-warning);border-color:var(--md-warn-container)">'+upAllLabel+'</button>';
   html += '<button class="btn" id="modRefresh" '+(d.scanInProgress?'disabled':'')+' style="padding:7px 14px;font-size:14px">'+(d.scanInProgress?'⏳ Scanning…':'🔄 Rescan')+'</button>';
   html += '</div>';
 
@@ -171,17 +171,17 @@ function renderModules(){
       const updating = isUpdating(r.dir);
       const upBtn = updating
         ? '<button class="mod-cmd" disabled style="opacity:.6">⏳ updating…</button>'
-        : '<button class="mod-cmd" data-update-pkg="'+esc(r.package)+'" data-update-dir="'+esc(r.dir)+'" data-update-user="'+esc(r.user)+'" title="Run: '+esc(pm)+' install '+esc(r.package)+'@latest" style="background:#1f4e34;color:#5cdd8b;border-color:#2e6e4a">⬆ Update</button>';
+        : '<button class="mod-cmd" data-update-pkg="'+esc(r.package)+'" data-update-dir="'+esc(r.dir)+'" data-update-user="'+esc(r.user)+'" title="Run: '+esc(pm)+' install '+esc(r.package)+'@latest" style="background:var(--md-ok-container);color:var(--md-primary);border-color:var(--md-primary)">⬆ Update</button>';
       const cpyBtn = '<button class="mod-cmd" data-cmd="'+esc(cmd)+'" title="Copy command">📋</button>';
       html += '<tr>'
         + '<td><span class="sev '+sev+'">'+(r.severity||'—')+'</span></td>'
-        + '<td><span class="mod-pkg'+(isDev?' dev':'')+'">'+esc(r.package)+'</span>'+(isDev?' <span style="color:#6b7280;font-size:12px;text-transform:uppercase">dev</span>':'')+'</td>'
+        + '<td><span class="mod-pkg'+(isDev?' dev':'')+'">'+esc(r.package)+'</span>'+(isDev?' <span style="color:var(--md-on-surface-dis);font-size:12px;text-transform:uppercase">dev</span>':'')+'</td>'
         + '<td class="mod-ver">'+esc(r.current||'—')+'</td>'
         + '<td class="mod-ver">'+esc(r.wanted||'—')+'</td>'
         + '<td class="mod-ver new">'+esc(r.latest||'—')+'</td>'
         + '<td>'+esc(r.user)+'</td>'
         + '<td><span class="mod-path" title="'+esc(r.dir)+'">'+esc(r.relDir)+'</span></td>'
-        + '<td style="color:#6b7280;font-size:12.5px;text-transform:uppercase">'+esc(pm)+'</td>'
+        + '<td style="color:var(--md-on-surface-dis);font-size:12.5px;text-transform:uppercase">'+esc(pm)+'</td>'
         + '<td style="text-align:right;white-space:nowrap">'+upBtn+' '+cpyBtn+'</td>'
         + '</tr>';
     }
@@ -196,7 +196,7 @@ function renderModules(){
     return bo - ao || a.user.localeCompare(b.user) || a.relDir.localeCompare(b.relDir);
   });
   if (projects.length) {
-    html += '<div class="mod-card"><h3>Scanned Projects <span style="font-weight:400;font-size:14px;color:#6b7280">'+projects.length+' total</span></h3>';
+    html += '<div class="mod-card"><h3>Scanned Projects <span style="font-weight:400;font-size:14px;color:var(--md-on-surface-dis)">'+projects.length+' total</span></h3>';
     html += '<div style="overflow-x:auto"><table class="mod-table">';
     html += '<tr><th>User</th><th>Project</th><th>Path</th><th>PM</th><th>Deps</th><th>Outdated</th><th>Last scan</th><th style="text-align:right"></th></tr>';
     for (const p of projects) {
@@ -207,16 +207,16 @@ function renderModules(){
       const updating = isUpdating(p.dir);
       const allBtn = updating
         ? '<button class="mod-cmd" disabled style="opacity:.6">⏳ updating…</button>'
-        : (od ? '<button class="mod-cmd" data-update-all="'+esc(p.dir)+'" data-update-user="'+esc(p.user)+'" data-update-count="'+od+'" title="Update all '+od+' outdated packages to @latest" style="background:#3a2d10;color:#f8a306;border-color:#5a4e1f">⬆ Update all ('+od+')</button>'
+        : (od ? '<button class="mod-cmd" data-update-all="'+esc(p.dir)+'" data-update-user="'+esc(p.user)+'" data-update-count="'+od+'" title="Update all '+od+' outdated packages to @latest" style="background:var(--md-warn-container);color:var(--md-warning);border-color:var(--md-warn-container)">⬆ Update all ('+od+')</button>'
               : '');
       html += '<tr>'
         + '<td>'+esc(p.user)+'</td>'
-        + '<td><span class="mod-pkg">'+esc(p.pkgName||'—')+'</span>'+(p.pkgVersion?' <span style="color:#6b7280;font-size:12.5px">'+esc(p.pkgVersion)+'</span>':'')+'</td>'
+        + '<td><span class="mod-pkg">'+esc(p.pkgName||'—')+'</span>'+(p.pkgVersion?' <span style="color:var(--md-on-surface-dis);font-size:12.5px">'+esc(p.pkgVersion)+'</span>':'')+'</td>'
         + '<td><span class="mod-path" title="'+esc(p.dir)+'">'+esc(p.relDir)+'</span></td>'
-        + '<td style="color:#6b7280;font-size:12.5px;text-transform:uppercase">'+esc(p.pm||'npm')+'</td>'
+        + '<td style="color:var(--md-on-surface-dis);font-size:12.5px;text-transform:uppercase">'+esc(p.pm||'npm')+'</td>'
         + '<td>'+(p.depCount||0)+'</td>'
         + '<td>'+odLabel+'</td>'
-        + '<td><span style="color:#6b7280;font-size:13px">'+(p.scannedAt? new Date(p.scannedAt).toLocaleString() : '—')+'</span></td>'
+        + '<td><span style="color:var(--md-on-surface-dis);font-size:13px">'+(p.scannedAt? new Date(p.scannedAt).toLocaleString() : '—')+'</span></td>'
         + '<td style="text-align:right">'+allBtn+'</td>'
         + '</tr>';
     }
@@ -226,10 +226,10 @@ function renderModules(){
   // Recent updates log
   const log = (d.updateLog || []).slice().reverse();
   const detail = !!state.modShowDetailLog;
-  html += '<div class="mod-card"><div class="head"><h3 style="margin:0">Recent Updates <span style="font-weight:400;font-size:14px;color:#6b7280">'+log.length+' entries</span></h3>';
+  html += '<div class="mod-card"><div class="head"><h3 style="margin:0">Recent Updates <span style="font-weight:400;font-size:14px;color:var(--md-on-surface-dis)">'+log.length+' entries</span></h3>';
   html += '<div style="display:flex;gap:8px;align-items:center">';
   if (log.length) html += '<button class="btn" id="modDetailToggle" title="Show full command output for each update" style="font-size:12.5px;padding:4px 10px;'+(detail?'background:#1f3a4e;color:#7cc7ff;border-color:#2e5a6e':'')+'">'+(detail?'▾ Detailed log':'▸ Show detailed log')+'</button>';
-  if (log.length) html += '<button class="btn" id="modClearLog" style="font-size:12.5px;padding:4px 10px;background:#3a2020;color:#ff8088">🗑 Clear</button>';
+  if (log.length) html += '<button class="btn" id="modClearLog" style="font-size:12.5px;padding:4px 10px;background:var(--md-error-container);color:var(--md-error-bright)">🗑 Clear</button>';
   html += '</div>';
   html += '</div>';
   if (!log.length) {
@@ -244,8 +244,8 @@ function renderModules(){
       html += '<div class="upd-log-detail '+cls+'">';
       html += '<div class="top"><span class="ic">'+icon+'</span>'
         + '<span class="when">'+new Date(e.timestamp).toLocaleString()+'</span>'
-        + '<strong>'+esc(e.user)+'</strong> · <span style="color:#9ca3af;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">'+esc(e.relDir)+'</span>'
-        + (e.pm?' <span style="color:#6b7280;font-size:12.5px;text-transform:uppercase">'+esc(e.pm)+'</span>':'')
+        + '<strong>'+esc(e.user)+'</strong> · <span style="color:var(--md-on-surface-med);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">'+esc(e.relDir)+'</span>'
+        + (e.pm?' <span style="color:var(--md-on-surface-dis);font-size:12.5px;text-transform:uppercase">'+esc(e.pm)+'</span>':'')
         + (dur?'<span class="auto-stat" style="margin-left:auto">⏱ <span class="v">'+dur+'</span></span>':'')
         + '</div>';
       if (allPkgs) html += '<div class="att">📦 '+esc(allPkgs)+'</div>';
@@ -253,17 +253,17 @@ function renderModules(){
         html += '<div class="att">🔁 '+e.attempts.map(a => esc(a.strategy)+(a.success?'✓':'✗')+(a.error?'('+esc(a.error)+')':'')).join(' → ')+'</div>';
       }
       if (e.autoFix) html += '<div class="att">🔧 auto-fix: '+esc(e.autoFix)+'</div>';
-      if (e.error) html += '<div class="att" style="color:#ff8088">⚠ '+esc(e.error)+'</div>';
+      if (e.error) html += '<div class="att" style="color:var(--md-error-bright)">⚠ '+esc(e.error)+'</div>';
       const out = (e.output||'').trim();
       if (out) html += '<pre>'+esc(out)+'</pre>';
-      else if (!e.error) html += '<div class="att" style="color:#6b7280">(no command output captured)</div>';
+      else if (!e.error) html += '<div class="att" style="color:var(--md-on-surface-dis)">(no command output captured)</div>';
       html += '</div>';
     }
   } else {
     html += '<div class="upd-log">';
     for (const e of log) {
       const icon = e.success ? '✅' : '❌';
-      const colorStyle = e.success ? '' : ' style="color:#ff8088"';
+      const colorStyle = e.success ? '' : ' style="color:var(--md-error-bright)"';
       const dur = e.duration_ms ? Math.round(e.duration_ms/1000)+'s' : '';
       const pkgs = (e.packages||[]).slice(0,4).join(', ') + ((e.packages||[]).length>4 ? ' +'+((e.packages||[]).length-4)+' more' : '');
       html += '<div class="upd-log-entry">'
@@ -278,8 +278,8 @@ function renderModules(){
 
   // Auto-update log (newest first)
   const auReversed = auLog.slice().reverse();
-  html += '<div class="mod-card"><div class="head"><h3 style="margin:0">🤖 Auto-Update Log <span style="font-weight:400;font-size:14px;color:#6b7280">'+auReversed.length+' pass'+(auReversed.length===1?'':'es')+'</span></h3>';
-  if (auReversed.length) html += '<button class="btn" id="auClearLog" style="font-size:12.5px;padding:4px 10px;background:#3a2020;color:#ff8088">🗑 Clear</button>';
+  html += '<div class="mod-card"><div class="head"><h3 style="margin:0">🤖 Auto-Update Log <span style="font-weight:400;font-size:14px;color:var(--md-on-surface-dis)">'+auReversed.length+' pass'+(auReversed.length===1?'':'es')+'</span></h3>';
+  if (auReversed.length) html += '<button class="btn" id="auClearLog" style="font-size:12.5px;padding:4px 10px;background:var(--md-error-container);color:var(--md-error-bright)">🗑 Clear</button>';
   html += '</div>';
   if (!auReversed.length) {
     html += '<div class="mod-empty">No auto-update passes have run yet. Use <strong>Run now</strong> above to test.</div>';
@@ -299,8 +299,8 @@ function renderModules(){
       html += '<span class="hint">'+triggeredIcon+'</span>';
       html += '<span class="summary-pills">';
       html += '<span class="auto-stat">attempted <span class="v">'+att+'</span></span>';
-      if (ok)    html += '<span class="auto-stat" style="color:#5cdd8b">✅ <span class="v">'+ok+'</span></span>';
-      if (fail)  html += '<span class="auto-stat" style="color:#ff8088">❌ <span class="v">'+fail+'</span></span>';
+      if (ok)    html += '<span class="auto-stat" style="color:var(--md-primary)">✅ <span class="v">'+ok+'</span></span>';
+      if (fail)  html += '<span class="auto-stat" style="color:var(--md-error-bright)">❌ <span class="v">'+fail+'</span></span>';
       if (upd)   html += '<span class="auto-stat">📦 <span class="v">'+upd+'</span> pkgs</span>';
       if (fixes) html += '<span class="auto-stat">🔧 <span class="v">'+fixes+'</span> fixes</span>';
       if (dur)   html += '<span class="auto-stat">⏱ <span class="v">'+dur+'</span></span>';
@@ -312,8 +312,8 @@ function renderModules(){
           const cls = r.skipped ? '' : (r.success ? 'ok' : 'fail');
           const ic = r.skipped ? '⏭' : (r.success ? '✅' : '❌');
           html += '<div class="child '+cls+'">';
-          html += '<div>'+ic+' <strong>'+esc(r.user)+'</strong> · <span style="color:#9ca3af;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">'+esc(r.relDir)+'</span>';
-          if (r.skipped) html += ' — <em style="color:#6b7280">skipped: '+esc(r.reason||'')+'</em>';
+          html += '<div>'+ic+' <strong>'+esc(r.user)+'</strong> · <span style="color:var(--md-on-surface-med);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">'+esc(r.relDir)+'</span>';
+          if (r.skipped) html += ' — <em style="color:var(--md-on-surface-dis)">skipped: '+esc(r.reason||'')+'</em>';
           html += '</div>';
           if (!r.skipped) {
             const pkgList = (r.packages||[]).slice(0,8).join(', ') + ((r.packages||[]).length>8 ? ' +'+((r.packages||[]).length-8)+' more' : '');
@@ -322,7 +322,7 @@ function renderModules(){
               html += '<div class="att">🔁 '+r.attempts.map(a => esc(a.strategy) + (a.success?'✓':'✗')+(a.error?'('+esc(a.error)+')':'')).join(' → ')+'</div>';
             }
             if (r.autoFix) html += '<div class="att">🔧 auto-fix: '+esc(r.autoFix)+'</div>';
-            if (!r.success && r.finalError) html += '<div class="att" style="color:#ff8088">⚠ '+esc(r.finalError)+'</div>';
+            if (!r.success && r.finalError) html += '<div class="att" style="color:var(--md-error-bright)">⚠ '+esc(r.finalError)+'</div>';
             if (!r.success && r.outputTail) html += '<pre>'+esc(r.outputTail)+'</pre>';
           }
           html += '</div>';

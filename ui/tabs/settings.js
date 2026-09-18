@@ -61,7 +61,7 @@ function renderSettings(){
   html += '<div class="upd-card" style="margin-top:14px"><div class="site-card-hd"><h3>Domains</h3>' + (cf.configured ? '<button class="btn small" onclick="cfDomains=null; loadCfDomains()">↻</button>' : '') + '</div>';
   if (!cf.configured) html += '<p class="dim">Add a Cloudflare API token to see zones and how each site domain resolves.</p>';
   else if (!cfDomains) { html += '<p class="dim">Loading zones…</p>'; if (!cfDomainsLoading) loadCfDomains(); }
-  else if (cfDomains.error) html += '<p style="color:#ff8088">⚠ ' + esc(cfDomains.error) + '</p>';
+  else if (cfDomains.error) html += '<p style="color:var(--md-error-bright)">⚠ ' + esc(cfDomains.error) + '</p>';
   else {
     // One cryptic Cloudflare code repeated down every row explains nothing. The server probes the
     // zone per permission and returns which of the two causes it actually is — show that verdict.
@@ -73,9 +73,9 @@ function renderSettings(){
     html += '<table class="upd-table"><tr><th>Site</th><th>Zone</th><th>DNS</th><th>Proxied</th><th>Points here</th><th>www</th></tr>';
     for (const s of cfDomains.sites) {
       html += '<tr><td><b>' + esc(s.domain) + '</b></td><td>' + (s.zone ? esc(s.zone) + (s.zone_status && s.zone_status !== 'active' ? ' <span class="dim">(' + esc(s.zone_status) + ')</span>' : '') : '<span class="dim">not in Cloudflare</span>') + '</td>'
-        + '<td class="mono">' + (s.records ? (s.records.length ? s.records.map(r => esc(r.type + ' ' + r.content)).join('<br>') : '<span style="color:#f8a306">no record</span>') : (s.error ? '<span style="color:#ff8088">' + esc(s.error) + '</span>' : '')) + '</td>'
+        + '<td class="mono">' + (s.records ? (s.records.length ? s.records.map(r => esc(r.type + ' ' + r.content)).join('<br>') : '<span style="color:var(--md-warning)">no record</span>') : (s.error ? '<span style="color:var(--md-error-bright)">' + esc(s.error) + '</span>' : '')) + '</td>'
         + '<td>' + (s.proxied == null ? '' : s.proxied ? '☁️ yes' : 'no (DNS only)') + '</td>'
-        + '<td>' + (s.records ? (s.points_here ? '✅' : s.proxied ? '<span class="dim">via Cloudflare</span>' : '<span style="color:#f8a306">✗</span>') : '') + '</td>'
+        + '<td>' + (s.records ? (s.points_here ? '✅' : s.proxied ? '<span class="dim">via Cloudflare</span>' : '<span style="color:var(--md-warning)">✗</span>') : '') + '</td>'
         + '<td class="mono dim">' + (s.www ? (s.www.length ? s.www.map(r => esc(r.type + ' ' + r.content)).join('<br>') : '–') : '') + '</td></tr>';
     }
     html += '</table><div class="dim" style="font-size:14px;margin-top:8px">Zones this token can see: ' + cfDomains.zones.map(z => esc(z.name) + (z.status !== 'active' ? ' (' + esc(z.status) + ')' : '')).join(', ') + '</div>';
@@ -173,22 +173,22 @@ function cleanupCardHtml(d){
     const on = !!cuCfg[k];
     if (on && t && !t.prune) cuSel += (t.bytes||0);
     const size = t ? (t.count ? bkBytes(t.bytes)+(t.prune?' in store':'')+' · '+t.count+(t.count===1?' path':' paths') : 'nothing found') : '';
-    html += '<label title="'+esc(cuHints[k])+'" style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="cuOpt" data-key="'+k+'" '+(on?'checked':'')+'><span>'+esc(cuLabels[k])+'</span><span style="margin-left:auto;color:#9ca3af;font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace;white-space:nowrap">'+esc(size)+'</span></label>';
+    html += '<label title="'+esc(cuHints[k])+'" style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="cuOpt" data-key="'+k+'" '+(on?'checked':'')+'><span>'+esc(cuLabels[k])+'</span><span style="margin-left:auto;color:var(--md-on-surface-med);font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace;white-space:nowrap">'+esc(size)+'</span></label>';
   }
   html += '</div>';
   if (cuPrev && cuPrev.targets) {
     const lo = cuPrev.targets.find(x => x.key==='leftovers');
-    if (lo && lo.items && lo.items.length) html += '<div class="hint" style="font-size:13px;margin-top:8px;line-height:1.7">leftovers: '+lo.items.map(i => '<code style="background:#12141d;padding:1px 6px;border-radius:4px">'+esc(i.path.replace(/^\/home\//,'~'))+'</code> '+bkBytes(i.bytes)).join(' · ')+'</div>';
+    if (lo && lo.items && lo.items.length) html += '<div class="hint" style="font-size:13px;margin-top:8px;line-height:1.7">leftovers: '+lo.items.map(i => '<code style="background:var(--md-surface-04dp);padding:1px 6px;border-radius:4px">'+esc(i.path.replace(/^\/home\//,'~'))+'</code> '+bkBytes(i.bytes)).join(' · ')+'</div>';
   }
   html += '<div class="auto-row" style="margin-top:10px"><label class="switch"><input type="checkbox" id="cuAfterAuto" '+(cuCfg.afterAutoUpdate?'checked':'')+'><span class="slider"></span></label>';
   html += '<label for="cuAfterAuto">Run after the nightly auto-update pass</label>';
   html += '<span class="hint" style="margin-left:auto">'+(cuPrev?('measured '+new Date(cuPrev.measuredAt).toLocaleString()+' · selected ≈ '+bkBytes(cuSel)):'not measured yet — click Measure')+'</span></div>';
-  html += '<div class="auto-row"><button class="btn" id="cuSave" style="background:#5cdd8b;color:#0b2818;padding:8px 16px;font-size:14px">💾 Save</button>';
+  html += '<div class="auto-row"><button class="btn" id="cuSave" style="background:var(--md-primary);color:var(--md-on-primary);padding:8px 16px;font-size:14px">💾 Save</button>';
   html += '<button class="btn" id="cuMeasure" style="padding:8px 16px;font-size:14px">📏 Measure</button>';
   html += '<button class="btn" id="cuRun" '+(cu.running?'disabled':'')+' style="padding:8px 16px;font-size:14px">'+(cu.running?'⏳ cleaning…':'🧹 Clean now')+'</button>';
   if (cuLast && cuLast.results && cuLast.results.length) html += '<span class="hint" style="margin-left:auto">'+cuLast.results.map(r => esc(cuLabels[r.key]||r.key)+': '+bkBytes(r.freed||0)).join(' · ')+'</span>';
   html += '</div>';
-  if (cuLast && cuLast.errors && cuLast.errors.length) html += '<div class="hint" style="color:#ff8088;font-size:13px;margin-top:6px">'+cuLast.errors.slice(0,5).map(esc).join('<br>')+'</div>';
+  if (cuLast && cuLast.errors && cuLast.errors.length) html += '<div class="hint" style="color:var(--md-error-bright);font-size:13px;margin-top:6px">'+cuLast.errors.slice(0,5).map(esc).join('<br>')+'</div>';
   html += '</div>';
 
   return html;

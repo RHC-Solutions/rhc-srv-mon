@@ -125,7 +125,7 @@ async function siteCtl(btn, domain, action, app, user){
 // shell run the system node whatever the site user's nvm holds. Show the truth, keep the record as a
 // footnote when the two differ, and flag a binary that was replaced under a running process.
 function siteRuntime(s){
-  if (s.nodeStale) return { text: 'Node <span style="color:#f8a306">⚠ replaced</span>', title: 'This process is still running ' + (s.nodeExe || 'its node binary') + ', which has since been replaced on disk by an upgrade. It keeps the old version until it is restarted.' };
+  if (s.nodeStale) return { text: 'Node <span style="color:var(--md-warning)">⚠ replaced</span>', title: 'This process is still running ' + (s.nodeExe || 'its node binary') + ', which has since been replaced on disk by an upgrade. It keeps the old version until it is restarted.' };
   if (s.nodeActual) {
     const rec = String(s.nodeVersion || '').replace(/^v/, '');
     const act = s.nodeActual.replace(/^v/, '');
@@ -215,11 +215,11 @@ function siteNewSuggest(){
       const u = document.getElementById('nsUser'), h = document.getElementById('nsHint'), uh = document.getElementById('nsUserHint'), p = document.getElementById('nsPort');
       if (u && (!u.dataset.touched || !u.value)) u.value = r.user;
       if (p && !p.value) p.value = r.nextNodePort;
-      if (h) h.innerHTML = !r.valid ? '<span style="color:#ff8088">that is not a valid domain name</span>'
-        : r.managed ? '<span style="color:#ff8088">this panel already manages it</span>'
-        : r.vhostExists ? '<span style="color:#ff8088">a vhost for it already exists on disk</span>'
+      if (h) h.innerHTML = !r.valid ? '<span style="color:var(--md-error-bright)">that is not a valid domain name</span>'
+        : r.managed ? '<span style="color:var(--md-error-bright)">this panel already manages it</span>'
+        : r.vhostExists ? '<span style="color:var(--md-error-bright)">a vhost for it already exists on disk</span>'
         : '<span class="up">available</span>';
-      if (uh) uh.innerHTML = r.userTaken ? '<span style="color:#f8a306">the unix user ' + esc(r.user) + ' already exists — pick another</span>' : 'owns /home/' + esc(r.user) + '; php-fpm runs as this account';
+      if (uh) uh.innerHTML = r.userTaken ? '<span style="color:var(--md-warning)">the unix user ' + esc(r.user) + ' already exists — pick another</span>' : 'owns /home/' + esc(r.user) + '; php-fpm runs as this account';
     } catch(e){}
   }, 350);
 }
@@ -251,7 +251,7 @@ async function siteNewGo(btn){
 function siteDeleteDialog(){
   const s = siteView.data;
   const bg = sshModal('<h3>Delete ' + esc(s.domain) + '</h3>'
-    + '<div class="box" style="border-color:#ff808866"><b style="color:#ff8088">This removes the vhost, certificates'
+    + '<div class="box" style="border-color:var(--md-error-bright)"><b style="color:var(--md-error-bright)">This removes the vhost, certificates'
     + (s.php ? ', the php-fpm pool' : '') + ', databases, SSH/FTP users, cron jobs, logrotate and the unix account <span class="mono">' + esc(s.user) + '</span> with its home directory.</b><br>Everything under <span class="mono">/home/' + esc(s.user) + '</span> goes with it. Export anything you need first.</div>'
     + siteField('Type the domain to confirm', '<input id="delConfirm" autocomplete="off" placeholder="' + esc(s.domain) + '">')
     + '<label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin:6px 0"><input type="checkbox" id="delKeepHome"> keep the home directory (removes the account, leaves the files)</label>'
@@ -523,7 +523,7 @@ function siteTabCf(s){
       + '<div class="row3">'
       + siteField('Zone', '<input value="' + esc(zone.name) + '" disabled>', 'status ' + esc(zone.status) + (zone.paused ? ' · paused' : '') + (zone.plan ? ' · ' + esc(zone.plan) : ''))
       + siteField('Cloudflare account', '<input value="' + esc((d.account && d.account.name) || '?') + '" disabled>')
-      + siteField('This server', '<input value="' + esc(ip || '?') + '" disabled>', d.points_here ? '<span class="up">the apex A record points here</span>' : '<span style="color:#f8a306">the apex A record does not point here</span>')
+      + siteField('This server', '<input value="' + esc(ip || '?') + '" disabled>', d.points_here ? '<span class="up">the apex A record points here</span>' : '<span style="color:var(--md-warning)">the apex A record does not point here</span>')
       + '</div>'
       + '<table class="upd-table"><thead><tr><th>Name</th><th>Type</th><th>Content</th><th>Proxy</th><th></th></tr></thead><tbody>'
       + rows(d.records, 'apex') + rows(d.www, 'www') + '</tbody></table>'
@@ -596,7 +596,7 @@ function siteTabSettings(s){
     + (s.type === 'reverse-proxy' ? siteField('Reverse Proxy URL', '<input id="stProxy" value="' + esc(s.reverse_proxy_url || '') + '" placeholder="http://127.0.0.1:8080">') : '')
     + '<div class="site-actions"><button class="btn pri" onclick="siteSaveDomain()">Save</button></div>');
   html += siteCard('Site User Settings',
-    '<div class="row2">' + siteField('Site User', '<input value="' + esc(s.user) + '" disabled>', s.unix ? 'uid ' + s.unix.uid + ' · ' + esc(s.unix.home) : '<span style="color:#ff8088">unix user missing!</span>')
+    '<div class="row2">' + siteField('Site User', '<input value="' + esc(s.user) + '" disabled>', s.unix ? 'uid ' + s.unix.uid + ' · ' + esc(s.unix.home) : '<span style="color:var(--md-error-bright)">unix user missing!</span>')
     + siteField('Password', '<div class="site-pw"><input id="stPw" type="password" value="' + (s.hasPassword ? '****************' : '') + '" placeholder="' + (s.hasPassword ? '' : 'not stored — generate one') + '" readonly><button class="btn small" onclick="sitePwReveal()" title="Show">👁</button><button class="btn small" onclick="sitePwCopy()" title="Copy">⧉</button></div>',
       '<a href="#" onclick="event.preventDefault(); sitePwGenerate()">Generate new password</a>' + (s.managed_by === 'clp' && !s.hasPassword ? ' · the CloudPanel password is not readable by this panel' : '')) + '</div>'
     + siteField('SSH Keys', '<textarea id="stKeys" rows="5" placeholder="ssh-ed25519 AAAA… user@host (one per line)">' + esc(s.ssh_keys || '') + '</textarea>', 'Written to ' + esc('/home/' + s.user + '/.ssh/authorized_keys'))
@@ -618,11 +618,11 @@ function siteTabSettings(s){
     const sel = '<select id="stNodeVer">' + latestOpt + (known ? '' : '<option value="' + esc(recorded) + '" selected>' + esc(recorded) + ' · recorded, not installed</option>') + opts + '</select>';
     const act = (s.nodejs.actual || []);
     const actNote = act.length
-      ? 'Actually running: ' + act.map(a => (a.stale ? '<b style="color:#f8a306">' + esc(a.path) + ' (deleted — node was upgraded under it; restart to pick up the new one)</b>' : '<b>' + esc(a.version || '?') + '</b> <span class="dim">' + esc(a.path) + '</span>') + ' <span class="dim">(' + esc(a.procs.slice(0, 4).join(', ')) + (a.procs.length > 4 ? ' +' + (a.procs.length - 4) : '') + ')</span>').join(' · ')
+      ? 'Actually running: ' + act.map(a => (a.stale ? '<b style="color:var(--md-warning)">' + esc(a.path) + ' (deleted — node was upgraded under it; restart to pick up the new one)</b>' : '<b>' + esc(a.version || '?') + '</b> <span class="dim">' + esc(a.path) + '</span>') + ' <span class="dim">(' + esc(a.procs.slice(0, 4).join(', ')) + (a.procs.length > 4 ? ' +' + (a.procs.length - 4) : '') + ')</span>').join(' · ')
       : 'No running Node process found for this site — the value above is only what is recorded.';
     const trackNote = tracks
       ? '<div class="dim" style="font-size:13px;margin-top:6px">Follows the system Node.js — an upgrade applies here at the next restart, with nothing pinned.</div>'
-      : '<div style="font-size:13px;margin-top:6px;color:#f8a306">Pinned to ' + esc(recorded) + ' — system upgrades will not reach this site. Choose <b>Latest</b> to follow them.</div>';
+      : '<div style="font-size:13px;margin-top:6px;color:var(--md-warning)">Pinned to ' + esc(recorded) + ' — system upgrades will not reach this site. Choose <b>Latest</b> to follow them.</div>';
     html += siteCard('Node.js Settings',
       '<div class="row2">' + siteField('Node.js Version *', '<div style="display:flex;gap:6px"><span style="flex:1">' + sel + '</span><label class="chip" style="display:flex;align-items:center;gap:6px;font-size:14px"><input type="checkbox" id="stNodeInstall"> nvm install</label></div>', actNote + trackNote)
       + siteField('App Port *', '<input id="stNodePort" type="number" min="1024" max="65535" value="' + s.nodejs.port + '">', 'nginx proxies / to 127.0.0.1:' + s.nodejs.port + (s.vhost_placeholders.includes('app_port') ? '' : ' — the vhost has a literal port; it will be patched')) + '</div>'
@@ -691,7 +691,7 @@ function siteTabVhost(s){
     const missing = !v.placeholders.includes('settings');
     return warn + siteCard('Vhost <span class="dim" style="font-weight:400;font-size:14px">' + esc(v.file) + '</span>',
       '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Edit the <b>template</b>: <code>{{placeholders}}</code> (' + v.placeholders.map(p => '<code>' + esc(p) + '</code>').join(' ') + ') are filled in on save from the site\'s settings. Saving runs <code>nginx -t</code> and reloads nginx; on failure the previous file is restored.'
-        + (missing ? ' <span style="color:#f8a306">No <code>{{settings}}</code> placeholder: Security features (basic auth, blocked IPs…) need it — the Security tab can insert it.</span>' : '') + '</p>'
+        + (missing ? ' <span style="color:var(--md-warning)">No <code>{{settings}}</code> placeholder: Security features (basic auth, blocked IPs…) need it — the Security tab can insert it.</span>' : '') + '</p>'
       + '<textarea id="vhEditor" class="site-code" spellcheck="false" rows="28">' + esc(v.template) + '</textarea>'
       + '<div class="site-actions" style="justify-content:space-between"><div><button class="btn" onclick="siteVhostPreview()">Preview rendered</button> <button class="btn" onclick="siteVhostReset()">Reset to template…</button></div><div><button class="btn pri" onclick="siteVhostSave()">Save</button></div></div>'
       + '<pre id="vhPreview" class="site-code-pre" style="display:none"></pre>');
@@ -840,7 +840,7 @@ async function siteDbExport(btn, id){
 }
 function siteDbImport(id, name){
   const bg = sshModal('<h3>⬆ Import into ' + esc(name) + '</h3>'
-    + '<div class="box" style="border-color:#f8a30666"><b style="color:#f8a306">This runs the dump against an existing database.</b> Statements in the file are applied as they are — a dump that starts with DROP TABLE will drop those tables. Export first if you want a way back.</div>'
+    + '<div class="box" style="border-color:var(--md-warning)"><b style="color:var(--md-warning)">This runs the dump against an existing database.</b> Statements in the file are applied as they are — a dump that starts with DROP TABLE will drop those tables. Export first if you want a way back.</div>'
     + siteField('Dump file', '<input type="file" id="dbFile" accept=".sql,.gz,.sql.gz">', 'plain .sql or gzipped .sql.gz — streamed straight into the client, never buffered on disk')
     + '<div id="dbImpProg" class="dim" style="font-size:13px"></div>'
     + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" id="dbImpGo">Import</button></div>');
@@ -938,10 +938,10 @@ async function siteDbRootReveal(engine){
 /* ---- SSL/TLS ---- */
 function siteTabSsl(s){
   return siteSub('ssl', siteUrl('/certificates'), (v) => {
-    const rows = v.certificates.map(c => { const days = siteDays(c.expires_at); return '<tr' + (c.is_active ? ' style="background:#20242f"' : '') + '><td>' + (c.is_active ? '<span class="upd-badge ok">active</span>' : '<span class="upd-badge na">stored</span>') + '</td><td>' + esc(c.type.replace('_', ' ')) + '</td><td>' + esc(c.subject || '') + '<div class="dim" style="font-size:13px">' + esc((c.sans || []).join(', ')) + '</div></td><td>' + esc((c.issuer || '').split(',')[1] || c.issuer || '') + '</td><td' + (days != null && days < 30 ? ' style="color:#ff8088"' : '') + '>' + (c.expires_at ? c.expires_at.slice(0, 10) + (days != null ? ' <span class="dim">(' + (days < 0 ? 'expired' : days + 'd') + ')</span>' : '') : '') + '</td><td style="text-align:right;white-space:nowrap">'
+    const rows = v.certificates.map(c => { const days = siteDays(c.expires_at); return '<tr' + (c.is_active ? ' style="background:var(--md-divider)"' : '') + '><td>' + (c.is_active ? '<span class="upd-badge ok">active</span>' : '<span class="upd-badge na">stored</span>') + '</td><td>' + esc(c.type.replace('_', ' ')) + '</td><td>' + esc(c.subject || '') + '<div class="dim" style="font-size:13px">' + esc((c.sans || []).join(', ')) + '</div></td><td>' + esc((c.issuer || '').split(',')[1] || c.issuer || '') + '</td><td' + (days != null && days < 30 ? ' style="color:var(--md-error-bright)"' : '') + '>' + (c.expires_at ? c.expires_at.slice(0, 10) + (days != null ? ' <span class="dim">(' + (days < 0 ? 'expired' : days + 'd') + ')</span>' : '') : '') + '</td><td style="text-align:right;white-space:nowrap">'
       + (!c.is_active && c.has_key ? '<button class="btn small" onclick="siteCertActivate(' + c.id + ')">Activate</button> ' : '') + (!c.is_active ? '<button class="btn small" onclick="armConfirm(this, \'⚠ Delete?\', () => siteCertDelete(' + c.id + '))">Delete</button>' : '') + '</td></tr>'; }).join('');
     const inst = v.installed;
-    return siteCard('Certificates', '<p class="dim" style="margin:0 0 8px;font-size:14.5px">nginx serves ' + (inst ? '<b>' + esc(inst.subject) + '</b> from ' + esc((inst.issuer || '').split(',')[1] || inst.issuer) + ', valid until ' + inst.expires_at.slice(0, 10) : '<span style="color:#ff8088">no certificate file</span>') + '. Let\'s Encrypt and Cloudflare-issued origin certificates come with the Settings → Cloudflare phase; upload a PEM pair for now.</p>'
+    return siteCard('Certificates', '<p class="dim" style="margin:0 0 8px;font-size:14.5px">nginx serves ' + (inst ? '<b>' + esc(inst.subject) + '</b> from ' + esc((inst.issuer || '').split(',')[1] || inst.issuer) + ', valid until ' + inst.expires_at.slice(0, 10) : '<span style="color:var(--md-error-bright)">no certificate file</span>') + '. Let\'s Encrypt and Cloudflare-issued origin certificates come with the Settings → Cloudflare phase; upload a PEM pair for now.</p>'
       + '<table class="upd-table"><tr><th></th><th>Type</th><th>Subject / SANs</th><th>Issuer</th><th>Expires</th><th></th></tr>' + (rows || '<tr><td colspan="6" class="dim">No certificates stored</td></tr>') + '</table>'
       + '<div class="site-actions"><button class="btn" onclick="siteCertSelfSigned()">Self-signed</button><button class="btn pri" onclick="siteCertUpload()">Upload certificate…</button></div>');
   });
@@ -1001,7 +1001,7 @@ async function siteSecuritySave(insertPlaceholder){
 /* ---- SSH/FTP ---- */
 function siteTabSsh(s){
   return siteSub('ssh', siteUrl('/ssh-users'), (list) => {
-    const rows = list.map(u => '<tr><td class="mono">' + esc(u.username) + (u.unix ? '' : ' <span style="color:#ff8088">(unix user missing)</span>') + '</td><td class="dim">' + (u.unix ? 'uid ' + u.unix.uid + ' · ' + esc(u.unix.home) : '') + '</td><td>' + (u.ssh_keys ? u.ssh_keys.split('\n').filter(x => x.trim()).length + ' key(s)' : '<span class="dim">no keys</span>') + '</td><td style="text-align:right;white-space:nowrap">'
+    const rows = list.map(u => '<tr><td class="mono">' + esc(u.username) + (u.unix ? '' : ' <span style="color:var(--md-error-bright)">(unix user missing)</span>') + '</td><td class="dim">' + (u.unix ? 'uid ' + u.unix.uid + ' · ' + esc(u.unix.home) : '') + '</td><td>' + (u.ssh_keys ? u.ssh_keys.split('\n').filter(x => x.trim()).length + ' key(s)' : '<span class="dim">no keys</span>') + '</td><td style="text-align:right;white-space:nowrap">'
       + (u.has_password ? '<button class="btn small" onclick="siteSshPw(' + u.id + ')">Show password</button> ' : '') + '<button class="btn small" onclick="siteSshEdit(' + u.id + ')">Edit</button> <button class="btn small" onclick="armConfirm(this, \'⚠ Delete user + home?\', () => siteSshDelete(' + u.id + '))">Delete</button></td></tr>').join('');
     return siteCard('SSH Users', '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Separate logins with their own home that see this site\'s <code>htdocs</code>, <code>logs</code> and <code>backups</code> (symlinks; group = site user, umask 007 so files stay shared).</p>'
       + '<table class="upd-table"><tr><th>User</th><th></th><th>Keys</th><th></th></tr>' + (rows || '<tr><td colspan="4" class="dim">No SSH users</td></tr>') + '</table>'

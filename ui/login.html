@@ -2,24 +2,78 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sign in · RHC SRV Manager</title>
 <style>
-  :root { color-scheme: dark; } * { box-sizing:border-box; }
-  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background:#161823; color:#e9e9e9; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; padding:20px; }
-  .card { width:100%; max-width:400px; background:#1e2230; border-radius:16px; padding:28px 28px 24px; box-shadow:0 10px 40px rgba(0,0,0,.45); border:1px solid #2a2f40; }
-  h1 { font-size:21.5px; margin:0 0 4px; } .sub { color:#6b7280; font-size:15px; margin-bottom:20px; }
-  label { display:block; font-size:13px; font-weight:700; color:#9ca3af; text-transform:uppercase; letter-spacing:.5px; margin:14px 0 6px; }
-  input { width:100%; background:#12141d; border:1px solid #2a2f40; color:#e9e9e9; border-radius:9px; padding:11px 13px; font-size:17px; outline:none; }
-  input:focus { border-color:#5cdd8b88; } input.code { font-size:26px; letter-spacing:8px; text-align:center; font-family:ui-monospace,Menlo,Consolas,monospace; }
-  button { width:100%; margin-top:20px; background:#5cdd8b; color:#0b2818; border:none; border-radius:9px; padding:12px; font-size:17px; font-weight:700; cursor:pointer; }
-  button:hover { background:#6fee9c; } button:disabled { opacity:.5; cursor:not-allowed; } button.sec { background:#2a2f40; color:#e9e9e9; margin-top:10px; }
-  .err { margin-top:14px; background:#5a1f25; color:#ff8088; border-radius:9px; padding:10px 12px; font-size:15px; display:none; }
-  .ok { margin-top:14px; background:#1f4e34; color:#5cdd8b; border-radius:9px; padding:10px 12px; font-size:15px; }
-  .hint { font-size:14px; color:#6b7280; margin-top:8px; line-height:1.5; }
-  .qr { display:flex; justify-content:center; margin:14px 0 6px; } .qr canvas, .qr img { border-radius:10px; background:#fff; padding:10px; }
-  .secret { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:15px; letter-spacing:1px; background:#12141d; border-radius:8px; padding:8px 10px; word-break:break-all; text-align:center; color:#cbd5e1; }
+  /* Material Design 2 — dark theme sign-in (same token set as the dashboard) */
+  :root {
+    color-scheme: dark;
+    --md-primary:#5cdd8b; --md-primary-light:#8bf0b0; --md-on-primary:#00210f;
+    --md-error:#cf6679; --md-error-bright:#ff8a95;
+    --md-background:#12141c; --md-surface-01dp:#1c1f2a; --md-surface-04dp:#252836;
+    --md-surface-06dp:#292d3c; --md-surface-24dp:#383d51;
+    --md-on-surface:rgba(255,255,255,.87); --md-on-surface-med:rgba(255,255,255,.60);
+    --md-on-surface-dis:rgba(255,255,255,.38); --md-outline:rgba(255,255,255,.24);
+    --md-ok-container:#10361f; --md-error-container:#4a1420;
+    --md-elev-2:0 3px 1px -2px rgba(0,0,0,.2), 0 2px 2px 0 rgba(0,0,0,.14), 0 1px 5px 0 rgba(0,0,0,.12);
+    --md-elev-4:0 2px 4px -1px rgba(0,0,0,.2), 0 4px 5px 0 rgba(0,0,0,.14), 0 1px 10px 0 rgba(0,0,0,.12);
+    --md-elev-24:0 11px 15px -7px rgba(0,0,0,.2), 0 24px 38px 3px rgba(0,0,0,.14), 0 9px 46px 8px rgba(0,0,0,.12);
+    --md-ease:cubic-bezier(.4,0,.2,1);
+    --md-font:Roboto,"Helvetica Neue",-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+    --md-font-mono:"Roboto Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:var(--md-background); color:var(--md-on-surface); font-family:var(--md-font);
+         font-size:14px; line-height:20px; letter-spacing:.25px; padding:24px;
+         -webkit-font-smoothing:antialiased; }
+  /* MD2 dialog-weight card: elevation 24, 4dp corners, 24dp padding */
+  .card { width:100%; max-width:400px; background:var(--md-surface-24dp); border-radius:4px;
+          padding:24px; box-shadow:var(--md-elev-24); }
+  h1 { font-size:24px; font-weight:400; line-height:32px; letter-spacing:0; margin:0 0 4px;
+       display:flex; align-items:center; gap:10px; }
+  .sub { color:var(--md-on-surface-med); font-size:14px; margin-bottom:24px; }
+  /* filled text field: caption label, tinted box, underline that turns primary on focus */
+  label { display:block; font-size:12px; font-weight:400; line-height:16px; letter-spacing:.4px;
+          color:var(--md-on-surface-med); margin:16px 0 4px; }
+  input { width:100%; background:var(--md-surface-04dp); color:var(--md-on-surface);
+          border:none; border-bottom:1px solid var(--md-outline); border-radius:4px 4px 0 0;
+          padding:12px; font-family:inherit; font-size:16px; line-height:24px; letter-spacing:.15px; outline:none;
+          transition:background-color 150ms var(--md-ease), border-color 150ms var(--md-ease), box-shadow 150ms var(--md-ease); }
+  input:hover { background:var(--md-surface-06dp); border-bottom-color:var(--md-on-surface); }
+  input:focus { background:var(--md-surface-06dp); border-bottom-color:var(--md-primary);
+                box-shadow:inset 0 -1px 0 0 var(--md-primary); }
+  input::placeholder { color:var(--md-on-surface-dis); }
+  input.code { font-size:28px; line-height:36px; letter-spacing:12px; text-align:center;
+               font-family:var(--md-font-mono); padding:10px 12px 10px 24px; }
+  /* contained primary button: 36dp, uppercase button type, elevation 2 → 4 */
+  button { width:100%; margin-top:24px; min-height:36px; background:var(--md-primary); color:var(--md-on-primary);
+           border:none; border-radius:4px; padding:8px 16px; font-family:inherit; font-size:14px; font-weight:500;
+           letter-spacing:1.25px; text-transform:uppercase; cursor:pointer; box-shadow:var(--md-elev-2);
+           position:relative; overflow:hidden;
+           transition:background-color 150ms var(--md-ease), box-shadow 150ms var(--md-ease); }
+  button:hover { background:var(--md-primary-light); box-shadow:var(--md-elev-4); }
+  button:disabled { background:rgba(255,255,255,.12); color:var(--md-on-surface-dis); box-shadow:none; cursor:not-allowed; }
+  /* text button for the secondary action */
+  button.sec { background:transparent; color:var(--md-primary); box-shadow:none; margin-top:8px; }
+  button.sec:hover { background:rgba(92,221,139,.08); box-shadow:none; }
+  .md-ripple { position:absolute; border-radius:50%; transform:scale(0); pointer-events:none;
+               background:currentColor; opacity:.24; animation:md-ripple-in 450ms cubic-bezier(0,0,.2,1) forwards; }
+  .md-ripple.out { animation:md-ripple-out 250ms var(--md-ease) forwards; }
+  @keyframes md-ripple-in  { to { transform:scale(1); } }
+  @keyframes md-ripple-out { to { opacity:0; } }
+  .err { margin-top:16px; background:var(--md-error-container); color:var(--md-error-bright);
+         border-radius:4px; padding:12px 16px; font-size:14px; display:none; }
+  .ok  { margin-top:16px; background:var(--md-ok-container); color:var(--md-primary);
+         border-radius:4px; padding:12px 16px; font-size:14px; }
+  .hint { font-size:12px; line-height:16px; letter-spacing:.4px; color:var(--md-on-surface-med); margin-top:8px; }
+  .qr { display:flex; justify-content:center; margin:16px 0 8px; }
+  .qr canvas, .qr img { border-radius:4px; background:#fff; padding:12px; }
+  .secret { font-family:var(--md-font-mono); font-size:14px; letter-spacing:1.5px;
+            background:var(--md-surface-04dp); border-radius:4px; padding:12px; word-break:break-all;
+            text-align:center; color:var(--md-on-surface-med); }
   .step { display:none; } .step.on { display:block; }
   .ts { display:none; justify-content:center; margin-top:16px; min-height:65px; }
   .ts.on { display:flex; }
-  footer { text-align:center; color:#4b5563; font-size:12.5px; margin-top:18px; }
+  footer { text-align:center; color:var(--md-on-surface-dis); font-size:12px; letter-spacing:.4px; margin-top:24px; }
+  @media (prefers-reduced-motion: reduce) { .md-ripple { display:none; } }
 </style></head><body>
 <div class="card">
   <h1>📊 RHC SRV Manager</h1>
@@ -63,6 +117,27 @@
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <script>
 const $ = (i) => document.getElementById(i);
+
+/* --- MD2 ripple on the sign-in buttons --- */
+document.addEventListener('pointerdown', (e) => {
+  const el = e.target.closest && e.target.closest('button');
+  if (!el || el.disabled) return;
+  const r = el.getBoundingClientRect(); if (!r.width) return;
+  const d = Math.hypot(Math.max(e.clientX - r.left, r.right - e.clientX),
+                       Math.max(e.clientY - r.top, r.bottom - e.clientY)) * 2;
+  const ink = document.createElement('span');
+  ink.className = 'md-ripple';
+  ink.style.width = ink.style.height = d + 'px';
+  ink.style.left = (e.clientX - r.left - d / 2) + 'px';
+  ink.style.top = (e.clientY - r.top - d / 2) + 'px';
+  el.appendChild(ink);
+  let gone = false;
+  const fade = () => { if (gone) return; gone = true; ink.classList.add('out'); setTimeout(() => ink.remove(), 260); };
+  setTimeout(fade, 450);
+  window.addEventListener('pointerup', fade, { once: true });
+  window.addEventListener('pointercancel', fade, { once: true });
+}, true);
+
 let pending = null, setupToken = null;
 
 /* --- Cloudflare Turnstile (only when the server hands us a site key; skipped over a tunnel) --- */

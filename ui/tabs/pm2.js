@@ -10,7 +10,7 @@ function matches(p, user){
 }
 
 const HDR = '<div class="hdr"><div class="stat">Status</div><div class="meta">Service</div>'
-  + '<div class="beats-h"></div><div class="col">CPU</div><div class="col">Mem</div><div class="col">↺</div><div class="pct" style="color:#6b7280">24h</div><div class="act"></div></div>';
+  + '<div class="beats-h"></div><div class="col">CPU</div><div class="col">Mem</div><div class="col">↺</div><div class="pct" style="color:var(--md-on-surface-dis)">24h</div><div class="act"></div></div>';
 
 function rowHtml(p, userLabel){
   const up = p.status === 'online';

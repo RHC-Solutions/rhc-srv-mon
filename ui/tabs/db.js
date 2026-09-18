@@ -34,9 +34,9 @@ function renderDb(){
   if (d.error) {
     html += '<div class="err">⚠ '+esc(d.error)+'</div>';
   } else {
-    html += '<div class="row" style="background:#1a1d23;border-bottom:1px solid #2d3139"><div class="meta"><div class="name">Location</div><div class="info">Unix socket · cluster 17/main</div></div><div class="col" style="flex:0 0 auto">' + esc(d.version || '') + '</div></div>';
+    html += '<div class="row" style="background:var(--md-surface-02dp);border-bottom:1px solid var(--md-divider)"><div class="meta"><div class="name">Location</div><div class="info">Unix socket · cluster 17/main</div></div><div class="col" style="flex:0 0 auto">' + esc(d.version || '') + '</div></div>';
     html += '<div class="hdr"><div class="stat">Status</div><div class="meta">Database</div>'
-      + '<div class="beats-h"></div><div class="col">Size</div><div class="col">Conns</div><div class="col">Cache</div><div class="pct" style="color:#6b7280">24h</div></div>';
+      + '<div class="beats-h"></div><div class="col">Size</div><div class="col">Conns</div><div class="col">Cache</div><div class="pct" style="color:var(--md-on-surface-dis)">24h</div></div>';
     for (const db of d.databases) html += dbRow(db);
   }
   html += '</div>';
@@ -62,7 +62,7 @@ function renderDb(){
     if (d.sqlite.error) {
       html += '<div class="err">⚠ ' + esc(d.sqlite.error) + '</div>';
     } else {
-      html += '<div class="row" style="background:#1a1d23;border-bottom:1px solid #2d3139"><div class="meta"><div class="name">Location</div><div class="info">file</div></div><div class="col" style="flex:0 0 auto;word-break:break-all;font-size:12.5px;max-width:400px">' + esc(d.sqlite.path || '') + '</div></div>';
+      html += '<div class="row" style="background:var(--md-surface-02dp);border-bottom:1px solid var(--md-divider)"><div class="meta"><div class="name">Location</div><div class="info">file</div></div><div class="col" style="flex:0 0 auto;word-break:break-all;font-size:12.5px;max-width:400px">' + esc(d.sqlite.path || '') + '</div></div>';
       html += '<div class="hdr"><div class="meta">Name</div><div class="col" style="flex:0 0 auto">Size</div></div>';
       html += '<div class="row"><div class="meta"><div class="name">CloudPanel DB</div><div class="info">' + d.sqlite.tables + ' tables · ' + d.sqlite.pageCount.toLocaleString() + ' pages</div></div><div class="col" style="flex:0 0 auto">' + fmtMem(d.sqlite.size) + '</div></div>';
     }
@@ -76,7 +76,7 @@ function renderDb(){
       html += '<div class="err">⚠ ' + esc(d.mariadb.error) + '</div>';
     } else {
       const upStr = d.mariadb.uptime ? fmtUp(d.mariadb.uptime * 1000) : '?';
-      html += '<div class="row" style="background:#1a1d23;border-bottom:1px solid #2d3139"><div class="meta"><div class="name">Location</div><div class="info">TCP · up ' + upStr + '</div></div><div class="col" style="flex:0 0 auto">localhost:3306 · ' + esc(d.mariadb.version) + '</div></div>';
+      html += '<div class="row" style="background:var(--md-surface-02dp);border-bottom:1px solid var(--md-divider)"><div class="meta"><div class="name">Location</div><div class="info">TCP · up ' + upStr + '</div></div><div class="col" style="flex:0 0 auto">localhost:3306 · ' + esc(d.mariadb.version) + '</div></div>';
       if (d.mariadb.dbSizes && d.mariadb.dbSizes.length) {
         html += '<div class="hdr"><div class="meta">Database</div><div class="col" style="flex:0 0 auto">Size</div></div>';
         for (const db of d.mariadb.dbSizes) {
