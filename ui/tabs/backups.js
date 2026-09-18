@@ -20,7 +20,7 @@ function renderBackup(){
   html += '<div class="upd-card" style="grid-column:1/-1">';
   html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">';
   html += '<h3 style="margin:0">💾 Backup to Wasabi</h3>';
-  html += '<span style="font-size:14px;color:#6b7280">remote:rhcsolutions/web01-backups · s3.eu-central-1.wasabisys.com</span>';
+  html += '<span style="font-size:14px;color:var(--md-on-surface-dis)">remote:rhcsolutions/web01-backups · s3.eu-central-1.wasabisys.com</span>';
   html += '<div style="margin-left:auto;display:flex;gap:8px">';
   if (d.running) html += '<button class="btn running" disabled>⏳ backing up…</button>';
   else html += '<button class="btn update" id="bkRun">▶ Back up now</button>';
@@ -29,10 +29,10 @@ function renderBackup(){
   if (lr){
     html += '<div style="margin-top:10px;font-size:15px">';
     html += '<span class="upd-badge '+(lr.success?'ok':'na')+'">'+(lr.success?'✓ last backup ok':'⚠ last backup had errors')+'</span> ';
-    html += '<span style="color:#9ca3af"> '+new Date(lr.finishedAt||lr.startedAt).toLocaleString()+' · '+lr.itemCount+' items · '+bkBytes(lr.bytes)+' · '+Math.round((lr.duration_ms||0)/1000)+'s · '+esc(lr.trigger)+'</span>';
+    html += '<span style="color:var(--md-on-surface-med)"> '+new Date(lr.finishedAt||lr.startedAt).toLocaleString()+' · '+lr.itemCount+' items · '+bkBytes(lr.bytes)+' · '+Math.round((lr.duration_ms||0)/1000)+'s · '+esc(lr.trigger)+'</span>';
     if (lr.errors && lr.errors.length) html += '<ul style="margin:6px 0 0;color:#f87171">'+lr.errors.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>';
     html += '</div>';
-  } else { html += '<div style="margin-top:10px;color:#9ca3af;font-size:15px">No backups run yet.</div>'; }
+  } else { html += '<div style="margin-top:10px;color:var(--md-on-surface-med);font-size:15px">No backups run yet.</div>'; }
   html += '</div>';
 
   html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px">';
@@ -40,7 +40,7 @@ function renderBackup(){
   const av = d.available || { databases: [], sites: [] };
   const pgSel = Array.isArray(sc.pgDatabases) ? sc.pgDatabases : null;
   const siteSel = Array.isArray(sc.siteDomains) ? sc.siteDomains : null;
-  const box = '<div style="background:#12141d;border:1px solid #232838;border-radius:8px;padding:12px">';
+  const box = '<div style="background:var(--md-surface-04dp);border:1px solid var(--md-divider);border-radius:8px;padding:12px">';
   const sub = '<div style="margin:8px 0 0 22px;display:flex;flex-direction:column;gap:4px;font-size:14.5px;max-height:220px;overflow:auto">';
   const mono = 'font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px';
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-bottom:14px">';
@@ -80,13 +80,22 @@ function renderBackup(){
   // per-site backups: one row per site, last ad-hoc run, "Back up now" (files only; DB dumps come with the Databases slice)
   {
     const sites = (d.available && d.available.sites) || [];
-    const lastFor = (dom) => (d.log || []).slice().reverse().find(e => e.site === dom);
-    html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><div class="site-card-hd"><h3 style="margin:0">Back up a single site</h3><span class="dim" style="font-size:14px">files under htdocs (node_modules, .next, cache… excluded) → Wasabi <code>' + esc((d.lastRun && d.lastRun.stamp ? '' : '') + 'web01-backups/&lt;stamp&gt;-&lt;domain&gt;') + '</code>, same retention</span></div>'
-      + '<table class="upd-table bk-sites"><tr><th>Site</th><th>Type</th><th>Last site backup</th><th></th></tr>';
+    // A site is covered by an ad-hoc run for that domain OR by any run (nightly full backup,
+    // "back up all sites") whose items include its archive — the full run has site:null, so
+    // matching on e.site alone made every site read "never" until backed up by hand.
+    const coveredBy = (e, dom) => e.site === dom || (e.items || []).includes('sites/' + dom + '.tar.zst');
+    const lastFor = (dom) => (d.log || []).slice().reverse().find(e => coveredBy(e, dom));
+    html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><div class="site-card-hd"><h3 style="margin:0">Back up sites</h3><span class="dim" style="font-size:14px">files under htdocs (node_modules, .next, cache… excluded) → Wasabi <code>' + esc((d.lastRun && d.lastRun.stamp ? '' : '') + 'web01-backups/&lt;stamp&gt;-&lt;domain&gt;') + '</code>, same retention</span></div>'
+      + '<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn update" id="bkAllSites"' + (d.running ? ' disabled' : '') + '>' + (d.running ? '⏳ backing up…' : '▶ Back up all sites (' + sites.length + ')') + '</button></div>'
+      + '<table class="upd-table bk-sites"><tr><th>Site</th><th>Type</th><th>Last backup</th><th></th></tr>';
     for (const st of sites.slice().sort((a, b) => a.domain.localeCompare(b.domain))) {
       const l = lastFor(st.domain);
       html += '<tr><td><b>' + esc(st.domain) + '</b> <span class="dim">' + esc(st.user || '') + '</span></td><td>' + esc(st.type || '') + '</td><td>'
-        + (l ? new Date(l.finishedAt).toLocaleString() + ' · ' + bkBytes(l.bytes) + ' · ' + (l.success ? '<span class="upd-badge ok">ok</span>' : '<span class="upd-badge err" title="' + esc((l.errors||[]).join('; ')) + '">failed</span>') : '<span class="dim">never</span>') + '</td>'
+        + (l ? new Date(l.finishedAt).toLocaleString()
+               + (l.site === st.domain ? ' · ' + bkBytes(l.bytes) : '')   // full-run bytes are the whole backup, not this site
+               + ' · ' + (l.success ? '<span class="upd-badge ok">ok</span>' : '<span class="upd-badge err" title="' + esc((l.errors||[]).join('; ')) + '">failed</span>')
+               + ' <span class="dim" style="font-size:12px">' + (l.trigger === 'scheduled' ? 'nightly' : l.site === st.domain ? 'manual' : 'all sites') + '</span>'
+             : '<span class="dim">never</span>') + '</td>'
         + '<td style="text-align:right"><button class="btn small bk-site-run" data-domain="' + esc(st.domain) + '"' + (d.running ? ' disabled' : '') + '>' + (d.running ? '⏳' : '▶ Back up now') + '</button></td></tr>';
     }
     if (!sites.length) html += '<tr><td colspan="4" class="dim">No sites</td></tr>';
@@ -95,7 +104,7 @@ function renderBackup(){
 
   if (window._bkRemote){
     html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><h3 style="margin:0 0 8px">In Wasabi ('+window._bkRemote.length+')</h3>';
-    html += '<div style="font-size:14.5px;color:#cbd5e1;max-height:220px;overflow:auto">'+(window._bkRemote.length?window._bkRemote.map(n=>'<div>📁 '+esc(n)+'</div>').join(''):'<span style="color:#6b7280">none yet</span>')+'</div></div>';
+    html += '<div style="font-size:14.5px;color:var(--md-on-surface-med);max-height:220px;overflow:auto">'+(window._bkRemote.length?window._bkRemote.map(n=>'<div>📁 '+esc(n)+'</div>').join(''):'<span style="color:var(--md-on-surface-dis)">none yet</span>')+'</div></div>';
   }
   if (d.log && d.log.length){
     html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><h3 style="margin:0 0 8px">Recent runs</h3><table class="upd-table"><tr><th>When</th><th>Trigger</th><th>Scope</th><th>Items</th><th>Size</th><th>Duration</th><th>Status</th></tr>';
@@ -107,6 +116,8 @@ function renderBackup(){
 
   view.innerHTML = html;
   document.querySelectorAll('.bk-site-run').forEach(b => b.addEventListener('click', () => armConfirm(b, '⚠ Click again to back up', () => runSiteBackupNow(b.dataset.domain))));
+  const allSites = document.getElementById('bkAllSites');
+  if (allSites) allSites.addEventListener('click', () => armConfirm(allSites, '⚠ Click again to back up every site', runAllSitesBackupNow));
   const run = document.getElementById('bkRun');
   if (run) run.addEventListener('click', () => armConfirm(run, '⚠ Click again to start', runBackupNow));
   const save = document.getElementById('bkSave');
@@ -157,5 +168,13 @@ async function runSiteBackupNow(domain){
     const r = await fetch('api/backup/site/' + encodeURIComponent(domain), { method:'POST' });
     const j = await r.json(); if (!r.ok) return toast(j.error || 'Failed', 'error');
     toast('Site backup started: ' + domain, 'success'); setTimeout(refresh, 1500);
+  } catch(e){ toast('Error: ' + e, 'error'); }
+}
+// Every site's files in one run — same scope as the per-site button, all domains at once.
+async function runAllSitesBackupNow(){
+  try {
+    const r = await fetch('api/backup/sites', { method:'POST' });
+    const j = await r.json(); if (!r.ok) return toast(j.error || 'Failed', 'error');
+    toast('Backup started for all ' + j.sites + ' sites', 'success'); setTimeout(refresh, 1500);
   } catch(e){ toast('Error: ' + e, 'error'); }
 }
