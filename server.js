@@ -104,6 +104,19 @@ const server = http.createServer((req, res) => {
     })();
     return;
   }
+  // Uninstall a tracked component: /api/updates/remove/<key> system-wide,
+  // /api/updates/remove/<user>/<key> for one user's own npm prefix.
+  if (url.startsWith('/api/updates/remove/') && req.method === 'POST') {
+    const parts = url.slice('/api/updates/remove/'.length).split('/').map(decodeURIComponent);
+    const promise = parts.length >= 2 && parts[1]
+      ? updates.runUserRemove(parts[0], parts[1], actorOf(req))
+      : updates.runRemove(parts[0], actorOf(req));
+    promise.then((result) => {
+      res.writeHead(result && result.error ? 400 : 200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    });
+    return;
+  }
   if (url.startsWith('/api/updates/run/') && req.method === 'POST') {
     const parts = url.slice('/api/updates/run/'.length).split('/');
     const promise = parts.length >= 2 && parts[1]

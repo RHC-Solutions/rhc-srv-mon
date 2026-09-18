@@ -28,7 +28,7 @@ function renderUpdates(){
     const hasUpdate = c.updateAvailable;
     const isRunning = c.updating;
     const statusBadge = !c.currentVersion ? '<span class="upd-badge na">not installed</span>'
-      : isRunning ? '<span class="upd-badge" style="background:#5a4e1f;color:#f8a306">updating…</span>'
+      : isRunning ? '<span class="upd-badge" style="background:var(--md-warn-container);color:var(--md-warning)">updating…</span>'
       : hasUpdate ? '<span class="upd-badge new">update available</span>'
       : '<span class="upd-badge ok">up to date</span>';
     const btnHtml = !c.currentVersion ? ''
@@ -36,12 +36,15 @@ function renderUpdates(){
       : c.key === 'node' ? '<button class="btn" disabled>via nvm/fnm/n</button>'
       : hasUpdate ? '<button class="btn update" onclick="triggerUpdate(\'' + c.key + '\')">⬆ Update</button>'
       : '<button class="btn" disabled>✓ latest</button>';
+    // Node.js is the runtime everything else here needs, so it is never removable.
+    const rmHtml = (!c.currentVersion || isRunning || c.key === 'node') ? ''
+      : ' <button class="btn danger small upd-remove" data-comp="' + c.key + '" data-label="' + esc(c.label) + '" title="npm rm -g — uninstall ' + esc(c.label) + ' system-wide">🗑 Remove</button>';
     html += '<tr>'
       + '<td><strong>' + esc(c.label) + '</strong></td>'
       + '<td>' + esc(c.currentVersion || '—') + '</td>'
       + '<td>' + esc(c.latestVersion || '—') + '</td>'
       + '<td>' + statusBadge + '</td>'
-      + '<td style="text-align:right">' + btnHtml + '</td>'
+      + '<td style="text-align:right;white-space:nowrap">' + btnHtml + rmHtml + '</td>'
       + '</tr>';
   }
   html += '</table></div>';
@@ -61,7 +64,7 @@ function renderUpdates(){
     }
     html += '<div class="upd-card" style="grid-column:1/-1">';
     html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
-    html += '<h3 style="margin:0">By User <span style="font-weight:400;font-size:14px;color:#6b7280">' + userKeys.length + ' users</span></h3>';
+    html += '<h3 style="margin:0">By User <span style="font-weight:400;font-size:14px;color:var(--md-on-surface-dis)">' + userKeys.length + ' users</span></h3>';
     if (userOutdatedCount) {
       html += '<button class="btn update" onclick="triggerUpdateAllUsers()" style="font-size:14px;padding:4px 14px">⬆ Update All Users (' + userOutdatedCount + ')</button>';
     }
@@ -109,6 +112,12 @@ function renderUpdates(){
       } else {
         html += '<span class="upd-badge ok" style="font-size:12.5px">✓ up to date</span>';
       }
+      // one remove control per component this user actually has (refused server-side
+      // when the user sits on the shared system npm prefix — that is a system-wide removal)
+      for (const c of d.components) {
+        if (c.key === 'node' || !uv[c.key]) continue;
+        html += ' <button class="btn danger small upd-remove" data-user="' + esc(u) + '" data-comp="' + c.key + '" data-label="' + esc(c.label) + '" style="margin:1px" title="npm rm -g ' + esc(c.label) + ' for ' + esc(u) + '">🗑 ' + c.key + '</button>';
+      }
       html += '</td>';
       html += '</tr>';
     }
@@ -138,16 +147,16 @@ function renderUpdates(){
   // Update log
   html += '<div class="upd-card" style="grid-column:1/-1">';
   html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
-  html += '<h3 style="margin:0">Update Log <span style="font-weight:400;font-size:14px;color:#6b7280">last ' + d.log.length + ' entries</span></h3>';
-  html += '<button class="btn" onclick="clearUpdateLog()" style="font-size:12.5px;padding:3px 10px;background:#3a2020;color:#ff8088;border:none;border-radius:5px;cursor:pointer">🗑 Clear log</button>';
+  html += '<h3 style="margin:0">Update Log <span style="font-weight:400;font-size:14px;color:var(--md-on-surface-dis)">last ' + d.log.length + ' entries</span></h3>';
+  html += '<button class="btn" onclick="clearUpdateLog()" style="font-size:12.5px;padding:3px 10px;background:var(--md-error-container);color:var(--md-error-bright);border:none;border-radius:5px;cursor:pointer">🗑 Clear log</button>';
   html += '</div>';
   html += '<div class="upd-log">';
   if (!d.log.length) {
-    html += '<div style="color:#6b7280;padding:10px 0;font-size:15px">No updates have been run yet.</div>';
+    html += '<div style="color:var(--md-on-surface-dis);padding:10px 0;font-size:15px">No updates have been run yet.</div>';
   } else {
     for (const entry of d.log.slice().reverse()) {
       const icon = entry.success ? '✅' : '❌';
-      const cls = entry.success ? '' : ' style="color:#ff8088"';
+      const cls = entry.success ? '' : ' style="color:var(--md-error-bright)"';
       html += '<div class="upd-log-entry">'
         + '<span class="time">' + new Date(entry.timestamp).toLocaleString() + '</span>'
         + '<span class="comp"' + cls + '>' + icon + ' ' + esc(entry.label) + '</span>'
@@ -159,6 +168,12 @@ function renderUpdates(){
 
   html += '</div>';
   document.getElementById('updatesview').innerHTML = html;
+  // Uninstalling is destructive and has no undo, so it goes through the same two-step
+  // arm/confirm the rest of the panel uses instead of a browser dialog.
+  document.querySelectorAll('.upd-remove').forEach(b => b.addEventListener('click', () => {
+    const who = b.dataset.user ? ' for ' + b.dataset.user : ' system-wide';
+    armConfirm(b, '⚠ Click again to remove', () => triggerRemove(b.dataset.comp, b.dataset.user || null, b.dataset.label + who));
+  }));
 }
 
 async function checkUpdates(){
@@ -195,6 +210,21 @@ async function triggerUserUpdate(user, key){
     lastUpdates = await res2.json();
     if (state.tab === 'updates') renderUpdates();
   } catch(_){}
+}
+
+// Uninstall a component: npm rm -g, system-wide or for one user's own npm prefix.
+async function triggerRemove(key, user, label){
+  try {
+    const url = 'api/updates/remove/' + (user ? encodeURIComponent(user) + '/' : '') + encodeURIComponent(key);
+    const res = await fetch(url, { method: 'POST' });
+    const result = await res.json();
+    if (result && result.error) toast(result.error, 'error');
+    else if (result && result.success === false) toast('Removal of ' + label + ' failed', 'error', { detail: result.output });
+    else toast('Removed ' + label, 'success');
+    const res2 = await fetch('api/updates');
+    lastUpdates = await res2.json();
+    if (state.tab === 'updates') renderUpdates();
+  } catch(e){ toast('Error: ' + e, 'error'); }
 }
 
 async function triggerUpdateAll(){
