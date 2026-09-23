@@ -69,7 +69,7 @@ function renderUpdates(){
     if (aur && aur.running) {
       html += '<span class="dim" style="font-size:14px">⏳ Updating ' + aur.done + '/' + aur.total + (aur.current ? ' · ' + esc(aur.current) : '') + '</span>';
     } else if (userOutdatedCount) {
-      html += '<button class="btn update" onclick="triggerUpdateAllUsers()" style="font-size:14px;padding:4px 14px">⬆ Update All Users (' + userOutdatedCount + ')</button>';
+      html += '<button class="btn update" onclick="armConfirm(this, \'⬆ Update all users?\', () => triggerUpdateAllUsers())" style="font-size:14px;padding:4px 14px" title="Runs npm updates for every user, sequentially — it can take a few minutes">⬆ Update All Users (' + userOutdatedCount + ')</button>';
     }
     html += '</div>';
     html += '<div style="overflow-x:auto"><table class="upd-table">';
@@ -239,8 +239,8 @@ async function triggerUpdateAll(){
   } catch(_){}
 }
 
+// Confirmed by arming the button that calls this (see renderUpdates) rather than by a browser dialog.
 async function triggerUpdateAllUsers(){
-  if (!confirm('Update every outdated tool for all users? Runs npm updates sequentially and may take a few minutes.')) return;
   try {
     const r = await fetch('api/updates/run-all-users', { method: 'POST' });
     const j = await r.json().catch(() => ({}));

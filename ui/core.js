@@ -74,6 +74,35 @@ function sshModal(html){
 }
 function sshModalClose(){ const m = document.getElementById('ssh-modal'); if (m) m.remove(); }
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.getElementById('ssh-modal')) sshModalClose(); });
+// Ask for one value without window.prompt — the panel never opens a browser dialog, because they
+// block the page, cannot be styled or dismissed by clicking away, and look nothing like the rest of
+// it. Resolves with the value, or null if the modal was cancelled, dismissed or escaped; callers
+// must handle null, since every exit from the modal now goes through it.
+function askModal(opts){
+  opts = opts || {};
+  return new Promise((resolve) => {
+    let done = false;
+    const onKey = (e) => { if (e.key === 'Escape') finish(null); };
+    function finish(v){
+      if (done) return;
+      done = true;
+      document.removeEventListener('keydown', onKey);
+      sshModalClose();
+      resolve(v);
+    }
+    const bg = sshModal('<h3>' + esc(opts.title || '') + '</h3>'
+      + sshField(opts.label || '', '<input id="askV"' + (opts.password ? ' type="password"' : '') + ' value="' + esc(opts.value || '') + '"' + (opts.placeholder ? ' placeholder="' + esc(opts.placeholder) + '"' : '') + '>', opts.hint || '')
+      + '<div class="foot"><button class="btn" id="askNo">Cancel</button><button class="btn pri" id="askYes">' + esc(opts.ok || 'OK') + '</button></div>');
+    const inp = bg.querySelector('#askV');
+    bg.querySelector('#askYes').onclick = () => finish(inp.value);
+    bg.querySelector('#askNo').onclick = () => finish(null);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') finish(inp.value); });
+    // sshModal closes itself on a backdrop click and the global Escape handler closes it too; both
+    // would otherwise leave this promise pending forever, with the caller still waiting on it.
+    bg.addEventListener('mousedown', (e) => { if (e.target === bg) finish(null); });
+    document.addEventListener('keydown', onKey);
+  });
+}
 function sshField(label, inner, hint){ return '<div class="upd-field"><label>' + label + '</label>' + inner + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</div>'; }
 // Each tab has its own URL (…/rhc-admin/ssh, …/postgres, …). Slugs are single path
 // segments so every relative URL in this page (api/…, login, ws/ssh) keeps resolving.

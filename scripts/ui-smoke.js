@@ -22,7 +22,7 @@ function makeEl(tag, id) {
   const el = {
     tagName: String(tag || 'div').toUpperCase(), id: id || '', _html: '', children: [], style: {}, dataset: {}, value: '', checked: false, textContent: '',
     classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, toggle(c, f) { f ? this._s.add(c) : this._s.delete(c); }, contains(c) { return this._s.has(c); } },
-    addEventListener() {}, removeEventListener() {}, appendChild(c) { this.children.push(c); return c; }, remove() {}, focus() {}, select() {}, click() {},
+    addEventListener() {}, removeEventListener() {}, appendChild(c) { this.children.push(c); if (c && c.id) byId.set(c.id, c); return c; }, remove() {}, focus() {}, select() {}, click() {},
     setAttribute() {}, getAttribute() { return null; }, contains() { return false; }, scrollTop: 0, scrollHeight: 0, setSelectionRange() {},
     querySelector(sel) { return findIn(this, sel)[0] || null; }, querySelectorAll(sel) { return findIn(this, sel); },
     get innerHTML() { return this._html; },
@@ -54,9 +54,9 @@ const document = {
   createElement(tag) { return makeEl(tag); },
   querySelector(sel) { return findIn(document.body, sel)[0] || null; },
   querySelectorAll(sel) { return findIn(document.body, sel); },
-  addEventListener() {}, execCommand: () => true,
+  addEventListener() {}, removeEventListener() {}, execCommand: () => true,
 };
-document.body.appendChild = (c) => { document.body.children.push(c); if (c._html) registerIds(c, c._html); return c; };
+document.body.appendChild = (c) => { document.body.children.push(c); if (c && c.id) byId.set(c.id, c); if (c._html) registerIds(c, c._html); return c; };
 for (const id of ['host', 'pagetitle', 'updated', 'banner', 'userbar', 'q', 'sort', 'sharedToggle', 'main', 'toast-host', 'ivl', 'ssh-hostlist', 'ssh-tabbar', 'ssh-terms', 'ssh-empty', 'ssh-side-ft',
   'pm2view', 'dbview', 'updatesview', 'sitesview', 'modulesview', 'backupview', 'sshview', 'eventsview', 'settingsview']) byId.set(id, makeEl(id.endsWith('view') ? 'div' : id === 'q' ? 'input' : 'div', id));
 
@@ -137,6 +137,18 @@ const call = (label, fn) => { try { const r = fn(); log('  ok  ' + label); retur
       { domain: 'b.example', user: 'b', type: 'php', cf_only: true, has_settings_placeholder: false, addrs: ['1.2.3.4'], via_cloudflare: false },
       { domain: 'c.example', user: 'c', type: 'static', cf_only: false, has_settings_placeholder: true, addrs: [], via_cloudflare: null },
     ] }));
+    sandbox.sshModalClose();
+    // askModal replaced window.prompt/confirm: it must resolve on every way out of the modal, or a
+    // caller awaiting it (the VNC password handshake) hangs with nothing on screen.
+    call('askModal resolves on cancel', () => {
+      let got = 'pending';
+      const pr = sandbox.askModal({ title: 'Rename tab', label: 'Tab name', value: 'shell' }).then((v) => { got = v; });
+      const bg = sandbox.document.getElementById('ssh-modal');
+      if (!bg) throw new Error('askModal opened no modal');
+      const no = bg.querySelector('#askNo'); if (!no) throw new Error('no cancel button');
+      no.onclick();
+      return pr.then(() => { if (got !== null) throw new Error('cancel resolved with ' + JSON.stringify(got) + ', not null'); });
+    });
     sandbox.sshModalClose();
     call('siteGo(null)', () => sandbox.siteGo(null));
   }

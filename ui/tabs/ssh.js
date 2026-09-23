@@ -124,9 +124,13 @@ function sshActivate(id, opts){
   if (s && !opts.noFocus) requestAnimationFrame(() => { try { if (s.kind === 'vnc') s.rfb && s.rfb.focus(); else { s.fit.fit(); s.term.focus(); } } catch(e){} });
 }
 function sshPaneSolo(id){ sshSetLayout(1); sshActivate(id); }
-function sshRenameTab(id){
+async function sshRenameTab(id){
   const s = sshSess.get(id); if (!s) return;
-  const n = prompt('Tab name', s.label); if (n && n.trim()) { s.label = n.trim().slice(0, 60); const b = s.el.querySelector('.pane-hd .pl'); if (b) b.textContent = s.label; sshRenderTabs(); }
+  const n = await askModal({ title: 'Rename tab', label: 'Tab name', value: s.label, ok: 'Rename' });
+  if (n == null || !n.trim()) return;
+  s.label = n.trim().slice(0, 60);
+  const b = s.el.querySelector('.pane-hd .pl'); if (b) b.textContent = s.label;
+  sshRenderTabs();
 }
 function sshDuplicateTab(){ const s = sshSess.get(sshActive); if (!s) return; if (s.hostId) sshConnect(s.hostId); else sshConnectAdhoc(s.adhoc); }
 function sshCloseAll(){ for (const id of [...sshSess.keys()]) sshCloseTab(id); }
@@ -197,7 +201,12 @@ async function sshOpenVncTab(h){
     rfb.viewOnly = !!cred.viewOnly; rfb.scaleViewport = true; rfb.resizeSession = false; rfb.background = '#0c0e16';
     rfb.addEventListener('connect', () => { s.status = 'open'; sshRenderTabs(); sshRenderHosts(); });
     rfb.addEventListener('disconnect', (e) => { s.status = 'dead'; sshRenderTabs(); sshVncNote(s, (e.detail && e.detail.clean) ? 'Disconnected.' : 'Connection lost — the VNC server may not be running, or the port is wrong.'); });
-    rfb.addEventListener('credentialsrequired', () => { const pw = prompt('VNC password for ' + h.name); if (pw != null) rfb.sendCredentials({ password: pw }); else rfb.disconnect(); });
+    // noVNC waits on this event, so the answer is async: send the password when the modal returns
+    // one, and hang up if it was dismissed — the handshake cannot be left half-finished.
+    rfb.addEventListener('credentialsrequired', () => {
+      askModal({ title: 'VNC password', label: 'Password for ' + h.name, password: true, ok: 'Connect' })
+        .then((pw) => { if (pw != null) rfb.sendCredentials({ password: pw }); else rfb.disconnect(); });
+    });
     rfb.addEventListener('securityfailure', (e) => sshVncNote(s, 'VNC authentication failed' + (e.detail && e.detail.reason ? ': ' + e.detail.reason : '') + ' — check the password in the host settings.'));
     s.rfb = rfb;
   } catch(e){ s.status = 'dead'; sshVncNote(s, 'Could not start the viewer: ' + e.message); }
@@ -530,7 +539,7 @@ function sshEditHost(id){
       + '</div>'
     + sshField('After login', '<label style="display:flex;gap:8px;align-items:center;font-size:15px;cursor:pointer"><input type="checkbox" id="shf-root"' + (h.becomeRoot ? ' checked' : '') + ' style="accent-color:var(--md-primary)"> Become root (<code>sudo -i</code>) — for non-root users; a sudo password prompt is answered with the stored password, or type it</label>')
     + '<div id="shf-test"></div>'
-    + '<div class="foot"><div class="left">' + (id ? '<button class="btn danger" onclick="sshDeleteHost(\'' + id + '\')">Delete</button>' : '') + (id ? '<button class="btn" onclick="sshTestHost(\'' + id + '\')">🔌 Test connection</button>' : '') + (id ? '<button class="btn" onclick="sshDeployVncDialog(\'' + id + '\')" title="Install a VNC server on this host">🖵 Deploy VNC</button>' : '') + '</div>'
+    + '<div class="foot"><div class="left">' + (id ? '<button class="btn danger" onclick="armConfirm(this, \'⚠ Delete host?\', () => sshDeleteHost(\'' + id + '\'))">Delete</button>' : '') + (id ? '<button class="btn" onclick="sshTestHost(\'' + id + '\')">🔌 Test connection</button>' : '') + (id ? '<button class="btn" onclick="sshDeployVncDialog(\'' + id + '\')" title="Install a VNC server on this host">🖵 Deploy VNC</button>' : '') + '</div>'
     + '<button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="sshSaveHost(' + (id ? '\'' + id + '\'' : 'null') + ')">' + (id ? 'Save' : 'Add host') + '</button></div>');
 }
 function sshReadHostForm(){
@@ -566,9 +575,8 @@ async function sshSaveHost(id){
     toast(id ? 'Host saved' : 'Host added', 'success'); sshModalClose(); renderSsh();
   } catch(e){ toast('Error: ' + e, 'error'); }
 }
+// Confirmed by arming the Delete button in the host dialog, not by a browser dialog.
 async function sshDeleteHost(id){
-  const h = sshData.hosts.find(x => x.id === id);
-  if (!confirm('Delete host "' + (h ? h.name : id) + '"?')) return;
   try { await fetch('api/ssh/hosts/' + id, { method: 'DELETE' }); toast('Host deleted', 'success'); sshModalClose(); renderSsh(); } catch(e){ toast('Error: ' + e, 'error'); }
 }
 async function sshTestHost(id){
