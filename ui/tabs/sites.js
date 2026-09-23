@@ -130,8 +130,10 @@ function siteRuntime(s){
     const rec = String(s.nodeVersion || '').replace(/^v/, '');
     const act = s.nodeActual.replace(/^v/, '');
     const differs = rec && act.split('.')[0] !== rec.split('.')[0];
-    return { text: 'Node ' + esc(s.nodeActual) + (differs ? ' <span class="dim">(rec. ' + esc(rec) + ')</span>' : ''),
-      title: 'Measured from the process listening on port ' + s.nodePort + (differs ? '. CloudPanel recorded ' + rec + ', which is not what runs.' : '') };
+    return { text: 'Node ' + esc(s.nodeActual) + (differs ? ' <span class="dim">(rec. ' + esc(rec) + ')</span>' : '')
+        + (s.pm2DaemonStale ? ' <span style="color:var(--md-warning)">⚠ pm2 daemon</span>' : ''),
+      title: 'Measured from the process listening on port ' + s.nodePort + (differs ? '. CloudPanel recorded ' + rec + ', which is not what runs.' : '')
+        + (s.pm2DaemonStale ? '. The app is current, but the PM2 daemon holding the port still runs a node binary replaced by an upgrade — `pm2 update` as the site user moves it across.' : '') };
   }
   if (s.phpActual) {
     const differs = s.phpVersion && String(s.phpVersion) !== String(s.phpActual);
