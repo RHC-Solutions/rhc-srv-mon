@@ -113,9 +113,21 @@ async function siteCtl(btn, domain, action, app, user){
     if (user) q.push('user=' + encodeURIComponent(user));
     const r = await siteApi('POST', 'api/sites/' + encodeURIComponent(domain) + '/processes/' + action + (q.length ? '?' + q.join('&') : ''));
     const out = r.results.map(x => x.user + ': ' + (x.command || '') + '\n' + (x.output || '')).join('\n\n');
-    if (r.ok) toast('pm2 ' + action + ' · ' + label, 'success', { detail: out, duration: 6000 });
-    else toast('pm2 ' + action + ' did not fully succeed · ' + label, 'warn', { detail: out, duration: 14000 });
-    setTimeout(() => { if (siteView.domain) siteSubReload('procs'); refresh(); }, 1200);
+    // The server re-reads the site after acting, so say what it is now rather than only that the
+    // command was accepted — "pm2 restart ok" while the site stays down is the least useful of the
+    // two facts, and showing it alone is what made these buttons look like they did nothing.
+    const h = r.health, now = h ? ' → ' + h.statusLabel + (h.statusReason ? ' (' + h.statusReason + ')' : '') : '';
+    const bad = h && h.status !== 'online';
+    const wd = r.watchdogs || [];
+    if (wd.length) toast('Heads up: ' + domain + ' has a cron that will start it again', 'warn',
+      { detail: 'These jobs restart the app on their own, so this stop will not hold:\n\n'
+        + wd.map(w => w.user + ':  ' + w.command).join('\n')
+        + '\n\nThe panel does not manage these crontabs — disable the job on the site itself if you need the stop to stick.', duration: 20000 });
+    if (r.ok && !bad) toast('pm2 ' + action + ' · ' + label + now, 'success', { detail: out, duration: 6000 });
+    else if (r.ok) toast('pm2 ' + action + ' ran · ' + label + now, 'warn', { detail: out, duration: 14000 });
+    else toast('pm2 ' + action + ' did not fully succeed · ' + label + now, 'warn', { detail: out, duration: 14000 });
+    if (siteView.domain) siteSubReload('procs');
+    refresh();
   } catch(e){ siteErr(e, 'pm2 ' + action); }
   finally { if (btn) btn.disabled = false; }
 }
@@ -125,15 +137,17 @@ async function siteCtl(btn, domain, action, app, user){
 // shell run the system node whatever the site user's nvm holds. Show the truth, keep the record as a
 // footnote when the two differ, and flag a binary that was replaced under a running process.
 function siteRuntime(s){
-  if (s.nodeStale) return { text: 'Node <span style="color:var(--md-warning)">⚠ replaced</span>', title: 'This process is still running ' + (s.nodeExe || 'its node binary') + ', which has since been replaced on disk by an upgrade. It keeps the old version until it is restarted.' };
+  // A stale pm2 *daemon* is not a stale app: `pm2 update` replaces the daemon, restarting the app
+  // does not. Saying so is the difference between an actionable warning and one that never clears.
+  const staleDaemon = (s.pm2DaemonStale || []).length
+    ? ' The pm2 daemon of ' + (s.pm2DaemonStale || []).join(', ') + ' is itself still on a replaced binary — that one needs `pm2 update`, not an app restart.' : '';
+  if (s.nodeStale) return { text: 'Node <span style="color:var(--md-warning)">⚠ replaced</span>', title: 'This site\'s app processes are still running ' + (s.nodeExe || 'their node binary') + ', which has since been replaced on disk by an upgrade. They keep the old version until they are restarted.' + staleDaemon };
   if (s.nodeActual) {
     const rec = String(s.nodeVersion || '').replace(/^v/, '');
     const act = s.nodeActual.replace(/^v/, '');
     const differs = rec && act.split('.')[0] !== rec.split('.')[0];
-    return { text: 'Node ' + esc(s.nodeActual) + (differs ? ' <span class="dim">(rec. ' + esc(rec) + ')</span>' : '')
-        + (s.pm2DaemonStale ? ' <span style="color:var(--md-warning)">⚠ pm2 daemon</span>' : ''),
-      title: 'Measured from the process listening on port ' + s.nodePort + (differs ? '. CloudPanel recorded ' + rec + ', which is not what runs.' : '')
-        + (s.pm2DaemonStale ? '. The app is current, but the PM2 daemon holding the port still runs a node binary replaced by an upgrade — `pm2 update` as the site user moves it across.' : '') };
+    return { text: 'Node ' + esc(s.nodeActual) + ((s.pm2DaemonStale || []).length ? ' <span style="color:var(--md-warning)" title="pm2 daemon on a replaced binary">⚠</span>' : '') + (differs ? ' <span class="dim">(rec. ' + esc(rec) + ')</span>' : ''),
+      title: 'Measured from this site\'s pm2 app processes' + (differs ? '. CloudPanel recorded ' + rec + ', which is not what runs.' : '') + staleDaemon };
   }
   if (s.phpActual) {
     const differs = s.phpVersion && String(s.phpVersion) !== String(s.phpActual);
