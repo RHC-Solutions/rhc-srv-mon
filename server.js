@@ -22,6 +22,7 @@ require('./lib/api/sites');
 require('./lib/api/backups');
 require('./lib/api/settings');
 require('./lib/api/ssh');
+const notifyEvents = require('./lib/notify-events');
 const clpImport = require('./lib/clp-import');
 const cloudpanel = require('./lib/cloudpanel');
 const page = require('./lib/page');
@@ -499,6 +500,7 @@ backups.loadBackups();
 const sampleAll = () => history.sample().then(() => postgres.dbSample()).catch((e) => console.error('db sample failed:', e.message));
 const firstSample = sampleAll();           // first sample immediately
 setInterval(sampleAll, history.SAMPLE_MS);
+notifyEvents.start();                      // event log → Telegram/Slack
 firstSample.finally(() => sites.collectSites());   // initial sites data, once the PM2 sample it reads exists
 setInterval(() => sites.collectSites(), 300_000); // re-check sites every 5 min
 

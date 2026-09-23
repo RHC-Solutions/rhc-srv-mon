@@ -34,13 +34,13 @@ function renderSettings(){
     + '<div class="upd-toggle"><label class="switch"><input type="checkbox" id="tgOn"' + (tg.enabled ? ' checked' : '') + '><span class="slider"></span></label><label>Enabled</label></div>'
     + '<div class="row2">' + stField('Bot token', '<input type="password" id="tgToken" placeholder="' + (tg.hasToken ? esc(tg.botToken) + ' (leave empty to keep)' : '123456:ABC-DEF1234ghIkl') + '">')
     + stField('Chat ID', '<input id="tgChat" value="' + esc(tg.chatId || '') + '" placeholder="-100123456789">') + '</div>'
-    + '<div class="upd-chk-grid"><label><input type="checkbox" id="tgUpd"' + (tg.notifyOnUpdate !== false ? ' checked' : '') + '> Updates available</label><label><input type="checkbox" id="tgDone"' + (tg.notifyOnComplete !== false ? ' checked' : '') + '> Update / backup / cleanup results</label><label><input type="checkbox" id="tgAuth"' + (tg.notifyOnAuth !== false ? ' checked' : '') + '> Web login attempts</label></div>'
+    + '<div class="upd-chk-grid"><label><input type="checkbox" id="tgUpd"' + (tg.notifyOnUpdate !== false ? ' checked' : '') + '> Updates available</label><label><input type="checkbox" id="tgDone"' + (tg.notifyOnComplete !== false ? ' checked' : '') + '> Update / backup / cleanup results</label><label><input type="checkbox" id="tgAuth"' + (tg.notifyOnAuth !== false ? ' checked' : '') + '> Web login attempts</label><label><input type="checkbox" id="tgSite"' + (tg.notifyOnSite !== false ? ' checked' : '') + '> Site start / stop / restart</label></div>'
     + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'telegram\')">📨 Send test</button><button class="btn pri" onclick="saveTelegramSettings()">Save</button></div></div>';
   // Slack
   html += '<div class="upd-card"><h3>Slack</h3>'
     + '<div class="upd-toggle"><label class="switch"><input type="checkbox" id="slOn"' + (sl.enabled ? ' checked' : '') + '><span class="slider"></span></label><label>Enabled</label></div>'
     + stField('Incoming webhook URL', '<input type="password" id="slUrl" placeholder="' + (sl.hasUrl ? esc(sl.webhookUrl) + ' (leave empty to keep)' : 'https://hooks.slack.com/services/T…/B…/…') + '">', 'Slack → Apps → Incoming Webhooks → pick a channel')
-    + '<div class="upd-chk-grid"><label><input type="checkbox" id="slUpd"' + (sl.notifyOnUpdate !== false ? ' checked' : '') + '> Updates available</label><label><input type="checkbox" id="slDone"' + (sl.notifyOnComplete !== false ? ' checked' : '') + '> Update / backup / cleanup results</label><label><input type="checkbox" id="slAuth"' + (sl.notifyOnAuth !== false ? ' checked' : '') + '> Web login attempts</label></div>'
+    + '<div class="upd-chk-grid"><label><input type="checkbox" id="slUpd"' + (sl.notifyOnUpdate !== false ? ' checked' : '') + '> Updates available</label><label><input type="checkbox" id="slDone"' + (sl.notifyOnComplete !== false ? ' checked' : '') + '> Update / backup / cleanup results</label><label><input type="checkbox" id="slAuth"' + (sl.notifyOnAuth !== false ? ' checked' : '') + '> Web login attempts</label><label><input type="checkbox" id="slSite"' + (sl.notifyOnSite !== false ? ' checked' : '') + '> Site start / stop / restart</label></div>'
     + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'slack\')">📨 Send test</button><button class="btn pri" onclick="saveSlackSettings()">Save</button></div></div>';
   // Cloudflare
   html += '<div class="upd-card"><h3>Cloudflare</h3>'
@@ -104,14 +104,14 @@ async function saveGeneralSettings(){
 }
 async function saveTelegramSettings(){
   const g = (id) => document.getElementById(id);
-  const body = { enabled: g('tgOn').checked, chatId: g('tgChat').value, notifyOnUpdate: g('tgUpd').checked, notifyOnComplete: g('tgDone').checked, notifyOnAuth: g('tgAuth').checked };
+  const body = { enabled: g('tgOn').checked, chatId: g('tgChat').value, notifyOnUpdate: g('tgUpd').checked, notifyOnComplete: g('tgDone').checked, notifyOnAuth: g('tgAuth').checked, notifyOnSite: g('tgSite').checked };
   if (g('tgToken').value.trim()) body.botToken = g('tgToken').value.trim();
   try { await stApi('PUT', 'api/settings/telegram', body); toast('Telegram settings saved', 'success'); lastSettings = null; renderSettings(); }
   catch(e){ stErr(e, 'Telegram'); }
 }
 async function saveSlackSettings(){
   const g = (id) => document.getElementById(id);
-  const body = { enabled: g('slOn').checked, notifyOnUpdate: g('slUpd').checked, notifyOnComplete: g('slDone').checked, notifyOnAuth: g('slAuth').checked };
+  const body = { enabled: g('slOn').checked, notifyOnUpdate: g('slUpd').checked, notifyOnComplete: g('slDone').checked, notifyOnAuth: g('slAuth').checked, notifyOnSite: g('slSite').checked };
   if (g('slUrl').value.trim()) body.webhookUrl = g('slUrl').value.trim();
   try { await stApi('PUT', 'api/settings/slack', body); toast('Slack settings saved', 'success'); lastSettings = null; renderSettings(); }
   catch(e){ stErr(e, 'Slack'); }
