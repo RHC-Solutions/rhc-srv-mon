@@ -63,6 +63,7 @@ function renderSitesList(){
     + '<span style="flex:1"></span>'
     + '<div class="site-viewsw"><button class="chip' + (siteViewMode === 'cards' ? ' active' : '') + '" onclick="siteSetView(\'cards\')" title="Cards">▦</button><button class="chip' + (siteViewMode === 'table' ? ' active' : '') + '" onclick="siteSetView(\'table\')" title="Table">☰</button></div>'
     + '<button class="btn" onclick="siteSyncClp()" title="Re-read CloudPanel\'s database (sites this panel already manages are left alone)">⟳ Sync from CloudPanel</button>'
+    + '<button class="btn" onclick="siteCfBulk()" title="Allow traffic from Cloudflare only — for every site at once">☁ Cloudflare-only…</button>'
     + '<button class="btn pri" onclick="siteNewDialog()">＋ New Site</button></div>';
   const sortOrder = { 'down': 0, 'degraded': 1, 'online': 2 };
   const q = siteQ.trim().toLowerCase();
@@ -1053,6 +1054,71 @@ async function siteSecuritySave(insertPlaceholder){
   try { const r = await siteApi('PUT', siteUrl('/security'), body); toast('Security settings saved' + (r.vhost.changed ? ' · nginx reloaded' : ''), 'success'); siteReloadAll(); }
   catch(e){ siteErr(e, 'Security'); }
 }
+
+/* ---- Cloudflare-only, for every site at once ---- */
+//
+// The Security tab's Cloudflare toggle, one site at a time, is the safe version of this: you are
+// looking at the site you are changing. In bulk the same switch can take a site off the internet —
+// a vhost that allows only Cloudflare's ranges answers 403 to everything else — so this never acts
+// on "all sites" as a blind set. The server returns a plan first: who actually resolves to
+// Cloudflare, whose vhost can carry the setting at all, and what each site is set to today. Only
+// the sites ticked here are touched.
+async function siteCfBulk(){
+  toast('Checking DNS for every site…');
+  try { siteCfBulkDialog(await siteApi('GET', 'api/sites/bulk/cloudflare-only')); }
+  catch(e){ siteErr(e, 'Cloudflare-only'); }
+}
+function siteCfBulkRow(x){
+  const dns = x.via_cloudflare === true ? '<span style="color:var(--md-primary)">Cloudflare</span>'
+    : x.via_cloudflare === false ? '<span style="color:var(--md-warning)">direct</span> <span class="dim">' + esc(x.addrs.slice(0, 2).join(', ')) + '</span>'
+    : '<span class="dim">no DNS answer</span>';
+  const tpl = x.has_settings_placeholder ? '<span class="dim">ok</span>' : '<span style="color:var(--md-warning)">no {{settings}}</span>';
+  // Ticked by default only where turning it on is safe and would change something.
+  const ready = x.via_cloudflare === true && x.has_settings_placeholder && !x.cf_only;
+  return '<tr><td><label class="chip" style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="cfb" value="' + esc(x.domain) + '"' + (ready ? ' checked' : '') + '> <span class="mono">' + esc(x.domain) + '</span></label></td>'
+    + '<td>' + dns + '</td><td>' + tpl + '</td>'
+    + '<td style="text-align:right">' + (x.cf_only ? '<b>on</b>' : '<span class="dim">off</span>') + '</td></tr>';
+}
+function siteCfBulkDialog(plan){
+  const rows = plan.sites.map(siteCfBulkRow).join('');
+  const risky = plan.sites.filter(x => x.via_cloudflare !== true).length;
+  const bg = sshModal('<h3>☁ Allow traffic from Cloudflare only</h3>'
+    + '<p class="dim" style="margin:0 0 10px;font-size:14.5px">Includes <code>/etc/nginx/cloudflare/ips</code> in the vhost and switches its access log to the <code>cloudflare</code> format — the same setting as each site\'s Security tab. Anything that does not come through Cloudflare is answered <b>403</b>, so a site whose DNS points straight at this box goes dark the moment it is turned on.</p>'
+    + (risky ? '<div class="banner bad" style="margin-bottom:10px"><span class="ico">⚠</span> ' + risky + ' site(s) do not resolve to Cloudflare. They are left unticked — tick one only if you know its DNS is about to change.</div>' : '')
+    + '<div id="cfbBody"><table class="upd-table"><tr><th>Site</th><th>DNS</th><th>vhost</th><th style="text-align:right">Now</th></tr>' + rows + '</table>'
+    + '<label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:10px"><input type="checkbox" id="cfbInsert"> add a <code>{{settings}}</code> placeholder to vhosts that have none</label></div>'
+    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button>'
+    + '<button class="btn" id="cfbOff">Turn off for ticked</button>'
+    + '<button class="btn pri" id="cfbOn">Turn on for ticked</button></div>');
+  bg.querySelector('#cfbOn').onclick = (e) => armConfirm(e.target, 'Cloudflare-only — apply?', () => siteCfBulkApply(true));
+  bg.querySelector('#cfbOff').onclick = () => siteCfBulkApply(false);
+}
+async function siteCfBulkApply(on){
+  const bg = document.getElementById('ssh-modal'); if (!bg) return;
+  const domains = [...bg.querySelectorAll('input.cfb:checked')].map(i => i.value);
+  if (!domains.length) { toast('No sites ticked', 'warn'); return; }
+  const body = { cf_only: on, domains, insert_settings_placeholder: !!(document.getElementById('cfbInsert') || {}).checked };
+  for (const b of bg.querySelectorAll('.foot .btn')) b.disabled = true;
+  toast('Applying to ' + domains.length + ' site(s)… each one is written, tested and reloaded on its own');
+  try {
+    const r = await siteApi('PUT', 'api/sites/bulk/cloudflare-only', body);
+    const done = r.results.filter(x => x.ok && !x.skipped), skipped = r.results.filter(x => x.skipped), bad = r.results.filter(x => !x.ok);
+    const list = (arr, f) => arr.map(x => '<div>' + f(x) + '</div>').join('');
+    document.getElementById('cfbBody').innerHTML = '<div style="font-size:14.5px;line-height:1.7">'
+      + (done.length ? '<p style="margin:0 0 6px"><b style="color:var(--md-primary)">' + done.length + ' changed</b></p>' + list(done, x => '<span class="mono">' + esc(x.domain) + '</span> — Cloudflare-only is now <b>' + (on ? 'on' : 'off') + '</b>' + (x.changed ? ' <span class="dim">(nginx reloaded)</span>' : '')) : '')
+      + (skipped.length ? '<p style="margin:10px 0 6px" class="dim">' + skipped.length + ' already ' + (on ? 'on' : 'off') + '</p>' : '')
+      + (bad.length ? '<p style="margin:10px 0 6px"><b style="color:var(--md-error-bright)">' + bad.length + ' failed</b></p>' + list(bad, x => '<span class="mono">' + esc(x.domain) + '</span> — ' + esc(x.error)) : '')
+      + '</div>';
+    for (const b of bg.querySelectorAll('.foot .btn')) b.remove();
+    bg.querySelector('.foot').innerHTML = '<button class="btn pri" onclick="sshModalClose()">Close</button>';
+    toast('Cloudflare-only ' + (on ? 'on' : 'off') + ' · ' + done.length + ' changed' + (bad.length ? ', ' + bad.length + ' failed' : ''), bad.length ? 'warn' : 'success', { duration: bad.length ? 12000 : 6000 });
+    refresh();
+  } catch(e){
+    for (const b of bg.querySelectorAll('.foot .btn')) b.disabled = false;
+    siteErr(e, 'Cloudflare-only');
+  }
+}
+
 
 /* ---- SSH/FTP ---- */
 function siteTabSsh(s){

@@ -130,6 +130,14 @@ const call = (label, fn) => { try { const r = fn(); log('  ok  ' + label); retur
     } catch (e) { errors.push('ssh dialogs: ' + e.message); }
     // dialogs (render only)
     for (const [label, fn] of [['sitePwGenerate', () => sandbox.sitePwGenerate()], ['siteSshAdd', () => sandbox.siteSshAdd()], ['siteCertUpload', () => sandbox.siteCertUpload()], ['siteCronEdit(null)', () => sandbox.siteCronEdit(null)], ['siteFmMkdir', () => sandbox.siteFmMkdir()]]) { call(label, fn); sandbox.sshModalClose(); }
+    // The bulk Cloudflare-only dialog renders from a server plan, so feed it one and every shape a
+    // site can have in it: behind Cloudflare, resolving straight here, and no DNS answer at all.
+    call('siteCfBulkDialog', () => sandbox.siteCfBulkDialog({ sites: [
+      { domain: 'a.example', user: 'a', type: 'nodejs', cf_only: false, has_settings_placeholder: true, addrs: ['172.67.1.1'], via_cloudflare: true },
+      { domain: 'b.example', user: 'b', type: 'php', cf_only: true, has_settings_placeholder: false, addrs: ['1.2.3.4'], via_cloudflare: false },
+      { domain: 'c.example', user: 'c', type: 'static', cf_only: false, has_settings_placeholder: true, addrs: [], via_cloudflare: null },
+    ] }));
+    sandbox.sshModalClose();
     call('siteGo(null)', () => sandbox.siteGo(null));
   }
   log(errors.length ? '\n' + errors.length + ' error(s):\n - ' + errors.join('\n - ') : '\nno errors');

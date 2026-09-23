@@ -321,6 +321,27 @@ const store2 = () => require('/opt/rhc-srv-mon-v2/lib/sites/store');
     eq(r.status, 200);
     eq((await req('GET', '/api/sites/' + php.domain + '/vhost')).json.on_disk, before, 'vhost not restored');
   });
+  await check('bulk cloudflare-only plans before it acts', async () => {
+    const r = await req('GET', '/api/sites/bulk/cloudflare-only');
+    eq(r.status, 200); ok(Array.isArray(r.json.sites) && r.json.sites.length, 'shape');
+    for (const x of r.json.sites) ok('via_cloudflare' in x && 'has_settings_placeholder' in x && 'cf_only' in x, 'plan row shape');
+    const direct = r.json.sites.filter((x) => x.via_cloudflare !== true).length;
+    return r.json.sites.length + ' sites, ' + direct + ' not behind Cloudflare';
+  });
+  await check('bulk cloudflare-only never guesses its set', async () => {
+    eq((await req('PUT', '/api/sites/bulk/cloudflare-only', { cf_only: true })).status, 400);
+    eq((await req('PUT', '/api/sites/bulk/cloudflare-only', { cf_only: true, domains: [] })).status, 400);
+  });
+  await check('bulk cloudflare-only reports per site and leaves the rest alone', async () => {
+    // An unknown site and one that is already in the target state: neither touches nginx, and the
+    // reply still accounts for both rather than failing the whole batch on the first bad name.
+    const cur = (await req('GET', '/api/sites/bulk/cloudflare-only')).json.sites;
+    const same = cur.find((x) => x.cf_only === true) || cur.find((x) => x.cf_only === false);
+    const r = await req('PUT', '/api/sites/bulk/cloudflare-only', { cf_only: same.cf_only, domains: ['nope.example', same.domain] });
+    eq(r.status, 200);
+    eq(r.json.results.find((x) => x.domain === 'nope.example').ok, false);
+    eq(r.json.results.find((x) => x.domain === same.domain).skipped, true);
+  });
   await check('GET ssh-users', async () => { const r = await req('GET', '/api/sites/' + php.domain + '/ssh-users'); eq(r.status, 200); ok(Array.isArray(r.json)); return r.json.length + ' users'; });
   await check('POST ssh-user rejects bad names / duplicates', async () => {
     eq((await req('POST', '/api/sites/' + php.domain + '/ssh-users', { username: 'Bad Name' })).status, 400);
