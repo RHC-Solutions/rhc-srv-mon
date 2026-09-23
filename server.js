@@ -37,6 +37,8 @@ const vnc = require('./lib/vnc');
 
 /* ----------------------------------------------------------------- server */
 
+let allUsersRun = null;   // background "Update All Users" batch: { running, total, done, ok, failed[], current }
+
 const server = http.createServer((req, res) => {
   const url = (req.url || '/').split('?')[0];
   if (!auth.authGate(req, res, url)) return;
@@ -58,7 +60,7 @@ const server = http.createServer((req, res) => {
   if (url === '/api/updates') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     const updatesCache = updates.getCache();
-    return res.end(JSON.stringify(updatesCache || { components: [], lastChecked: null, schedule: { enabled: false }, telegram: { enabled: false }, log: [] }));
+    return res.end(JSON.stringify(Object.assign({}, updatesCache || { components: [], lastChecked: null, schedule: { enabled: false }, telegram: { enabled: false }, log: [] }, { allUsersRun })));
   }
   if (url === '/api/updates/check' && req.method === 'POST') {
     updates.collectUpdates().then((data) => {
@@ -92,15 +94,23 @@ const server = http.createServer((req, res) => {
         if (userV && c.latestVersion && userV !== c.latestVersion) jobs.push([user, c.key]);
       }
     }
-    // Run sequentially — avoids spawning dozens of concurrent npm installs on a memory-tight box
+    // Sequential (dozens of concurrent npm installs would swamp this box) and in the background: the
+    // whole batch outlives nginx's proxy timeout, which used to kill the request the UI waited on.
+    // Progress is polled through GET api/updates (allUsersRun).
+    res.writeHead(allUsersRun && allUsersRun.running ? 409 : 200, { 'Content-Type': 'application/json' });
+    if (allUsersRun && allUsersRun.running) return res.end(JSON.stringify({ error: 'already running', run: allUsersRun }));
+    allUsersRun = { running: true, total: jobs.length, done: 0, ok: 0, failed: [], current: null, startedAt: new Date().toISOString(), finishedAt: null };
+    res.end(JSON.stringify({ started: true, count: jobs.length }));
     (async () => {
-      const results = [];
       for (const [user, key] of jobs) {
-        try { results.push(await updates.runUserUpdate(user, key, actor)); }
-        catch (e) { results.push({ user, component: key, success: false, output: e.message }); }
+        allUsersRun.current = user + '/' + key;
+        let r;
+        try { r = await updates.runUserUpdate(user, key, actor); }
+        catch (e) { r = { user, component: key, success: false, output: e.message }; }
+        allUsersRun.done++;
+        if (r && r.success) allUsersRun.ok++; else allUsersRun.failed.push(user + '/' + key + ': ' + String((r && (r.output || r.error)) || '').split('\n')[0].slice(0, 160));
       }
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ count: results.length, results }));
+      allUsersRun.running = false; allUsersRun.current = null; allUsersRun.finishedAt = new Date().toISOString();
     })();
     return;
   }

@@ -65,7 +65,10 @@ function renderUpdates(){
     html += '<div class="upd-card" style="grid-column:1/-1">';
     html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
     html += '<h3 style="margin:0">By User <span style="font-weight:400;font-size:14px;color:var(--md-on-surface-dis)">' + userKeys.length + ' users</span></h3>';
-    if (userOutdatedCount) {
+    const aur = lastUpdates.allUsersRun;
+    if (aur && aur.running) {
+      html += '<span class="dim" style="font-size:14px">⏳ Updating ' + aur.done + '/' + aur.total + (aur.current ? ' · ' + esc(aur.current) : '') + '</span>';
+    } else if (userOutdatedCount) {
       html += '<button class="btn update" onclick="triggerUpdateAllUsers()" style="font-size:14px;padding:4px 14px">⬆ Update All Users (' + userOutdatedCount + ')</button>';
     }
     html += '</div>';
@@ -239,11 +242,21 @@ async function triggerUpdateAll(){
 async function triggerUpdateAllUsers(){
   if (!confirm('Update every outdated tool for all users? Runs npm updates sequentially and may take a few minutes.')) return;
   try {
-    await fetch('api/updates/run-all-users', { method: 'POST' });
-    const res = await fetch('api/updates');
-    lastUpdates = await res.json();
-    if (state.tab === 'updates') renderUpdates();
-  } catch(_){}
+    const r = await fetch('api/updates/run-all-users', { method: 'POST' });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return toast('Update all users: ' + (j.error || 'HTTP ' + r.status), 'warn');
+    toast('Updating ' + j.count + ' tool(s) across users in the background…', 'info');
+    pollUpdateAllUsers();
+  } catch(e){ toast('Update all users failed: ' + e.message, 'error'); }
+}
+// The batch runs server-side; follow it through GET api/updates until it finishes.
+async function pollUpdateAllUsers(){
+  let run = null;
+  try { const res = await fetch('api/updates'); lastUpdates = await res.json(); run = lastUpdates.allUsersRun; } catch(_){}
+  if (state.tab === 'updates') renderUpdates();
+  if (run && run.running) return setTimeout(pollUpdateAllUsers, 3000);
+  if (run && run.finishedAt) toast('Update all users: ' + run.ok + '/' + run.total + ' updated' + (run.failed.length ? ', ' + run.failed.length + ' failed' : ''),
+    run.failed.length ? 'warn' : 'success', run.failed.length ? { detail: run.failed.join('\n'), duration: 20000 } : {});
 }
 
 function saveUpdatesConfig(){
