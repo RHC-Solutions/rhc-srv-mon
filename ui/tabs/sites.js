@@ -249,31 +249,71 @@ async function siteNewGo(btn){
     btn.disabled = false;
   }
 }
-// Delete: the domain has to be typed back, and the server refuses without it too.
-function siteDeleteDialog(){
+// Delete = archive → Telegram → delete. The dialog shows the server's plan (accounts, homes,
+// databases incl. ones the panel never registered, system files), the domain has to be typed back,
+// and the job is polled until done. Nothing is removed unless Telegram confirmed every part.
+let siteDelPoll = null;
+async function siteDeleteDialog(){
   const s = siteView.data;
-  const bg = sshModal('<h3>Delete ' + esc(s.domain) + '</h3>'
-    + '<div class="box" style="border-color:var(--md-error-bright)"><b style="color:var(--md-error-bright)">This removes the vhost, certificates'
-    + (s.php ? ', the php-fpm pool' : '') + ', databases, SSH/FTP users, cron jobs, logrotate and the unix account <span class="mono">' + esc(s.user) + '</span> with its home directory.</b><br>Everything under <span class="mono">/home/' + esc(s.user) + '</span> goes with it. Export anything you need first.</div>'
-    + siteField('Type the domain to confirm', '<input id="delConfirm" autocomplete="off" placeholder="' + esc(s.domain) + '">')
-    + '<label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin:6px 0"><input type="checkbox" id="delKeepHome"> keep the home directory (removes the account, leaves the files)</label>'
-    + '<div id="delSteps" class="site-cf-detail" style="display:none"></div>'
-    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn danger" id="delGo" onclick="siteDeleteGo(this)">Delete site</button></div>');
+  sshModal('<h3>Delete ' + esc(s.domain) + '</h3><div id="delBody"><p class="dim">Working out everything that belongs to this site… (sizing the homes can take a minute)</p></div>');
+  try {
+    const cur = await siteApi('GET', 'api/decommission');
+    if (cur.job) return siteDeleteWatch(cur.job.id);
+    const p = await siteApi('GET', siteUrl('/decommission'));
+    const li = (items) => '<ul style="margin:4px 0 8px 18px;padding:0">' + items.join('') + '</ul>';
+    const dbRow = (d, locked) => '<li><label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" class="delDb" value="' + esc(d.name) + '"' + (d.selected ? ' checked' : '') + (locked ? ' disabled' : '') + '> <span class="mono">' + esc(d.engine + ' · ' + d.name) + '</span>'
+      + ' <span class="dim">' + esc(locked ? 'registered with this site' : d.why + (d.owner ? ' · owner ' + d.owner : '') + (d.size ? ' · ' + fmtMem(d.size) : '')) + '</span></label></li>';
+    const dbs = p.databases.registered.map(d => dbRow(d, true)).concat(p.databases.discovered.map(d => dbRow(d, false)));
+    let h = '<div class="box" style="border-color:var(--md-error-bright)"><b style="color:var(--md-error-bright)">Everything below is packed into one archive and sent to Telegram. Only after Telegram confirms every part is the site deleted, for good.</b></div>'
+      + (p.telegram.configured ? '' : '<div class="box" style="border-color:var(--md-warning)">⚠ Telegram is not configured (Settings → Notifications). Deleting is blocked until it is.</div>')
+      + '<b>Unix accounts</b>' + li(p.accounts.map(a => '<li class="mono">' + esc(a.name) + (a.shared ? ' <span style="color:var(--md-warning)">shared with another site: kept</span>' : a.exists ? '' : ' <span class="dim">(already gone)</span>') + '</li>'))
+      + '<b>Archived homes</b> <span class="dim">≈ ' + esc(p.raw) + ' before compression · about ' + p.estParts + ' Telegram file(s) of ≤49 MB</span>' + li(p.homes.map(x => '<li class="mono">' + esc(x.path) + '</li>'))
+      + '<div class="dim" style="margin:-4px 0 8px">Left out: ' + esc(p.excludes.join(', ')) + '. Git repos are kept as a bundle of whatever the remote doesn\'t already have.</div>'
+      + '<b>Databases</b> <span class="dim">dumped into the archive, then dropped</span>' + (dbs.length ? li(dbs) : '<p class="dim">none found</p>') + (p.databases.pgError ? '<p style="color:var(--md-warning)">⚠ ' + esc(p.databases.pgError) + '</p>' : '')
+      + '<b>System files</b> <span class="dim">archived, then removed</span>' + (p.system.length ? li(p.system.map(f => '<li><span class="mono">' + esc(f.path) + '</span> <span class="dim">' + esc(f.what) + '</span></li>')) : '<p class="dim">none</p>')
+      + (p.claudeRc.length ? '<b>Claude RC</b>' + li(p.claudeRc.map(l => '<li class="mono">' + esc(l) + '</li>')) : '')
+      + (p.cloudpanel ? '<label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin:6px 0"><input type="checkbox" id="delClp" checked> also remove it from CloudPanel (site #' + esc(p.cloudpanel.id) + '; its DB is copied to /var/backups first)</label>' : '')
+      + (p.nginxMentions.length ? '<div class="box" style="border-color:var(--md-warning)">⚠ The domain is also mentioned in ' + p.nginxMentions.map(f => '<span class="mono">' + esc(f) + '</span>').join(', ') + '. Those files are left untouched; check them by hand.</div>' : '')
+      + (p.running ? '<div class="box" style="border-color:var(--md-warning)">⚠ Another deletion is running (' + esc(p.running.domain) + ').</div>' : '')
+      + siteField('Type the domain to confirm', '<input id="delConfirm" autocomplete="off" placeholder="' + esc(s.domain) + '">')
+      + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn danger" id="delGo" onclick="siteDeleteGo(this)"' + (p.telegram.configured && !p.running ? '' : ' disabled') + '>Archive to Telegram, then delete</button></div>';
+    document.getElementById('delBody').innerHTML = h;
+  } catch(e){ const b = document.getElementById('delBody'); if (b) b.innerHTML = '<div class="test-out err">' + esc(e.message + (e.detail ? '\n' + e.detail : '')) + '</div>'; }
 }
 async function siteDeleteGo(btn){
   const s = siteView.data;
   const typed = (document.getElementById('delConfirm') || {}).value || '';
   if (typed.trim() !== s.domain) return toast('Type ' + s.domain + ' exactly to confirm', 'warn');
-  const keepHome = !!(document.getElementById('delKeepHome') || {}).checked;
+  const databases = [...document.querySelectorAll('.delDb:checked:not(:disabled)')].map(x => x.value);
+  const clp = document.getElementById('delClp');
   btn.disabled = true;
-  const box = document.getElementById('delSteps');
-  if (box) { box.style.display = 'block'; box.textContent = 'Deleting…'; }
   try {
-    const r = await siteApi('DELETE', siteUrl('?confirm=' + encodeURIComponent(s.domain) + (keepHome ? '&keepHome=1' : '')));
-    if (box) box.textContent = r.steps.map(x => '✓ ' + x.name).join('\n') + (r.errors.length ? '\n\n⚠ ' + r.errors.join('\n⚠ ') : '');
-    toast('Deleted ' + r.domain + (r.errors.length ? ' with ' + r.errors.length + ' problem(s)' : ''), r.errors.length ? 'warn' : 'success', r.errors.length ? { detail: r.errors.join('\n'), duration: 20000 } : {});
-    setTimeout(() => { sshModalClose(); siteGo(null); refresh(); }, 1200);
-  } catch(e){ if (box) box.textContent = e.message + (e.detail ? '\n\n' + e.detail : ''); siteErr(e, 'Delete'); btn.disabled = false; }
+    const j = await siteApi('POST', siteUrl('/decommission'), { confirm: s.domain, databases, cloudpanel: clp ? clp.checked : false });
+    siteDeleteWatch(j.id);
+  } catch(e){ siteErr(e, 'Delete'); btn.disabled = false; }
+}
+function siteDeleteWatch(id){
+  const body = document.getElementById('delBody');
+  if (!body) return;
+  body.innerHTML = '<p><b id="delPhase">starting…</b> <span class="dim" id="delSent"></span></p><pre id="delLog" class="mono" style="max-height:50vh;overflow:auto;white-space:pre-wrap;font-size:12px"></pre>'
+    + '<div class="foot"><button class="btn" id="delClose" onclick="sshModalClose()">Close (keeps running)</button></div>';
+  clearInterval(siteDelPoll);
+  const tick = async () => {
+    let j; try { j = await siteApi('GET', 'api/decommission/' + id); } catch(e){ clearInterval(siteDelPoll); const ph = document.getElementById('delPhase'); if (ph) ph.textContent = e.message; return; }
+    const ph = document.getElementById('delPhase'), lg = document.getElementById('delLog'), sn = document.getElementById('delSent');
+    if (!ph) { if (j.done) clearInterval(siteDelPoll); return; }   // dialog closed: stop quietly once finished
+    ph.textContent = j.done ? (j.ok ? '✅ Archived to Telegram and deleted' : j.deleted ? '⚠ Deleted, with problems' : '✗ Failed. Nothing was deleted') : j.phase + '…';
+    sn.textContent = j.archive ? j.archive.name + ' · ' + fmtMem(j.archive.size) + ' · Telegram ' + j.archive.sent + '/' + j.archive.parts : '';
+    const atEnd = lg.scrollTop + lg.clientHeight >= lg.scrollHeight - 4;
+    lg.textContent = j.log.join('\n') + (j.errors.length ? '\n\nProblems:\n⚠ ' + j.errors.join('\n⚠ ') : '');
+    if (atEnd) lg.scrollTop = lg.scrollHeight;
+    if (j.done) {
+      clearInterval(siteDelPoll);
+      document.getElementById('delClose').textContent = 'Close';
+      if (j.deleted) { toast(j.domain + ' deleted' + (j.errors.length ? ' with ' + j.errors.length + ' problem(s)' : ''), j.ok ? 'success' : 'warn'); document.getElementById('delClose').onclick = () => { sshModalClose(); siteGo(null); refresh(); }; }
+    }
+  };
+  tick(); siteDelPoll = setInterval(tick, 2000);
 }
 
 /* =============================================================== detail */
