@@ -487,9 +487,9 @@ backups.loadBackups();
 
 // PM2 heartbeat + PostgreSQL sample (postgres → history is one-way; the timer sequences them).
 const sampleAll = () => history.sample().then(() => postgres.dbSample()).catch((e) => console.error('db sample failed:', e.message));
-sampleAll();                               // first sample immediately
+const firstSample = sampleAll();           // first sample immediately
 setInterval(sampleAll, history.SAMPLE_MS);
-sites.collectSites();                      // initial sites data
+firstSample.finally(() => sites.collectSites());   // initial sites data, once the PM2 sample it reads exists
 setInterval(() => sites.collectSites(), 300_000); // re-check sites every 5 min
 
 if (NO_JOBS) {
