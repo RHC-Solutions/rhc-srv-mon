@@ -216,12 +216,12 @@ const server = http.createServer((req, res) => {
       let payload;
       try { payload = JSON.parse(body); }
       catch { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'invalid JSON' })); }
-      const { dir, user, packages } = payload || {};
+      const { dir, user, packages, rebuild } = payload || {};
       if (!dir || !user) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'dir and user required' }));
       }
-      modules.runModuleUpdate(dir, user, packages || [], actorOf(req)).then((result) => {
+      modules.runModuleUpdate(dir, user, packages || [], actorOf(req), { rebuild: rebuild === true }).then((result) => {
         res.writeHead(result.success ? 200 : 500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
       }).catch((e) => {

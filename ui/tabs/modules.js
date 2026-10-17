@@ -129,8 +129,9 @@ function renderModules(){
   } else {
     upAllLabel = '⬆ Update all' + (totalOutdated ? ' (' + totalOutdated + ')' : '');
   }
+  const rebuildRows = (d.outdated||[]).filter(r => r.rebuild).length;
   const upAllDisabled = upAllBusy || totalOutdated === 0;
-  html += '<button class="btn" id="modUpdateAll" '+(upAllDisabled?'disabled':'')+' title="Update every outdated package in every scanned project to @latest" style="padding:7px 14px;font-size:14px;background:var(--md-warn-container);color:var(--md-warning);border-color:var(--md-warn-container)">'+upAllLabel+'</button>';
+  html += '<button class="btn" id="modUpdateAll" '+(upAllDisabled?'disabled':'')+' title="Update every outdated package in every scanned project to @latest'+(rebuildRows?' — '+rebuildRows+' build-affecting package'+(rebuildRows===1?'':'s')+' (next, react…) are held back; update those one by one with Update + rebuild':'')+'" style="padding:7px 14px;font-size:14px;background:var(--md-warn-container);color:var(--md-warning);border-color:var(--md-warn-container)">'+upAllLabel+'</button>';
   html += '<button class="btn" id="modRefresh" '+(d.scanInProgress?'disabled':'')+' style="padding:7px 14px;font-size:14px">'+(d.scanInProgress?'⏳ Scanning…':'🔄 Rescan')+'</button>';
   html += '</div>';
 
@@ -171,11 +172,13 @@ function renderModules(){
       const updating = isUpdating(r.dir);
       const upBtn = updating
         ? '<button class="mod-cmd" disabled style="opacity:.6">⏳ updating…</button>'
+        : r.rebuild
+        ? '<button class="mod-cmd" data-update-pkg="'+esc(r.package)+'" data-update-dir="'+esc(r.dir)+'" data-update-user="'+esc(r.user)+'" data-rebuild="1" title="'+esc(pm)+' install '+esc(r.package)+'@latest, then '+esc(pm)+' run build and restart the site\'s pm2 process; a failed build is rolled back. Auto-update and Update all never touch this package." style="background:var(--md-warn-container);color:var(--md-warning);border-color:var(--md-warn-container)">⬆ Update + rebuild</button>'
         : '<button class="mod-cmd" data-update-pkg="'+esc(r.package)+'" data-update-dir="'+esc(r.dir)+'" data-update-user="'+esc(r.user)+'" title="Run: '+esc(pm)+' install '+esc(r.package)+'@latest" style="background:var(--md-ok-container);color:var(--md-primary);border-color:var(--md-primary)">⬆ Update</button>';
       const cpyBtn = '<button class="mod-cmd" data-cmd="'+esc(cmd)+'" title="Copy command">📋</button>';
       html += '<tr>'
         + '<td><span class="sev '+sev+'">'+(r.severity||'—')+'</span></td>'
-        + '<td><span class="mod-pkg'+(isDev?' dev':'')+'">'+esc(r.package)+'</span>'+(isDev?' <span style="color:var(--md-on-surface-dis);font-size:12px;text-transform:uppercase">dev</span>':'')+'</td>'
+        + '<td><span class="mod-pkg'+(isDev?' dev':'')+'">'+esc(r.package)+'</span>'+(isDev?' <span style="color:var(--md-on-surface-dis);font-size:12px;text-transform:uppercase">dev</span>':'')+(r.rebuild?' <span class="sev minor" title="changes the compiled build: held back by auto-update and Update all">rebuild</span>':'')+'</td>'
         + '<td class="mod-ver">'+esc(r.current||'—')+'</td>'
         + '<td class="mod-ver">'+esc(r.wanted||'—')+'</td>'
         + '<td class="mod-ver new">'+esc(r.latest||'—')+'</td>'
@@ -249,6 +252,8 @@ function renderModules(){
         + (dur?'<span class="auto-stat" style="margin-left:auto">⏱ <span class="v">'+dur+'</span></span>':'')
         + '</div>';
       if (allPkgs) html += '<div class="att">📦 '+esc(allPkgs)+'</div>';
+      if (e.heldBack && e.heldBack.length) html += '<div class="att" style="color:var(--md-warning)">⏸ held back (needs rebuild): '+esc(e.heldBack.join(', '))+'</div>';
+      if (e.rebuild) html += '<div class="att">🏗 '+(e.rebuild.built?'rebuilt':'build failed'+(e.rebuild.rolledBack?', rolled back':''))+((e.rebuild.restarted||[]).length?' · restarted: '+esc(e.rebuild.restarted.map(x => x.domain+(x.ok?' ✓':' ✗ '+(x.error||''))).join(', ')):'')+'</div>';
       if (e.attempts && e.attempts.length) {
         html += '<div class="att">🔁 '+e.attempts.map(a => esc(a.strategy)+(a.success?'✓':'✗')+(a.error?'('+esc(a.error)+')':'')).join(' → ')+'</div>';
       }
@@ -303,6 +308,7 @@ function renderModules(){
       if (fail)  html += '<span class="auto-stat" style="color:var(--md-error-bright)">❌ <span class="v">'+fail+'</span></span>';
       if (upd)   html += '<span class="auto-stat">📦 <span class="v">'+upd+'</span> pkgs</span>';
       if (fixes) html += '<span class="auto-stat">🔧 <span class="v">'+fixes+'</span> fixes</span>';
+      if (pass.packagesHeldBack) html += '<span class="auto-stat" style="color:var(--md-warning)" title="build-affecting packages (next, react…) are never auto-updated; use Update + rebuild">⏸ <span class="v">'+pass.packagesHeldBack+'</span> held back</span>';
       if (dur)   html += '<span class="auto-stat">⏱ <span class="v">'+dur+'</span></span>';
       html += '</span></div>';
       const visibleResults = (pass.results||[]).filter(r => !r.skipped || (state.modShowSkipped));
@@ -315,6 +321,7 @@ function renderModules(){
           html += '<div>'+ic+' <strong>'+esc(r.user)+'</strong> · <span style="color:var(--md-on-surface-med);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">'+esc(r.relDir)+'</span>';
           if (r.skipped) html += ' — <em style="color:var(--md-on-surface-dis)">skipped: '+esc(r.reason||'')+'</em>';
           html += '</div>';
+          if (!r.skipped && r.heldBack && r.heldBack.length) html += '<div class="att" style="color:var(--md-warning)">⏸ held back (needs rebuild): '+esc(r.heldBack.join(', '))+'</div>';
           if (!r.skipped) {
             const pkgList = (r.packages||[]).slice(0,8).join(', ') + ((r.packages||[]).length>8 ? ' +'+((r.packages||[]).length-8)+' more' : '');
             html += '<div class="att">📦 '+esc(pkgList)+(r.duration_ms?' · '+Math.round(r.duration_ms/1000)+'s':'')+'</div>';
@@ -348,7 +355,8 @@ function renderModules(){
     });
   }));
   view.querySelectorAll('[data-update-pkg]').forEach(b => b.addEventListener('click', () => {
-    triggerModuleUpdate(b.dataset.updateDir, b.dataset.updateUser, [b.dataset.updatePkg]);
+    if (b.dataset.rebuild === '1') armConfirm(b, '⚠ Again: install, build, restart', () => triggerModuleUpdate(b.dataset.updateDir, b.dataset.updateUser, [b.dataset.updatePkg], { rebuild: true }));
+    else triggerModuleUpdate(b.dataset.updateDir, b.dataset.updateUser, [b.dataset.updatePkg]);
   }));
   view.querySelectorAll('[data-update-all]').forEach(b => b.addEventListener('click', () => {
     const n = b.dataset.updateCount;
@@ -484,7 +492,8 @@ async function triggerModulesRescan(){
   } catch(e) { toast('Error: '+e.message, 'error'); }
 }
 
-async function triggerModuleUpdate(dir, user, packages){
+async function triggerModuleUpdate(dir, user, packages, opts){
+  opts = opts || {};
   // Optimistically mark this dir as updating
   if (lastModules) {
     lastModules.activeUpdates = lastModules.activeUpdates || {};
@@ -496,7 +505,7 @@ async function triggerModuleUpdate(dir, user, packages){
     const res = await fetch('api/modules/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dir, user, packages: packages || [] }),
+      body: JSON.stringify({ dir, user, packages: packages || [], rebuild: !!opts.rebuild }),
     });
     const result = await res.json();
     // Refresh state immediately
@@ -507,7 +516,9 @@ async function triggerModuleUpdate(dir, user, packages){
     if (state.tab === 'modules') renderModules();
     if (result.success) {
       const pkgs = (result.packages||[]).join(', ');
-      toast('Update succeeded' + (pkgs ? ' · ' + pkgs : ''), 'success');
+      const rb = result.rebuild;
+      toast('Update succeeded' + (pkgs ? ' · ' + pkgs : '') + (rb ? ' · rebuilt' + (rb.restarted && rb.restarted.length ? ', restarted ' + rb.restarted.map(x => x.domain).join(', ') : '') : ''), 'success');
+      if (result.heldBack && result.heldBack.length) toast('Held back (needs rebuild): ' + result.heldBack.join(', ') + ' — use Update + rebuild', 'warn', { duration: 10000 });
     } else {
       const out = (result.output || '').split('\n').slice(-6).join('\n');
       toast('Update failed: ' + (result.error || 'unknown'), 'error', { detail: out, duration: 12000 });
