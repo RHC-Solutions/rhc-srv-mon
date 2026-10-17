@@ -10,3 +10,4 @@ modules.json
 rhc.sqlite
 rhc.sqlite-*
 secret.key
+backup-state/

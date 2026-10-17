@@ -346,11 +346,12 @@ const server = http.createServer((req, res) => {
   }
   if (url === '/api/backup') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify(Object.assign({}, backups.getState(), { available: backups.backupAvailable() })));
+    return res.end(JSON.stringify(Object.assign({}, backups.getState(), { available: backups.backupAvailableFull() })));
   }
   if (url === '/api/backup/run' && req.method === 'POST') {
     if (backups.isRunning()) { res.writeHead(409, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'A backup is already running' })); }
-    backups.runBackup('manual', actorOf(req)).catch((e) => console.error('backup run failed:', e.message));  // async; UI polls /api/backup
+    const mode = /[?&]mode=diff(&|$)/.test(req.url || '') ? 'diff' : 'full';
+    backups.runBackup('manual', actorOf(req), { mode }).catch((e) => console.error('backup run failed:', e.message));  // async; UI polls /api/backup
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ started: true }));
   }

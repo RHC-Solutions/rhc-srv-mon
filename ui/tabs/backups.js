@@ -10,7 +10,7 @@ function renderBackup(){
   if (view.contains(document.activeElement) && ['INPUT','SELECT','TEXTAREA'].includes((document.activeElement.tagName||''))) return;
   const d = lastBackup, sc = d.scope||{}, sch = d.schedule||{}, lr = d.lastRun;
   document.getElementById('host').textContent = '';
-  document.getElementById('updated').textContent = 'Wasabi · ' + (sch.enabled ? 'daily at ' + String(sch.hour).padStart(2,'0') + ':' + String(sch.minute).padStart(2,'0') : 'schedule off') + ' · keep ' + (d.retentionDays||14) + ' days';
+  document.getElementById('updated').textContent = 'Wasabi · ' + (sch.enabled ? 'daily at ' + String(sch.hour).padStart(2,'0') + ':' + String(sch.minute).padStart(2,'0') + ' · ' + bkModeText(sch) : 'schedule off') + ' · keep ' + (d.retentionDays||14) + ' days, ≥' + (d.keepFulls||4) + ' fulls';
   showBanner(null);
   setStatus(d.running ? [{ level:'info', icon:'⏳', text:'Backup running' }]
     : lr ? [{ level: lr.success ? 'ok' : 'bad', icon: lr.success ? '✅' : '🔴', text: lr.success ? 'Last backup ok' : 'Last backup failed', sub: new Date(lr.finishedAt).toLocaleString() + ' · ' + bkBytes(lr.bytes) }]
@@ -23,14 +23,15 @@ function renderBackup(){
   html += '<span style="font-size:14px;color:var(--md-on-surface-dis)">remote:rhcsolutions/web01-backups · s3.eu-central-1.wasabisys.com</span>';
   html += '<div style="margin-left:auto;display:flex;gap:8px">';
   if (d.running) html += '<button class="btn running" disabled>⏳ backing up…</button>';
-  else html += '<button class="btn update" id="bkRun">▶ Back up now</button>';
+  else html += '<button class="btn update" id="bkRun" title="Everything in scope, complete; becomes the base for later diffs">▶ Full backup</button><button class="btn" id="bkRunDiff" title="Databases and configs complete; site files only what changed since the last full backup">▶ Diff backup</button>';
   html += '<button class="btn" id="bkList">↻ List remote</button>';
   html += '</div></div>';
   if (lr){
     html += '<div style="margin-top:10px;font-size:15px">';
     html += '<span class="upd-badge '+(lr.success?'ok':'na')+'">'+(lr.success?'✓ last backup ok':'⚠ last backup had errors')+'</span> ';
-    html += '<span style="color:var(--md-on-surface-med)"> '+new Date(lr.finishedAt||lr.startedAt).toLocaleString()+' · '+lr.itemCount+' items · '+bkBytes(lr.bytes)+' · '+Math.round((lr.duration_ms||0)/1000)+'s · '+esc(lr.trigger)+'</span>';
+    html += '<span style="color:var(--md-on-surface-med)"> '+new Date(lr.finishedAt||lr.startedAt).toLocaleString()+' · '+bkModeBadge(lr)+' · '+lr.itemCount+' items · '+bkBytes(lr.bytes)+' · '+Math.round((lr.duration_ms||0)/1000)+'s · '+esc(lr.trigger)+(lr.pruned&&lr.pruned.length?' · pruned '+lr.pruned.length:'')+'</span>';
     if (lr.errors && lr.errors.length) html += '<ul style="margin:6px 0 0;color:#f87171">'+lr.errors.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>';
+    if (lr.notes && lr.notes.length) html += '<ul class="dim" style="margin:6px 0 0;font-size:13px">'+lr.notes.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>';
     html += '</div>';
   } else { html += '<div style="margin-top:10px;color:var(--md-on-surface-med);font-size:15px">No backups run yet.</div>'; }
   html += '</div>';
@@ -73,9 +74,19 @@ function renderBackup(){
   html += '<label class="switch"><input type="checkbox" id="bkSchedEnable" '+(sch.enabled?'checked':'')+'><span class="slider"></span></label><span>Daily at</span>';
   html += '<input id="bkSchedHour" type="number" min="0" max="23" value="'+(sch.hour!=null?sch.hour:3)+'" style="width:56px">:';
   html += '<input id="bkSchedMin" type="number" min="0" max="59" value="'+(sch.minute!=null?sch.minute:30)+'" style="width:56px">';
-  html += '<span style="margin-left:14px">Keep</span> <input id="bkRetention" type="number" min="1" max="365" value="'+(d.retentionDays!=null?d.retentionDays:14)+'" style="width:64px"> <span>days</span>';
+  const isDiff = sch.mode === 'diff', monthly = sch.fullEvery === 'monthly';
+  html += '<select id="bkMode" onchange="bkModeChanged()"><option value="full"'+(isDiff?'':' selected')+'>full backup every day</option><option value="diff"'+(isDiff?' selected':'')+'>differential, with a full backup</option></select>';
+  html += '<span id="bkFullWrap" style="display:'+(isDiff?'inline-flex':'none')+';gap:8px;align-items:center">';
+  html += '<select id="bkFullEvery" onchange="bkModeChanged()"><option value="weekly"'+(monthly?'':' selected')+'>weekly on</option><option value="monthly"'+(monthly?' selected':'')+'>monthly on day</option></select>';
+  html += '<select id="bkFullDay" style="display:'+(monthly?'none':'')+'">'+['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((n,i)=>'<option value="'+i+'"'+((sch.fullDay==null?0:sch.fullDay)===i?' selected':'')+'>'+n+'</option>').join('')+'</select>';
+  html += '<input id="bkFullDate" type="number" min="1" max="28" value="'+(sch.fullDate||1)+'" style="width:56px;display:'+(monthly?'':'none')+'">';
+  html += '</span>';
+  html += '<span style="margin-left:14px">Keep</span> <input id="bkRetention" type="number" min="1" max="365" value="'+(d.retentionDays!=null?d.retentionDays:14)+'" style="width:64px"> <span>days,</span>';
+  html += '<span>at least</span> <input id="bkKeepFulls" type="number" min="1" max="52" value="'+(d.keepFulls!=null?d.keepFulls:4)+'" style="width:56px"> <span>full backups</span>';
   html += '<button class="btn update" id="bkSave" style="margin-left:auto">Save</button>';
-  html += '</div></div>';
+  html += '</div>';
+  html += '<div class="hint" style="font-size:13px;margin-top:6px">Differential = site files changed since the last full backup (tar --listed-incremental); databases and configs are always complete. Restore = extract the full, then the diff on top. A full that a kept diff depends on is never pruned.</div>';
+  html += '</div>';
 
   // per-site backups: one row per site, last ad-hoc run, "Back up now" (files only; DB dumps come with the Databases slice)
   {
@@ -85,41 +96,54 @@ function renderBackup(){
     // matching on e.site alone made every site read "never" until backed up by hand.
     const coveredBy = (e, dom) => e.site === dom || (e.items || []).includes('sites/' + dom + '.tar.zst');
     const lastFor = (dom) => (d.log || []).slice().reverse().find(e => coveredBy(e, dom));
-    html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><div class="site-card-hd"><h3 style="margin:0">Back up sites</h3><span class="dim" style="font-size:14px">files under htdocs (node_modules, .next, cache… excluded) → Wasabi <code>' + esc((d.lastRun && d.lastRun.stamp ? '' : '') + 'web01-backups/&lt;stamp&gt;-&lt;domain&gt;') + '</code>, same retention</span></div>'
-      + '<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn update" id="bkAllSites"' + (d.running ? ' disabled' : '') + '>' + (d.running ? '⏳ backing up…' : '▶ Back up all sites (' + sites.length + ')') + '</button></div>'
-      + '<table class="upd-table bk-sites"><tr><th>Site</th><th>Type</th><th>Last backup</th><th></th></tr>';
+    const totalOnDisk = sites.reduce((n, s) => n + (s.bytes || 0), 0);
+    html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><div class="site-card-hd"><h3 style="margin:0">Back up sites</h3><span class="dim" style="font-size:14px">files under htdocs (node_modules, .next, cache… excluded) → Wasabi <code>' + esc('web01-backups/<stamp>[-diff]-<domain>') + '</code>, same retention · ' + bkBytes(totalOnDisk) + ' on disk' + (d.available && d.available.sizesAt ? ' <span title="sizes measured ' + esc(new Date(d.available.sizesAt).toLocaleString()) + '">ⓘ</span>' : '') + '</span></div>'
+      + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px"><button class="btn update" id="bkAllSites"' + (d.running ? ' disabled' : '') + '>' + (d.running ? '⏳ backing up…' : '▶ Full backup of all sites (' + sites.length + ')') + '</button>'
+      + '<button class="btn" id="bkAllSitesDiff"' + (d.running ? ' disabled' : '') + ' title="only files changed since the last full backup">▶ Diff of all sites</button></div>'
+      + '<table class="upd-table bk-sites"><tr><th>Site</th><th>Type</th><th title="files as a backup sees them: node_modules, .next, caches… excluded">Size on disk</th><th>Last backup</th><th>Base for diffs</th><th></th></tr>';
     for (const st of sites.slice().sort((a, b) => a.domain.localeCompare(b.domain))) {
       const l = lastFor(st.domain);
-      html += '<tr><td><b>' + esc(st.domain) + '</b> <span class="dim">' + esc(st.user || '') + '</span></td><td>' + esc(st.type || '') + '</td><td>'
+      const arch = l && l.sizes ? l.sizes['sites/' + st.domain + '.tar.zst'] : null;
+      const wasDiff = l && (l.diffItems || []).includes('sites/' + st.domain + '.tar.zst');
+      html += '<tr><td><b>' + esc(st.domain) + '</b> <span class="dim">' + esc(st.user || '') + '</span></td><td>' + esc(st.type || '') + '</td>'
+        + '<td>' + (st.bytes != null ? bkBytes(st.bytes) : '<span class="dim">…</span>') + '</td><td>'
         + (l ? new Date(l.finishedAt).toLocaleString()
-               + (l.site === st.domain ? ' · ' + bkBytes(l.bytes) : '')   // full-run bytes are the whole backup, not this site
+               + (arch != null ? ' · ' + bkBytes(arch) + (wasDiff ? ' <span class="upd-badge new" title="differential: only changes since the full backup">diff</span>' : ' <span class="upd-badge na">full</span>')
+                 : l.site === st.domain ? ' · ' + bkBytes(l.bytes) : '')   // older entries: only per-site runs have a usable total
                + ' · ' + (l.success ? '<span class="upd-badge ok">ok</span>' : '<span class="upd-badge err" title="' + esc((l.errors||[]).join('; ')) + '">failed</span>')
                + ' <span class="dim" style="font-size:12px">' + (l.trigger === 'scheduled' ? 'nightly' : l.site === st.domain ? 'manual' : 'all sites') + '</span>'
              : '<span class="dim">never</span>') + '</td>'
-        + '<td style="text-align:right"><button class="btn small bk-site-run" data-domain="' + esc(st.domain) + '"' + (d.running ? ' disabled' : '') + '>' + (d.running ? '⏳' : '▶ Back up now') + '</button></td></tr>';
+        + '<td>' + (st.base ? '<span title="full backup this site\'s diffs are relative to">' + new Date(st.base).toLocaleDateString() + '</span>' : '<span class="dim" title="first diff will be a full backup">none</span>') + '</td>'
+        + '<td style="text-align:right;white-space:nowrap"><button class="btn small bk-site-run" data-domain="' + esc(st.domain) + '" data-mode="full"' + (d.running ? ' disabled' : '') + '>' + (d.running ? '⏳' : '▶ Full') + '</button> '
+        + '<button class="btn small bk-site-run" data-domain="' + esc(st.domain) + '" data-mode="diff"' + (d.running || !st.base ? ' disabled' : '') + ' title="' + (st.base ? 'files changed since the full backup of ' + esc(new Date(st.base).toLocaleString()) : 'no full backup yet to diff against') + '">▶ Diff</button></td></tr>';
     }
-    if (!sites.length) html += '<tr><td colspan="4" class="dim">No sites</td></tr>';
+    if (!sites.length) html += '<tr><td colspan="6" class="dim">No sites</td></tr>';
     html += '</table></div>';
   }
 
   if (window._bkRemote){
     html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><h3 style="margin:0 0 8px">In Wasabi ('+window._bkRemote.length+')</h3>';
-    html += '<div style="font-size:14.5px;color:var(--md-on-surface-med);max-height:220px;overflow:auto">'+(window._bkRemote.length?window._bkRemote.map(n=>'<div>📁 '+esc(n)+'</div>').join(''):'<span style="color:var(--md-on-surface-dis)">none yet</span>')+'</div></div>';
+    const kind = (n) => /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$/.test(n) ? '<span class="upd-badge na">full</span>' : /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-diff$/.test(n) ? '<span class="upd-badge new">diff</span>' : '<span class="upd-badge ok">site</span>';
+    html += '<div style="font-size:14.5px;color:var(--md-on-surface-med);max-height:220px;overflow:auto">'+(window._bkRemote.length?window._bkRemote.map(n=>'<div>📁 '+esc(n)+' '+kind(n)+'</div>').join(''):'<span style="color:var(--md-on-surface-dis)">none yet</span>')+'</div></div>';
   }
   if (d.log && d.log.length){
     html += '<div class="upd-card" style="grid-column:1/-1;margin-top:14px"><h3 style="margin:0 0 8px">Recent runs</h3><table class="upd-table"><tr><th>When</th><th>Trigger</th><th>Scope</th><th>Items</th><th>Size</th><th>Duration</th><th>Status</th></tr>';
     for (const e of d.log.slice().reverse().slice(0,20)){
-      html += '<tr><td>'+new Date(e.finishedAt||e.startedAt).toLocaleString()+'</td><td>'+esc(e.trigger)+'</td><td>'+(e.site ? '<span class="mono">'+esc(e.site)+'</span>' : 'full')+'</td><td>'+e.itemCount+'</td><td>'+bkBytes(e.bytes)+'</td><td>'+Math.round((e.duration_ms||0)/1000)+'s</td><td>'+(e.success?'<span class="upd-badge ok">✓</span>':'<span class="upd-badge na" title="'+esc((e.errors||[]).join('; '))+'">⚠</span>')+'</td></tr>';
+      html += '<tr><td>'+new Date(e.finishedAt||e.startedAt).toLocaleString()+'</td><td>'+esc(e.trigger)+'</td><td>'+(e.site ? '<span class="mono">'+esc(e.site)+'</span> ' : 'server ')+bkModeBadge(e)+'</td><td>'+e.itemCount+'</td><td>'+bkBytes(e.bytes)+'</td><td>'+Math.round((e.duration_ms||0)/1000)+'s</td><td>'+(e.success?'<span class="upd-badge ok">✓</span>':'<span class="upd-badge na" title="'+esc((e.errors||[]).join('; '))+'">⚠</span>')+'</td></tr>';
     }
     html += '</table></div>';
   }
 
   view.innerHTML = html;
-  document.querySelectorAll('.bk-site-run').forEach(b => b.addEventListener('click', () => armConfirm(b, '⚠ Click again to back up', () => runSiteBackupNow(b.dataset.domain))));
+  document.querySelectorAll('.bk-site-run').forEach(b => b.addEventListener('click', () => armConfirm(b, '⚠ Again', () => runSiteBackupNow(b.dataset.domain, b.dataset.mode))));
   const allSites = document.getElementById('bkAllSites');
-  if (allSites) allSites.addEventListener('click', () => armConfirm(allSites, '⚠ Click again to back up every site', runAllSitesBackupNow));
+  if (allSites) allSites.addEventListener('click', () => armConfirm(allSites, '⚠ Click again to back up every site', () => runAllSitesBackupNow('full')));
+  const allSitesDiff = document.getElementById('bkAllSitesDiff');
+  if (allSitesDiff) allSitesDiff.addEventListener('click', () => armConfirm(allSitesDiff, '⚠ Click again for a diff of every site', () => runAllSitesBackupNow('diff')));
   const run = document.getElementById('bkRun');
-  if (run) run.addEventListener('click', () => armConfirm(run, '⚠ Click again to start', runBackupNow));
+  if (run) run.addEventListener('click', () => armConfirm(run, '⚠ Click again to start', () => runBackupNow('full')));
+  const runDiff = document.getElementById('bkRunDiff');
+  if (runDiff) runDiff.addEventListener('click', () => armConfirm(runDiff, '⚠ Click again to start', () => runBackupNow('diff')));
   const save = document.getElementById('bkSave');
   if (save) save.addEventListener('click', saveBackupConfig);
   const list = document.getElementById('bkList');
@@ -130,9 +154,23 @@ function renderBackup(){
     if (all) all.addEventListener('change', () => { for (const c of view.querySelectorAll(pair[1])) { c.disabled = all.checked; if (all.checked) c.checked = true; } });
   }
 }
-async function runBackupNow(){
-  try { const r = await fetch('api/backup/run',{method:'POST'}); const j = await r.json();
-    if (j.error) toast(j.error,'error'); else toast('Backup started','success');
+// Schedule mode pickers show/hide the weekly-day / monthly-date fields without a re-render.
+function bkModeChanged(){
+  const diff = document.getElementById('bkMode').value === 'diff', monthly = document.getElementById('bkFullEvery').value === 'monthly';
+  document.getElementById('bkFullWrap').style.display = diff ? 'inline-flex' : 'none';
+  document.getElementById('bkFullDay').style.display = monthly ? 'none' : '';
+  document.getElementById('bkFullDate').style.display = monthly ? '' : 'none';
+}
+function bkModeText(sch){
+  if (sch.mode !== 'diff') return 'full every day';
+  return 'diff daily, full ' + (sch.fullEvery === 'monthly' ? 'monthly on day ' + (sch.fullDate||1) : 'every ' + ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][sch.fullDay||0]);
+}
+function bkModeBadge(e){
+  return e.mode === 'diff' ? '<span class="upd-badge new" title="site files: only changes since the last full backup">diff</span>' : '<span class="upd-badge na">full</span>';
+}
+async function runBackupNow(mode){
+  try { const r = await fetch('api/backup/run' + (mode === 'diff' ? '?mode=diff' : ''),{method:'POST'}); const j = await r.json();
+    if (j.error) toast(j.error,'error'); else toast((mode === 'diff' ? 'Differential' : 'Full') + ' backup started','success');
     setTimeout(refresh, 1500);
   } catch(e){ toast('Error: '+e,'error'); }
 }
@@ -141,8 +179,13 @@ function saveBackupConfig(){
   const body = {
     schedule: { enabled: document.getElementById('bkSchedEnable').checked,
       hour: parseInt(document.getElementById('bkSchedHour').value)||0,
-      minute: parseInt(document.getElementById('bkSchedMin').value)||0 },
+      minute: parseInt(document.getElementById('bkSchedMin').value)||0,
+      mode: document.getElementById('bkMode').value,
+      fullEvery: document.getElementById('bkFullEvery').value,
+      fullDay: parseInt(document.getElementById('bkFullDay').value)||0,
+      fullDate: parseInt(document.getElementById('bkFullDate').value)||1 },
     retentionDays: parseInt(document.getElementById('bkRetention').value)||14,
+    keepFulls: parseInt(document.getElementById('bkKeepFulls').value)||4,
     scope: { postgres: document.getElementById('bkScopePg').checked,
       sites: document.getElementById('bkScopeSites').checked,
       configs: document.getElementById('bkScopeCfg').checked,
@@ -155,7 +198,7 @@ function saveBackupConfig(){
       extraPaths: document.getElementById('bkExtraPaths').value.split('\n').map(x=>x.trim()).filter(Boolean) },
   };
   fetch('api/backup/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(()=>toast('Saved','success'));
-  if (lastBackup){ lastBackup.schedule=Object.assign({},lastBackup.schedule,body.schedule); lastBackup.retentionDays=body.retentionDays; lastBackup.scope=body.scope; }
+  if (lastBackup){ lastBackup.schedule=Object.assign({},lastBackup.schedule,body.schedule); lastBackup.retentionDays=body.retentionDays; lastBackup.keepFulls=body.keepFulls; lastBackup.scope=body.scope; }
 }
 async function loadRemoteList(){
   toast('Listing Wasabi…');
@@ -163,18 +206,18 @@ async function loadRemoteList(){
 }
 
 
-async function runSiteBackupNow(domain){
+async function runSiteBackupNow(domain, mode){
   try {
-    const r = await fetch('api/backup/site/' + encodeURIComponent(domain), { method:'POST' });
+    const r = await fetch('api/backup/site/' + encodeURIComponent(domain) + (mode === 'diff' ? '?mode=diff' : ''), { method:'POST' });
     const j = await r.json(); if (!r.ok) return toast(j.error || 'Failed', 'error');
-    toast('Site backup started: ' + domain, 'success'); setTimeout(refresh, 1500);
+    toast((mode === 'diff' ? 'Diff' : 'Full') + ' site backup started: ' + domain, 'success'); setTimeout(refresh, 1500);
   } catch(e){ toast('Error: ' + e, 'error'); }
 }
 // Every site's files in one run — same scope as the per-site button, all domains at once.
-async function runAllSitesBackupNow(){
+async function runAllSitesBackupNow(mode){
   try {
-    const r = await fetch('api/backup/sites', { method:'POST' });
+    const r = await fetch('api/backup/sites' + (mode === 'diff' ? '?mode=diff' : ''), { method:'POST' });
     const j = await r.json(); if (!r.ok) return toast(j.error || 'Failed', 'error');
-    toast('Backup started for all ' + j.sites + ' sites', 'success'); setTimeout(refresh, 1500);
+    toast((mode === 'diff' ? 'Diff' : 'Full') + ' backup started for all ' + j.sites + ' sites', 'success'); setTimeout(refresh, 1500);
   } catch(e){ toast('Error: ' + e, 'error'); }
 }
