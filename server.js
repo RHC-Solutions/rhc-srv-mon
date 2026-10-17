@@ -75,7 +75,7 @@ const server = http.createServer((req, res) => {
   }
   if (url === '/api/updates/run-all' && req.method === 'POST') {
     const updatesCache = updates.getCache();
-    const outdated = (updatesCache ? updatesCache.components : []).filter(c => c.updateAvailable && c.key !== 'node');
+    const outdated = (updatesCache ? updatesCache.components : []).filter(c => c.updateAvailable);
     const actor = actorOf(req);
     Promise.all(outdated.map(c => updates.runUpdate(c.key, actor))).then((results) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });

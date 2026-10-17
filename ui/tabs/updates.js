@@ -16,7 +16,7 @@ function renderUpdates(){
 
   // Left column: components table
   html += '<div class="upd-card" style="grid-column:1/-1">';
-  const updCount = d.components.filter(c => c.updateAvailable && c.key !== 'node').length;
+  const updCount = d.components.filter(c => c.updateAvailable).length;
   html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
   html += '<h3 style="margin:0">Components</h3>';
   if (updCount) {
@@ -33,7 +33,6 @@ function renderUpdates(){
       : '<span class="upd-badge ok">up to date</span>';
     const btnHtml = !c.currentVersion ? ''
       : isRunning ? '<button class="btn running" disabled>⏳ updating</button>'
-      : c.key === 'node' ? '<button class="btn" disabled>via nvm/fnm/n</button>'
       : hasUpdate ? '<button class="btn update" onclick="triggerUpdate(\'' + c.key + '\')">⬆ Update</button>'
       : '<button class="btn" disabled>✓ latest</button>';
     // Node.js is the runtime everything else here needs, so it is never removable.
@@ -141,7 +140,7 @@ function renderUpdates(){
   html += '<div class="upd-field"><label>Components to auto-update</label><div class="upd-chk-grid">';
   for (const c of d.components) {
     const checked = !sched.components || sched.components.includes(c.key);
-    html += '<label><input type="checkbox" class="sched-comp" data-key="' + c.key + '" ' + (checked?'checked':'') + ' onchange="saveUpdatesConfig()"> ' + c.label + (c.key === 'node' ? ' <span class="hint">(manual via nvm/fnm)</span>' : '') + '</label>';
+    html += '<label><input type="checkbox" class="sched-comp" data-key="' + c.key + '" ' + (checked?'checked':'') + ' onchange="saveUpdatesConfig()"> ' + c.label + '</label>';
   }
   html += '</div></div></div>';
 
