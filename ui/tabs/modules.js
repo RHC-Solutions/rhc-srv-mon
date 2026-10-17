@@ -86,6 +86,9 @@ function renderModules(){
   html += '<label for="auAutoFix">Auto-fix common npm errors</label>';
   html += '<span class="hint">retry with <code style="background:var(--md-surface-04dp);padding:1px 6px;border-radius:4px">--force</code> on ERESOLVE; resync lockfile on EUSAGE; one retry on network errors; pnpm build scripts (ERR_PNPM_IGNORED_BUILDS) are always approved + rebuilt</span></div>';
 
+  html += '<div class="auto-row"><label class="switch"><input type="checkbox" id="auRebuild" '+(au.rebuild!==false?'checked':'')+'><span class="slider"></span></label>';
+  html += '<label for="auRebuild">Rebuild, restart &amp; verify built projects</label>';
+  html += '<span class="hint">a project with a .next / dist build gets its build script run and its site restarted after every update, then pm2 is asked whether it is still up; a failed build or a crash puts the previous versions back. Off = next, react &amp; co. are held back there instead</span></div>';
   html += '<div class="auto-row"><label class="switch"><input type="checkbox" id="auNotify" '+(au.notifyTelegram?'checked':'')+'><span class="slider"></span></label>';
   html += '<label for="auNotify">Telegram notify</label>';
   html += '<label style="display:flex;align-items:center;gap:6px;font-weight:500"><input type="checkbox" id="auFailOnly" '+(au.notifyOnFailureOnly?'checked':'')+'> failures only</label>';
@@ -308,7 +311,9 @@ function renderModules(){
       if (fail)  html += '<span class="auto-stat" style="color:var(--md-error-bright)">❌ <span class="v">'+fail+'</span></span>';
       if (upd)   html += '<span class="auto-stat">📦 <span class="v">'+upd+'</span> pkgs</span>';
       if (fixes) html += '<span class="auto-stat">🔧 <span class="v">'+fixes+'</span> fixes</span>';
-      if (pass.packagesHeldBack) html += '<span class="auto-stat" style="color:var(--md-warning)" title="build-affecting packages (next, react…) are never auto-updated; use Update + rebuild">⏸ <span class="v">'+pass.packagesHeldBack+'</span> held back</span>';
+      if (pass.projectsRebuilt) html += '<span class="auto-stat" title="built projects rebuilt and restarted after the update">🏗 <span class="v">'+pass.projectsRebuilt+'</span> rebuilt</span>';
+      if (pass.projectsRolledBack) html += '<span class="auto-stat" style="color:var(--md-warning)" title="build or restart failed; previous versions restored">↩ <span class="v">'+pass.projectsRolledBack+'</span> rolled back</span>';
+      if (pass.packagesHeldBack) html += '<span class="auto-stat" style="color:var(--md-warning)" title="build-affecting packages in a project the panel cannot rebuild; use Update + rebuild">⏸ <span class="v">'+pass.packagesHeldBack+'</span> held back</span>';
       if (dur)   html += '<span class="auto-stat">⏱ <span class="v">'+dur+'</span></span>';
       html += '</span></div>';
       const visibleResults = (pass.results||[]).filter(r => !r.skipped || (state.modShowSkipped));
@@ -322,6 +327,7 @@ function renderModules(){
           if (r.skipped) html += ' — <em style="color:var(--md-on-surface-dis)">skipped: '+esc(r.reason||'')+'</em>';
           html += '</div>';
           if (!r.skipped && r.heldBack && r.heldBack.length) html += '<div class="att" style="color:var(--md-warning)">⏸ held back (needs rebuild): '+esc(r.heldBack.join(', '))+'</div>';
+          if (!r.skipped && r.rebuild) html += '<div class="att">🏗 '+(r.rebuild.built?'rebuilt':'build failed')+(r.rebuild.rolledBack?' · rolled back':'')+((r.rebuild.restarted||[]).length?' · restarted: '+esc(r.rebuild.restarted.map(x => x.domain+(x.ok?' ✓':' ✗ '+(x.error||''))).join(', ')):'')+'</div>';
           if (!r.skipped) {
             const pkgList = (r.packages||[]).slice(0,8).join(', ') + ((r.packages||[]).length>8 ? ' +'+((r.packages||[]).length-8)+' more' : '');
             html += '<div class="att">📦 '+esc(pkgList)+(r.duration_ms?' · '+Math.round(r.duration_ms/1000)+'s':'')+'</div>';
@@ -404,6 +410,7 @@ function readAutoUpdateForm() {
   const hr = get('auHour');
   const mn = get('auMin');
   const af = get('auAutoFix');
+  const rbd = get('auRebuild');
   const nt = get('auNotify');
   const fo = get('auFailOnly');
   const ep = get('auExclPkgs');
@@ -416,6 +423,7 @@ function readAutoUpdateForm() {
     min:  mn ? parseInt(mn.value, 10) : 0,
     severities: sevs.length ? sevs : ['patch'],
     autoFix: af ? af.checked : true,
+    rebuild: rbd ? rbd.checked : true,
     notifyTelegram: nt ? nt.checked : false,
     notifyOnFailureOnly: fo ? fo.checked : true,
     excludedPackages: exPkgs,
