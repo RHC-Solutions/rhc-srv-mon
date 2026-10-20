@@ -150,6 +150,8 @@ function siteRuntime(s){
     return { text: 'Node ' + esc(s.nodeActual) + ((s.pm2DaemonStale || []).length ? ' <span style="color:var(--md-warning)" title="pm2 daemon on a replaced binary">⚠</span>' : '') + (differs ? ' <span class="dim">(rec. ' + esc(rec) + ')</span>' : ''),
       title: 'Measured from this site\'s pm2 app processes' + (differs ? '. CloudPanel recorded ' + rec + ', which is not what runs.' : '') + staleDaemon };
   }
+  if (s.pyStale) return { text: 'Python <span style="color:var(--md-warning)">⚠ replaced</span>', title: 'This site\'s app is still running ' + (s.pyExe || 'its python binary') + ', which has since been replaced on disk by an upgrade. It keeps the old version until it is restarted.' };
+  if (s.pyActual) return { text: 'Python ' + esc(s.pyActual), title: 'Measured from this site\'s app process (' + (s.pyExe || 'python') + ')' };
   if (s.phpActual) {
     const differs = s.phpVersion && String(s.phpVersion) !== String(s.phpActual);
     return { text: 'PHP ' + esc(s.phpActual) + (differs ? ' <span class="dim">(rec. ' + esc(s.phpVersion) + ')</span>' : ''), title: 'From the php-fpm pool that exists on disk' + (differs ? '; the database records ' + s.phpVersion : '') };
@@ -163,7 +165,7 @@ function siteSetSort(col){ if (siteSort === col) siteSortDir = -siteSortDir; els
 // Compact table: one row per site, sortable columns, whole row opens the site.
 function siteTableHtml(list, byStatus){
   const cols = [['status', 'Status'], ['domain', 'Domain'], ['type', 'Type'], ['user', 'Site user'], ['port', 'Port'], ['http', 'HTTP'], ['runtime', 'Runtime'], ['pm2', 'PM2'], ['disk', 'Disk'], ['owner', 'Owner']];
-  const val = (s, c) => c === 'port' ? Number(s.nodePort || s.poolPort || 0) : c === 'http' ? (s.httpUp ? 1 : 0) : c === 'runtime' ? (s.nodeActual || s.phpActual || s.nodeVersion || s.phpVersion || '') : c === 'pm2' ? (s.pm2 ? s.pm2.filter(p => p.status === 'online').length : -1) : c === 'disk' ? siteDiskBytes(s.disk) : c === 'owner' ? s.managed_by : (s[c] || '');
+  const val = (s, c) => c === 'port' ? Number(s.nodePort || s.poolPort || 0) : c === 'http' ? (s.httpUp ? 1 : 0) : c === 'runtime' ? (s.nodeActual || s.pyActual || s.phpActual || s.nodeVersion || s.phpVersion || '') : c === 'pm2' ? (s.pm2 ? s.pm2.filter(p => p.status === 'online').length : -1) : c === 'disk' ? siteDiskBytes(s.disk) : c === 'owner' ? s.managed_by : (s[c] || '');
   const rows = list.slice().sort((a, b) => { if (siteSort === 'status') return byStatus(a, b) * siteSortDir; const x = val(a, siteSort), y = val(b, siteSort); const r = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y)); return (r || a.domain.localeCompare(b.domain)) * siteSortDir; });
   let h = '<div class="upd-card" style="padding:6px 16px 10px"><table class="upd-table site-table"><thead><tr>' + cols.map(([k, l]) => '<th onclick="siteSetSort(\'' + k + '\')" class="sortable' + (siteSort === k ? ' on' : '') + '">' + l + (siteSort === k ? (siteSortDir > 0 ? ' ▲' : ' ▼') : '') + '</th>').join('') + '<th></th></tr></thead><tbody>';
   for (const s of rows) {
