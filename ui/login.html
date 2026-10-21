@@ -1,83 +1,70 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sign in · RHC SRV Manager</title>
+<script>try{var t=localStorage.getItem('rhc-theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark');}catch(e){}</script>
 <style>
-  /* Material Design 2 — dark theme sign-in (same token set as the dashboard) */
+  /* CloudPanel-style sign-in (same tokens as the dashboard: light, or CloudPanel's dark palette) */
   :root {
+    color-scheme: light;
+    --primary:#0078d4; --btn:#267ddd; --btn-hover:#2e87eb;
+    --bg:#f9fafb; --card:#ffffff; --border:#e2e2e2; --input:#ffffff; --input-border:#d3d3d3;
+    --text:#333333; --title:#2e2e2e; --med:#6c757d; --dis:#9bacb6;
+    --ok:#4e9a2a; --ok-bg:#edf7e8; --err:#d84531; --err-bg:#fdeced; --soft:#f4f6f8;
+    --shadow:0 2px 4px rgba(157,161,164,.19);
+    --font:"Helvetica Neue","Segoe UI",Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  html.dark {
     color-scheme: dark;
-    --md-primary:#5cdd8b; --md-primary-light:#8bf0b0; --md-on-primary:#00210f;
-    --md-error:#cf6679; --md-error-bright:#ff8a95;
-    --md-background:#12141c; --md-surface-01dp:#1c1f2a; --md-surface-04dp:#252836;
-    --md-surface-06dp:#292d3c; --md-surface-24dp:#383d51;
-    --md-on-surface:rgba(255,255,255,.87); --md-on-surface-med:rgba(255,255,255,.60);
-    --md-on-surface-dis:rgba(255,255,255,.38); --md-outline:rgba(255,255,255,.24);
-    --md-ok-container:#10361f; --md-error-container:#4a1420;
-    --md-elev-2:0 3px 1px -2px rgba(0,0,0,.2), 0 2px 2px 0 rgba(0,0,0,.14), 0 1px 5px 0 rgba(0,0,0,.12);
-    --md-elev-4:0 2px 4px -1px rgba(0,0,0,.2), 0 4px 5px 0 rgba(0,0,0,.14), 0 1px 10px 0 rgba(0,0,0,.12);
-    --md-elev-24:0 11px 15px -7px rgba(0,0,0,.2), 0 24px 38px 3px rgba(0,0,0,.14), 0 9px 46px 8px rgba(0,0,0,.12);
-    --md-ease:cubic-bezier(.4,0,.2,1);
-    --md-font:Roboto,"Helvetica Neue",-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
-    --md-font-mono:"Roboto Mono",ui-monospace,Menlo,Consolas,monospace;
+    --primary:#3b9aec; --bg:#0e1217; --card:#1c1f26; --border:#a8b3cf33; --input:#20242c; --input-border:#a8b3cf40;
+    --text:#e8eaed; --title:#ffffff; --med:#9b9b9b; --dis:#838383;
+    --ok:#84d35c; --ok-bg:#1d2e1a; --err:#f0727c; --err-bg:#3d1a1e; --soft:#20242c; --shadow:none;
   }
   * { box-sizing:border-box; }
-  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
-         background:var(--md-background); color:var(--md-on-surface); font-family:var(--md-font);
-         font-size:14px; line-height:20px; letter-spacing:.25px; padding:24px;
-         -webkit-font-smoothing:antialiased; }
-  /* MD2 dialog-weight card: elevation 24, 4dp corners, 24dp padding */
-  .card { width:100%; max-width:400px; background:var(--md-surface-24dp); border-radius:4px;
-          padding:24px; box-shadow:var(--md-elev-24); }
-  h1 { font-size:24px; font-weight:400; line-height:32px; letter-spacing:0; margin:0 0 4px;
-       display:flex; align-items:center; gap:10px; }
-  .sub { color:var(--md-on-surface-med); font-size:14px; margin-bottom:24px; }
-  /* filled text field: caption label, tinted box, underline that turns primary on focus */
-  label { display:block; font-size:12px; font-weight:400; line-height:16px; letter-spacing:.4px;
-          color:var(--md-on-surface-med); margin:16px 0 4px; }
-  input { width:100%; background:var(--md-surface-04dp); color:var(--md-on-surface);
-          border:none; border-bottom:1px solid var(--md-outline); border-radius:4px 4px 0 0;
-          padding:12px; font-family:inherit; font-size:16px; line-height:24px; letter-spacing:.15px; outline:none;
-          transition:background-color 150ms var(--md-ease), border-color 150ms var(--md-ease), box-shadow 150ms var(--md-ease); }
-  input:hover { background:var(--md-surface-06dp); border-bottom-color:var(--md-on-surface); }
-  input:focus { background:var(--md-surface-06dp); border-bottom-color:var(--md-primary);
-                box-shadow:inset 0 -1px 0 0 var(--md-primary); }
-  input::placeholder { color:var(--md-on-surface-dis); }
+  body { margin:0; min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+         background:var(--bg); color:var(--text); font-family:var(--font); font-size:15px; line-height:22px;
+         padding:24px; -webkit-font-smoothing:antialiased; }
+  .brand { display:flex; align-items:center; gap:10px; margin-bottom:24px; font-size:22px; font-weight:700;
+           color:var(--title); letter-spacing:-.2px; }
+  .brand svg { width:38px; height:38px; color:var(--primary); }
+  .brand b { color:var(--primary); }
+  .card { width:100%; max-width:420px; background:var(--card); border:1px solid var(--border); border-radius:6px;
+          padding:30px; box-shadow:var(--shadow); }
+  h1 { font-size:24px; font-weight:600; line-height:32px; margin:0 0 8px; color:var(--title); }
+  .sub { color:var(--med); font-size:15px; margin-bottom:20px; }
+  label { display:block; font-size:14px; font-weight:500; line-height:20px; color:var(--text); margin:18px 0 6px; }
+  input { width:100%; background:var(--input); color:var(--text); border:1px solid var(--input-border); border-radius:4px;
+          padding:10px 12px; font-family:inherit; font-size:16px; line-height:24px; outline:none;
+          transition:border-color 150ms, box-shadow 150ms; }
+  input:focus { border-color:var(--primary); box-shadow:0 0 0 3px rgba(0,120,212,.12); }
+  input::placeholder { color:var(--dis); }
   input.code { font-size:28px; line-height:36px; letter-spacing:12px; text-align:center;
-               font-family:var(--md-font-mono); padding:10px 12px 10px 24px; }
-  /* contained primary button: 36dp, uppercase button type, elevation 2 → 4 */
-  button { width:100%; margin-top:24px; min-height:36px; background:var(--md-primary); color:var(--md-on-primary);
-           border:none; border-radius:4px; padding:8px 16px; font-family:inherit; font-size:14px; font-weight:500;
-           letter-spacing:1.25px; text-transform:uppercase; cursor:pointer; box-shadow:var(--md-elev-2);
-           position:relative; overflow:hidden;
-           transition:background-color 150ms var(--md-ease), box-shadow 150ms var(--md-ease); }
-  button:hover { background:var(--md-primary-light); box-shadow:var(--md-elev-4); }
-  button:disabled { background:rgba(255,255,255,.12); color:var(--md-on-surface-dis); box-shadow:none; cursor:not-allowed; }
-  /* text button for the secondary action */
-  button.sec { background:transparent; color:var(--md-primary); box-shadow:none; margin-top:8px; }
-  button.sec:hover { background:rgba(92,221,139,.08); box-shadow:none; }
-  .md-ripple { position:absolute; border-radius:50%; transform:scale(0); pointer-events:none;
-               background:currentColor; opacity:.24; animation:md-ripple-in 450ms cubic-bezier(0,0,.2,1) forwards; }
-  .md-ripple.out { animation:md-ripple-out 250ms var(--md-ease) forwards; }
-  @keyframes md-ripple-in  { to { transform:scale(1); } }
-  @keyframes md-ripple-out { to { opacity:0; } }
-  .err { margin-top:16px; background:var(--md-error-container); color:var(--md-error-bright);
+               font-family:var(--mono); padding:10px 12px 10px 24px; }
+  button { width:100%; margin-top:26px; min-height:44px; background:var(--btn); color:#ffffff;
+           border:none; border-radius:4px; padding:8px 16px; font-family:inherit; font-size:15px; font-weight:500;
+           cursor:pointer; transition:background-color 150ms; }
+  button:hover { background:var(--btn-hover); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button.sec { background:transparent; color:var(--primary); margin-top:8px; }
+  button.sec:hover { text-decoration:underline; background:transparent; }
+  .err { margin-top:18px; background:var(--err-bg); color:var(--err); border:1px solid currentColor;
          border-radius:4px; padding:12px 16px; font-size:14px; display:none; }
-  .ok  { margin-top:16px; background:var(--md-ok-container); color:var(--md-primary);
+  .ok  { margin-top:18px; background:var(--ok-bg); color:var(--ok); border:1px solid currentColor;
          border-radius:4px; padding:12px 16px; font-size:14px; }
-  .hint { font-size:12px; line-height:16px; letter-spacing:.4px; color:var(--md-on-surface-med); margin-top:8px; }
+  .hint { font-size:13px; line-height:18px; color:var(--med); margin-top:8px; }
   .qr { display:flex; justify-content:center; margin:16px 0 8px; }
-  .qr canvas, .qr img { border-radius:4px; background:#fff; padding:12px; }
-  .secret { font-family:var(--md-font-mono); font-size:14px; letter-spacing:1.5px;
-            background:var(--md-surface-04dp); border-radius:4px; padding:12px; word-break:break-all;
-            text-align:center; color:var(--md-on-surface-med); }
+  .qr canvas, .qr img { border-radius:4px; background:#fff; padding:12px; border:1px solid var(--border); }
+  .secret { font-family:var(--mono); font-size:14px; letter-spacing:1.5px;
+            background:var(--soft); border:1px solid var(--border); border-radius:4px; padding:12px; word-break:break-all;
+            text-align:center; color:var(--med); }
   .step { display:none; } .step.on { display:block; }
   .ts { display:none; justify-content:center; margin-top:16px; min-height:65px; }
   .ts.on { display:flex; }
-  footer { text-align:center; color:var(--md-on-surface-dis); font-size:12px; letter-spacing:.4px; margin-top:24px; }
-  @media (prefers-reduced-motion: reduce) { .md-ripple { display:none; } }
+  footer { text-align:center; color:var(--dis); font-size:13px; margin-top:24px; }
 </style></head><body>
+<div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="2" width="28" height="28" rx="7" fill="currentColor"/><g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><rect x="8.5" y="8.5" width="15" height="6" rx="1.5"/><rect x="8.5" y="17.5" width="15" height="6" rx="1.5"/></g><g fill="#fff"><circle cx="12" cy="11.5" r="1.1"/><circle cx="12" cy="20.5" r="1.1"/></g></svg><span><b>RHC</b> SRV Manager</span></div>
 <div class="card">
-  <h1>📊 RHC SRV Manager</h1>
-  <div class="sub" id="sub">Sign in</div>
+  <h1 id="sub">Sign in</h1>
 
   <form class="step" id="s-login" autocomplete="on">
     <label>Username</label><input id="l-user" autocomplete="username" required autofocus>
@@ -118,25 +105,6 @@
 <script>
 const $ = (i) => document.getElementById(i);
 
-/* --- MD2 ripple on the sign-in buttons --- */
-document.addEventListener('pointerdown', (e) => {
-  const el = e.target.closest && e.target.closest('button');
-  if (!el || el.disabled) return;
-  const r = el.getBoundingClientRect(); if (!r.width) return;
-  const d = Math.hypot(Math.max(e.clientX - r.left, r.right - e.clientX),
-                       Math.max(e.clientY - r.top, r.bottom - e.clientY)) * 2;
-  const ink = document.createElement('span');
-  ink.className = 'md-ripple';
-  ink.style.width = ink.style.height = d + 'px';
-  ink.style.left = (e.clientX - r.left - d / 2) + 'px';
-  ink.style.top = (e.clientY - r.top - d / 2) + 'px';
-  el.appendChild(ink);
-  let gone = false;
-  const fade = () => { if (gone) return; gone = true; ink.classList.add('out'); setTimeout(() => ink.remove(), 260); };
-  setTimeout(fade, 450);
-  window.addEventListener('pointerup', fade, { once: true });
-  window.addEventListener('pointercancel', fade, { once: true });
-}, true);
 
 let pending = null, setupToken = null;
 

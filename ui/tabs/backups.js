@@ -30,7 +30,7 @@ function renderBackup(){
     html += '<div style="margin-top:10px;font-size:15px">';
     html += '<span class="upd-badge '+(lr.success?'ok':'na')+'">'+(lr.success?'✓ last backup ok':'⚠ last backup had errors')+'</span> ';
     html += '<span style="color:var(--md-on-surface-med)"> '+new Date(lr.finishedAt||lr.startedAt).toLocaleString()+' · '+bkModeBadge(lr)+' · '+lr.itemCount+' items · '+bkBytes(lr.bytes)+' · '+Math.round((lr.duration_ms||0)/1000)+'s · '+esc(lr.trigger)+(lr.pruned&&lr.pruned.length?' · pruned '+lr.pruned.length:'')+'</span>';
-    if (lr.errors && lr.errors.length) html += '<ul style="margin:6px 0 0;color:#f87171">'+lr.errors.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>';
+    if (lr.errors && lr.errors.length) html += '<ul style="margin:6px 0 0;color:var(--md-error-bright)">'+lr.errors.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>';
     if (lr.notes && lr.notes.length) html += '<ul class="dim" style="margin:6px 0 0;font-size:13px">'+lr.notes.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>';
     html += '</div>';
   } else { html += '<div style="margin-top:10px;color:var(--md-on-surface-med);font-size:15px">No backups run yet.</div>'; }

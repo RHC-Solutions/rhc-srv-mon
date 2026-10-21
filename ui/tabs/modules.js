@@ -109,7 +109,7 @@ function renderModules(){
     html += '</div></div>';
   }
 
-  html += '<div class="auto-row" style="margin-top:6px"><button class="btn" id="auSave" style="background:var(--md-primary);color:var(--md-on-primary);padding:8px 16px;font-size:14px">💾 Save settings</button>';
+  html += '<div class="auto-row" style="margin-top:6px"><button class="btn" id="auSave" style="background:var(--clp-btn);color:#fff;border-color:var(--clp-btn);padding:8px 16px;font-size:14px">💾 Save settings</button>';
   html += '<button class="btn" id="auRunNow" '+(auRunning?'disabled':'')+' style="padding:8px 16px;font-size:14px">'+(auRunning?'⏳ running…':'⏱ Run now (one pass)')+'</button>';
   html += '<span class="hint" id="auRunHint" style="margin-left:auto"></span></div>';
   html += '</div>';
@@ -177,7 +177,7 @@ function renderModules(){
         ? '<button class="mod-cmd" disabled style="opacity:.6">⏳ updating…</button>'
         : r.rebuild
         ? '<button class="mod-cmd" data-update-pkg="'+esc(r.package)+'" data-update-dir="'+esc(r.dir)+'" data-update-user="'+esc(r.user)+'" data-rebuild="1" title="'+esc(pm)+' install '+esc(r.package)+'@latest, then '+esc(pm)+' run build and restart the site\'s pm2 process; a failed build is rolled back. Auto-update and Update all never touch this package." style="background:var(--md-warn-container);color:var(--md-warning);border-color:var(--md-warn-container)">⬆ Update + rebuild</button>'
-        : '<button class="mod-cmd" data-update-pkg="'+esc(r.package)+'" data-update-dir="'+esc(r.dir)+'" data-update-user="'+esc(r.user)+'" title="Run: '+esc(pm)+' install '+esc(r.package)+'@latest" style="background:var(--md-ok-container);color:var(--md-primary);border-color:var(--md-primary)">⬆ Update</button>';
+        : '<button class="mod-cmd" data-update-pkg="'+esc(r.package)+'" data-update-dir="'+esc(r.dir)+'" data-update-user="'+esc(r.user)+'" title="Run: '+esc(pm)+' install '+esc(r.package)+'@latest" style="background:var(--clp-btn);color:#fff;border-color:var(--clp-btn)">⬆ Update</button>';
       const cpyBtn = '<button class="mod-cmd" data-cmd="'+esc(cmd)+'" title="Copy command">📋</button>';
       html += '<tr>'
         + '<td><span class="sev '+sev+'">'+(r.severity||'—')+'</span></td>'
@@ -234,7 +234,7 @@ function renderModules(){
   const detail = !!state.modShowDetailLog;
   html += '<div class="mod-card"><div class="head"><h3 style="margin:0">Recent Updates <span style="font-weight:400;font-size:14px;color:var(--md-on-surface-dis)">'+log.length+' entries</span></h3>';
   html += '<div style="display:flex;gap:8px;align-items:center">';
-  if (log.length) html += '<button class="btn" id="modDetailToggle" title="Show full command output for each update" style="font-size:12.5px;padding:4px 10px;'+(detail?'background:#1f3a4e;color:#7cc7ff;border-color:#2e5a6e':'')+'">'+(detail?'▾ Detailed log':'▸ Show detailed log')+'</button>';
+  if (log.length) html += '<button class="btn" id="modDetailToggle" title="Show full command output for each update" style="font-size:12.5px;padding:4px 10px;'+(detail?'background:var(--md-state-selected);color:var(--md-primary);border-color:var(--md-primary)':'')+'">'+(detail?'▾ Detailed log':'▸ Show detailed log')+'</button>';
   if (log.length) html += '<button class="btn" id="modClearLog" style="font-size:12.5px;padding:4px 10px;background:var(--md-error-container);color:var(--md-error-bright)">🗑 Clear</button>';
   html += '</div>';
   html += '</div>';

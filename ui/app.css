@@ -1,78 +1,98 @@
   /* ============================================================================
-     RHC SRV Manager — Material Design 2 (dark theme)
-     Structure follows the MD2 spec: a token layer (color / elevation / type /
-     shape / motion), then components expressed with the class names the tab
-     renderers already emit, so the markup in ui/tabs/*.js keeps working.
-     Dark theme rules applied throughout: surfaces get *lighter* with elevation
-     (white overlay per dp step), text uses the 87/60/38 % emphasis ladder, and
-     the primary is the desaturated 200-tone green the panel has always used.
+     RHC SRV Manager — CloudPanel look
+     Mirrors CloudPanel v2 (cloudpanel-io, values taken from its installed style.css /
+     admin/style.css / style-dark.css): a light #f9fafb page under a white 75px header
+     with a logo block, a #f2f4f6 admin-style sidebar whose active item carries a 3px
+     blue bar, white bordered cards, uppercase grey table heads and #267ddd buttons —
+     plus CloudPanel's own dark palette behind the moon/sun switch (html.dark).
+     Components keep the class names ui/tabs/*.js emits and still read the --md-*
+     token names, so the renderers' inline var(--md-…) styles follow the theme.
      ============================================================================ */
   :root {
-    color-scheme: dark;
+    color-scheme: light;
 
-    /* --- colour system ------------------------------------------------- */
-    --md-primary:          #5cdd8b;
-    --md-primary-variant:  #34b96a;
-    --md-primary-light:    #8bf0b0;
-    --md-on-primary:       #00210f;
-    --md-secondary:        #7fd6ff;
-    --md-on-secondary:     #002335;
-    --md-error:            #cf6679;
-    --md-error-bright:     #ff8a95;
-    --md-on-error:         #2d0009;
-    --md-warning:          #f8a306;
-    --md-on-warning:       #2a1c00;
+    /* --- accent + status ----------------------------------------------- */
+    --md-primary:          #0078d4;   /* CloudPanel link / active-bar blue */
+    --md-primary-variant:  #005fa8;
+    --md-primary-light:    #2e87eb;
+    --md-on-primary:       #ffffff;
+    --md-secondary:        #3399cc;
+    --md-on-secondary:     #ffffff;
+    --md-ok:               #73bf4c;   /* CloudPanel green: fills (bars, dots, pills) */
+    --md-ok-text:          #4e9a2a;   /* the same green, dark enough for text on white */
+    --md-error:            #dc3545;
+    --md-error-bright:     #d84531;
+    --md-on-error:         #ffffff;
+    --md-warning:          #e86a00;
+    --md-on-warning:       #ffffff;
+    --clp-btn:             #267ddd;
+    --clp-btn-hover:       #2e87eb;
+    --clp-btn-white:       #ffffff;
+    --clp-btn-white-hover: #e4e5e6;
+    --clp-btn-white-text:  #666666;
 
-    --md-background:       #12141c;
-    --md-surface:          #171a24;
+    /* --- surfaces ------------------------------------------------------ */
+    --md-background:       #f9fafb;
+    --md-surface:          #ffffff;
+    --clp-header:          #ffffff;
+    --clp-sidebar:         #f2f4f6;
+    --clp-sidebar-active:  #e6e9ec;
+    --clp-border:          #e2e2e2;
+    --clp-input:           #ffffff;
+    --clp-input-border:    #d3d3d3;
+    --clp-input-hover:     #b9bec4;
+    --clp-th-bg:           #fbfcfc;
+    --clp-th:              #9bacb6;
+    --clp-title:           #2e2e2e;
+    --clp-tab:             #666666;
+    --clp-scroll:          rgba(0,0,0,.18);
+    /* the old elevation steps, now flat light tints (cards are white + border) */
+    --md-surface-01dp:     #ffffff;
+    --md-surface-02dp:     #fbfcfc;
+    --md-surface-03dp:     #f7f8f9;
+    --md-surface-04dp:     #f4f6f8;
+    --md-surface-06dp:     #eef1f4;
+    --md-surface-08dp:     #eceff2;
+    --md-surface-12dp:     #e4e8ec;
+    --md-surface-16dp:     #dde2e7;
+    --md-surface-24dp:     #ffffff;
 
-    /* elevation overlays: MD2 dark-theme white scrim at 5/7/8/9/11/12/14/15/16 % */
-    --md-surface-01dp:     #1c1f2a;
-    --md-surface-02dp:     #20232f;
-    --md-surface-03dp:     #222533;
-    --md-surface-04dp:     #252836;
-    --md-surface-06dp:     #292d3c;
-    --md-surface-08dp:     #2c3041;
-    --md-surface-12dp:     #323648;
-    --md-surface-16dp:     #35394c;
-    --md-surface-24dp:     #383d51;
+    /* --- text ---------------------------------------------------------- */
+    --md-on-surface:       #333333;
+    --md-on-surface-med:   #6c757d;
+    --md-on-surface-dis:   #9bacb6;
+    --md-divider:          #eaeaea;
+    --md-outline:          #d3d3d3;
 
-    /* on-surface emphasis ladder */
-    --md-on-surface:       rgba(255,255,255,.87);
-    --md-on-surface-med:   rgba(255,255,255,.60);
-    --md-on-surface-dis:   rgba(255,255,255,.38);
-    --md-divider:          rgba(255,255,255,.12);
-    --md-outline:          rgba(255,255,255,.24);
+    /* --- interaction states -------------------------------------------- */
+    --md-state-hover:      rgba(0,0,0,.035);
+    --md-state-focus:      rgba(0,120,212,.10);
+    --md-state-press:      rgba(0,0,0,.06);
+    --md-state-selected:   rgba(0,120,212,.08);
+    --md-state-primary-h:  rgba(0,120,212,.06);
 
-    /* state layers (MD2 interaction opacities) */
-    --md-state-hover:      rgba(255,255,255,.04);
-    --md-state-focus:      rgba(255,255,255,.12);
-    --md-state-press:      rgba(255,255,255,.10);
-    --md-state-selected:   rgba(92,221,139,.12);
-    --md-state-primary-h:  rgba(92,221,139,.08);
+    /* --- tinted containers for badges / banners ------------------------ */
+    --md-ok-container:     #edf7e8;
+    --md-warn-container:   #fff3e8;
+    --md-error-container:  #fdeced;
+    --md-neutral-container:#eef1f4;
 
-    /* tonal containers for status chips / banners */
-    --md-ok-container:     #10361f;
-    --md-warn-container:   #3d3208;
-    --md-error-container:  #4a1420;
-    --md-neutral-container:#2c3041;
+    /* --- shadows: CloudPanel cards sit almost flat ---------------------- */
+    --md-elev-1: 0 2px 4px rgba(157,161,164,.19);
+    --md-elev-2: 0 2px 4px rgba(157,161,164,.25);
+    --md-elev-3: 0 3px 8px rgba(120,128,136,.18);
+    --md-elev-4: 0 4px 12px rgba(60,70,80,.12);
+    --md-elev-6: 0 6px 18px rgba(40,50,60,.16);
+    --md-elev-8: 0 8px 24px rgba(40,50,60,.16);
+    --md-elev-12:0 12px 32px rgba(30,40,50,.18);
+    --md-elev-16:0 14px 40px rgba(30,40,50,.20);
+    --md-elev-24:0 16px 48px rgba(20,30,40,.24);
 
-    /* --- elevation shadows (MD2 umbra / penumbra / ambient) ------------- */
-    --md-elev-1: 0 2px 1px -1px rgba(0,0,0,.20), 0 1px 1px 0 rgba(0,0,0,.14), 0 1px 3px 0 rgba(0,0,0,.12);
-    --md-elev-2: 0 3px 1px -2px rgba(0,0,0,.20), 0 2px 2px 0 rgba(0,0,0,.14), 0 1px 5px 0 rgba(0,0,0,.12);
-    --md-elev-3: 0 3px 3px -2px rgba(0,0,0,.20), 0 3px 4px 0 rgba(0,0,0,.14), 0 1px 8px 0 rgba(0,0,0,.12);
-    --md-elev-4: 0 2px 4px -1px rgba(0,0,0,.20), 0 4px 5px 0 rgba(0,0,0,.14), 0 1px 10px 0 rgba(0,0,0,.12);
-    --md-elev-6: 0 3px 5px -1px rgba(0,0,0,.20), 0 6px 10px 0 rgba(0,0,0,.14), 0 1px 18px 0 rgba(0,0,0,.12);
-    --md-elev-8: 0 5px 5px -3px rgba(0,0,0,.20), 0 8px 10px 1px rgba(0,0,0,.14), 0 3px 14px 2px rgba(0,0,0,.12);
-    --md-elev-12:0 7px 8px -4px rgba(0,0,0,.20), 0 12px 17px 2px rgba(0,0,0,.14), 0 5px 22px 4px rgba(0,0,0,.12);
-    --md-elev-16:0 8px 10px -5px rgba(0,0,0,.20), 0 16px 24px 2px rgba(0,0,0,.14), 0 6px 30px 5px rgba(0,0,0,.12);
-    --md-elev-24:0 11px 15px -7px rgba(0,0,0,.20), 0 24px 38px 3px rgba(0,0,0,.14), 0 9px 46px 8px rgba(0,0,0,.12);
-
-    /* --- shape (MD2: 4dp small/medium components, pill for chips) ------- */
+    /* --- shape --------------------------------------------------------- */
     --md-shape-s: 4px;
-    --md-shape-m: 4px;
+    --md-shape-m: 6px;
     --md-shape-l: 8px;
-    --md-shape-pill: 16px;
+    --md-shape-pill: 4px;      /* CloudPanel labels are near-square, not pills */
 
     /* --- motion -------------------------------------------------------- */
     --md-ease-standard:   cubic-bezier(.4,0,.2,1);
@@ -82,190 +102,253 @@
     --md-dur-medium: 250ms;
 
     /* --- type ---------------------------------------------------------- */
-    --md-font: Roboto, "Helvetica Neue", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-    --md-font-mono: "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --md-font: "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
+    --md-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+    /* the terminal surface stays dark in both themes (xterm paints on it) */
+    --term-bg: #0c0e16;
+  }
+
+  /* CloudPanel dark mode (style-dark.css: #0e1217 / #1c1f26 / #25282f, #a8b3cf33 borders) */
+  html.dark {
+    color-scheme: dark;
+    --md-primary:          #3b9aec;
+    --md-primary-variant:  #267ddd;
+    --md-primary-light:    #5aaef2;
+    --md-ok-text:          #84d35c;
+    --md-error-bright:     #f0727c;
+    --md-warning:          #ff8a2a;
+    --clp-btn-white:       #21262d;
+    --clp-btn-white-hover: #30363d;
+    --clp-btn-white-text:  #c9d1d9;
+
+    --md-background:       #0e1217;
+    --md-surface:          #1c1f26;
+    --clp-header:          #25282f;
+    --clp-sidebar:         #25282f;
+    --clp-sidebar-active:  #1c1f26;
+    --clp-border:          #a8b3cf33;
+    --clp-input:           #20242c;
+    --clp-input-border:    #a8b3cf40;
+    --clp-input-hover:     #a8b3cf70;
+    --clp-th-bg:           #25282f;
+    --clp-th:              #9b9b9b;
+    --clp-title:           #ffffff;
+    --clp-tab:             #9b9b9b;
+    --clp-scroll:          rgba(255,255,255,.2);
+    --md-surface-01dp:     #1c1f26;
+    --md-surface-02dp:     #1f232a;
+    --md-surface-03dp:     #21252c;
+    --md-surface-04dp:     #20242c;
+    --md-surface-06dp:     #262a32;
+    --md-surface-08dp:     #2a2e37;
+    --md-surface-12dp:     #30343d;
+    --md-surface-16dp:     #353942;
+    --md-surface-24dp:     #25282f;
+
+    --md-on-surface:       #e8eaed;
+    --md-on-surface-med:   #9b9b9b;
+    --md-on-surface-dis:   #838383;
+    --md-divider:          #a8b3cf26;
+    --md-outline:          #a8b3cf40;
+
+    --md-state-hover:      rgba(255,255,255,.04);
+    --md-state-focus:      rgba(59,154,236,.18);
+    --md-state-press:      rgba(255,255,255,.08);
+    --md-state-selected:   rgba(59,154,236,.14);
+    --md-state-primary-h:  rgba(59,154,236,.10);
+
+    --md-ok-container:     #1d2e1a;
+    --md-warn-container:   #3a2610;
+    --md-error-container:  #3d1a1e;
+    --md-neutral-container:#2a2e37;
+
+    --md-elev-1: none;
+    --md-elev-2: none;
+    --md-elev-3: 0 3px 8px rgba(0,0,0,.35);
+    --md-elev-4: 0 4px 12px rgba(0,0,0,.40);
+    --md-elev-6: 0 6px 18px rgba(0,0,0,.45);
+    --md-elev-8: 0 8px 24px rgba(0,0,0,.45);
+    --md-elev-12:0 12px 32px rgba(0,0,0,.5);
+    --md-elev-16:0 14px 40px rgba(0,0,0,.5);
+    --md-elev-24:0 16px 48px rgba(0,0,0,.6);
   }
   * { box-sizing: border-box; }
 
-  /* --- MD2 type scale ------------------------------------------------- */
+  /* --- type ----------------------------------------------------------- */
+  html { background:var(--md-background); }
   body { margin:0; background:var(--md-background); color:var(--md-on-surface);
          font-family:var(--md-font); font-size:14px; font-weight:400; line-height:20px;
-         letter-spacing:.25px; -webkit-font-smoothing:antialiased; }
-  h1 { /* headline 6 */ font-size:20px; font-weight:500; line-height:28px; letter-spacing:.15px;
-       margin:0; display:flex; align-items:center; gap:10px; }
-  h2 { /* subtitle 1 */ font-size:16px; font-weight:500; line-height:24px; letter-spacing:.15px; margin:0; }
-  h3 { /* subtitle 1 */ font-size:16px; font-weight:500; line-height:24px; letter-spacing:.15px; margin:0; }
-  .sub { /* body 2 */ color:var(--md-on-surface-med); font-size:14px; letter-spacing:.25px; margin-bottom:0; }
+         -webkit-font-smoothing:antialiased; }
+  h1 { font-size:28px; font-weight:600; line-height:36px; color:var(--clp-title);
+       margin:0; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  h2 { font-size:18px; font-weight:600; line-height:26px; margin:0; }
+  h3 { font-size:18px; font-weight:600; line-height:26px; margin:0; }
+  a { color:var(--md-primary); }
+  .sub { color:var(--md-on-surface-med); font-size:14px; margin-bottom:0; }
   .mono { font-family:var(--md-font-mono); font-size:13px; letter-spacing:0; }
   .dim  { color:var(--md-on-surface-dis); }
-  b, strong { font-weight:500; }
-  ::selection { background:rgba(92,221,139,.3); }
+  b, strong { font-weight:600; }
+  ::selection { background:rgba(0,120,212,.22); }
 
-  /* thin Material scrollbars */
-  * { scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.2) transparent; }
+  * { scrollbar-width:thin; scrollbar-color:var(--clp-scroll) transparent; }
   ::-webkit-scrollbar { width:8px; height:8px; }
-  ::-webkit-scrollbar-thumb { background:rgba(255,255,255,.2); border-radius:4px; }
-  ::-webkit-scrollbar-thumb:hover { background:rgba(255,255,255,.32); }
+  ::-webkit-scrollbar-thumb { background:var(--clp-scroll); border-radius:4px; }
   ::-webkit-scrollbar-track { background:transparent; }
+  @media (prefers-reduced-motion: reduce) { * { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
 
-  /* ---------------------------------------------------------------- ripple
-     MD2 touch ripple. ui/md2.js drops a .md-ripple span at the press point;
-     every interactive surface that opts in just needs position + clipping. */
-  .btn, .chip, .tab, .site-tab, .upd-test-btn, .ssh-tab, .mod-cmd, .ssh-host,
-  .ssh-tabbar .tools button, .ssh-host .acts button, .ssh-deadbar button,
-  .ssh-term .pane-hd button { position:relative; overflow:hidden; }
-  .md-ripple { position:absolute; border-radius:50%; transform:scale(0); pointer-events:none;
-               background:currentColor; opacity:.24; animation:md-ripple-in 450ms var(--md-ease-decelerate) forwards; }
-  .md-ripple.out { animation:md-ripple-out 250ms var(--md-ease-standard) forwards; }
-  @keyframes md-ripple-in  { to { transform:scale(1); } }
-  @keyframes md-ripple-out { to { opacity:0; } }
-  @media (prefers-reduced-motion: reduce) { .md-ripple { display:none; } * { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
+  /* ------------------------------------------------- header (CloudPanel .header, 75px) */
+  .topbar { position:sticky; top:0; z-index:40; display:flex; align-items:stretch; height:75px;
+            background:var(--clp-header); border-bottom:1px solid var(--clp-border);
+            box-shadow:0 2px 2px 0 hsla(0,0%,93%,.5); }
+  html.dark .topbar { box-shadow:none; }
+  .topbar.scrolled { box-shadow:var(--md-elev-4); }
+  .topbar .logo { flex:0 0 235px; display:flex; align-items:center; gap:10px; padding:0 20px;
+                  border-right:1px solid var(--clp-border); color:var(--clp-title); text-decoration:none;
+                  font-size:18px; font-weight:700; letter-spacing:-.2px; white-space:nowrap; }
+  .topbar .logo svg { width:32px; height:32px; flex-shrink:0; color:var(--md-primary); }
+  .topbar .logo .brand-name b { color:var(--md-primary); font-weight:700; }
+  .topnav { flex:1; min-width:0; display:flex; align-items:stretch; gap:0; padding:0 0 0 10px; overflow:hidden; }
+  .topnav .tab { display:flex; align-items:center; padding:0 15px; margin:0; height:auto; border:none; border-radius:0;
+                 background:none; color:#aaaaaa; font-size:16px; font-weight:700; text-decoration:none; }
+  .topnav .tab:hover, .topnav .tab.active { color:var(--md-primary); background:none; }
+  html.dark .topnav .tab { color:var(--md-on-surface); }
+  html.dark .topnav .tab:hover, html.dark .topnav .tab.active { color:var(--md-primary); }
+  .topright { display:flex; align-items:stretch; flex-shrink:0; }
+  .topright > * { display:flex; align-items:center; gap:8px; padding:0 22px; border-left:1px solid var(--clp-border); }
+  .theme-switch { background:none; border:none; border-left:1px solid var(--clp-border); color:#aaaaaa; cursor:pointer; font:inherit; }
+  .theme-switch:hover { color:var(--md-primary); }
+  .theme-switch svg { width:20px; height:20px; display:block; }
+  .theme-switch .sun, html.dark .theme-switch .moon { display:none; }
+  html.dark .theme-switch .sun { display:block; }
+  .userbar { display:flex; gap:8px; align-items:center; font-size:14px; color:var(--md-on-surface-med); }
+  .userbar:empty { display:none; }
+  .userbar .who { margin-right:6px; color:var(--md-on-surface); font-weight:600; white-space:nowrap; }
+  .userbar .who small { color:var(--md-on-surface-med); font-weight:400; }
 
-  /* ------------------------------------------------------------- layout */
+  /* ------------------------------------------- layout + sidebar (CloudPanel admin .sidebar) */
   .wrap { width:100%; margin:0; padding:0; display:flex; align-items:stretch; }
-  .content { flex:1 1 auto; min-width:0; padding:0 24px 40px; }
-
-  /* ------------------------------------- navigation drawer (permanent, 256dp) */
-  .sidenav { flex:0 0 256px; width:256px; background:var(--md-surface); border-right:1px solid var(--md-divider);
-             display:flex; flex-direction:column; gap:8px; padding:0 8px 8px;
-             position:sticky; top:0; align-self:flex-start; height:100vh; height:100dvh; overflow-y:auto; }
-  .brand { display:flex; align-items:center; gap:12px; height:64px; flex-shrink:0; padding:0 8px;
-           font-size:16px; font-weight:500; line-height:24px; letter-spacing:.15px;
-           color:var(--md-on-surface); white-space:nowrap; }
-  .brand .logo { font-size:22px; line-height:1; }
-  .tabs { display:flex; flex-direction:column; gap:0; margin:0; }
-  .tabs .tab { white-space:nowrap; flex-shrink:0; }
-  /* drawer item: 48dp row, body2 medium, activated state = primary at 12 % */
-  .tab { display:flex; align-items:center; height:48px; padding:0 16px; margin:0 0 2px;
-         background:none; border:none; border-radius:var(--md-shape-s);
-         color:var(--md-on-surface-med); font-family:inherit; font-size:14px; font-weight:500; line-height:20px;
-         letter-spacing:.1px; cursor:pointer; text-align:left; text-decoration:none;
-         transition:background-color var(--md-dur-short) var(--md-ease-standard), color var(--md-dur-short) var(--md-ease-standard); }
-  .tab:hover  { color:var(--md-on-surface); background:var(--md-state-hover); }
+  .content { flex:1 1 auto; min-width:0; padding:0 30px 60px; }
+  .sidenav { flex:0 0 235px; width:235px; background:var(--clp-sidebar); border-right:1px solid var(--clp-border);
+             display:flex; flex-direction:column; padding:15px 0;
+             position:sticky; top:75px; align-self:flex-start; height:calc(100vh - 75px); height:calc(100dvh - 75px); overflow-y:auto; }
+  .sidenav .grp { padding:6px 20px 8px; font-size:12px; font-weight:700; letter-spacing:.6px;
+                  text-transform:uppercase; color:var(--clp-th); }
+  .tabs { display:flex; flex-direction:column; margin:0; }
+  .tab { display:flex; align-items:center; gap:12px; padding:9px 20px 9px 17px; margin:0;
+         background:none; border:none; border-left:3px solid transparent; border-radius:0;
+         color:var(--md-on-surface); font-family:inherit; font-size:15px; font-weight:400; line-height:22px;
+         cursor:pointer; text-align:left; text-decoration:none; white-space:nowrap; flex-shrink:0;
+         transition:background-color var(--md-dur-short) var(--md-ease-standard), border-color var(--md-dur-short) var(--md-ease-standard); }
+  .tab svg { width:18px; height:18px; flex-shrink:0; color:var(--md-on-surface-med); }
+  .tab:hover, .tab.active { background:var(--clp-sidebar-active); border-left-color:var(--md-primary); }
+  .tab.active { font-weight:600; }
+  .tab.active svg, .tab:hover svg { color:var(--md-primary); }
   .tab:focus-visible { outline:none; background:var(--md-state-focus); }
-  .tab.active { color:var(--md-primary); background:var(--md-state-selected); }
-  a.tab { text-decoration:none; }
-  .sidenav .userbar { margin-top:auto; flex-direction:column; align-items:stretch; gap:4px;
-                      padding:12px 8px 4px; border-top:1px solid var(--md-divider); line-height:20px; }
-  .sidenav .userbar .who { margin-right:0; word-break:break-word; padding:0 8px 4px;
-                           font-size:14px; color:var(--md-on-surface); }
-  .sidenav .userbar .who small { color:var(--md-on-surface-med); }
-  .sidenav .userbar button { width:100%; text-align:left; justify-content:flex-start; }
+  .sidenav .side-ft { margin-top:auto; padding:16px 20px 4px; font-size:12px; line-height:16px; color:var(--md-on-surface-dis); }
 
-  /* ------------------------------------------------- top app bar (regular, 64dp) */
+  /* ------------------------------------------------ page header (CloudPanel .page-header) */
   .hdr-row { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
-             min-height:64px; position:sticky; top:0; z-index:20; margin:0 -24px 0; padding:8px 24px;
-             background:var(--md-background); }
-  .hdr-row.scrolled { box-shadow:var(--md-elev-4); background:var(--md-surface-04dp); }
-  .hdr-row h1 .sub { font-size:14px; font-weight:400; }
+             margin:24px 0 0; }
+  .hdr-row h1 .sub { font-size:15px; font-weight:400; }
   .subrow { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;
-            margin:4px 0 20px; }
+            margin:4px 0 24px; }
   .subrow .sub { margin-bottom:0; }
-  .userbar { display:flex; gap:8px; align-items:center; font-size:14px; color:var(--md-on-surface-med); margin-top:0; }
-  .userbar .who { margin-right:6px; }
-  .userbar .who small { color:var(--md-on-surface-dis); }
-  footer { color:var(--md-on-surface-dis); font-size:12px; letter-spacing:.4px; text-align:center; margin-top:24px; }
+  footer { color:var(--md-on-surface-dis); font-size:12px; text-align:center; margin-top:30px;
+           padding-top:12px; border-top:1px solid var(--md-divider); }
 
   /* ============================== BUTTONS ==============================
-     MD2 button: 36dp high, 4dp corners, button type (14px / 500 / 1.25px,
-     uppercase). Default .btn is an outlined button, .btn.pri a contained
-     primary (elevation 2 → 4 on hover), .btn.danger a contained error. */
+     CloudPanel buttons: 14px / 500, 4px corners, no uppercase. Default .btn is
+     .btn-white, .btn.pri is .btn-blue, .btn.danger is .btn-red. */
   .btn {
     display:inline-flex; align-items:center; justify-content:center; gap:6px;
-    min-height:32px; padding:0 12px; border:1px solid var(--md-outline); border-radius:var(--md-shape-s);
-    background:transparent; color:var(--md-on-surface);
-    font-family:inherit; font-size:13px; font-weight:500; line-height:1; letter-spacing:.8px;
-    text-transform:uppercase; white-space:nowrap; cursor:pointer;
+    min-height:34px; padding:0 16px; border:1px solid var(--clp-input-border); border-radius:var(--md-shape-s);
+    background:var(--clp-btn-white); color:var(--clp-btn-white-text);
+    font-family:inherit; font-size:14px; font-weight:500; line-height:1; letter-spacing:0;
+    text-transform:none; white-space:nowrap; cursor:pointer;
     transition:background-color var(--md-dur-short) var(--md-ease-standard),
-               box-shadow var(--md-dur-short) var(--md-ease-standard),
-               border-color var(--md-dur-short) var(--md-ease-standard); }
-  .btn:hover  { background:var(--md-state-hover); border-color:var(--md-on-surface-med); }
-  .btn:focus-visible { outline:none; background:var(--md-state-focus); }
-  .btn:active { background:var(--md-state-press); }
-  .btn:disabled { opacity:.38; cursor:not-allowed; background:transparent; border-color:var(--md-divider); }
-  .btn.pri { background:var(--md-primary); color:var(--md-on-primary); border-color:transparent; box-shadow:var(--md-elev-2); }
-  .btn.pri:hover  { background:var(--md-primary-light); box-shadow:var(--md-elev-4); }
-  .btn.pri:active { box-shadow:var(--md-elev-8); }
-  .btn.pri:disabled { background:rgba(255,255,255,.12); color:var(--md-on-surface-dis); box-shadow:none; }
-  .btn.danger { background:var(--md-error); color:var(--md-on-error); border-color:transparent; box-shadow:var(--md-elev-2); }
-  .btn.danger:hover { background:var(--md-error-bright); box-shadow:var(--md-elev-4); }
-  .btn.small { min-height:24px; padding:0 8px; font-size:12px; letter-spacing:.6px; }
+               border-color var(--md-dur-short) var(--md-ease-standard), color var(--md-dur-short) var(--md-ease-standard); }
+  .btn:hover  { background:var(--clp-btn-white-hover); }
+  .btn:focus-visible { outline:2px solid var(--md-primary); outline-offset:1px; }
+  .btn:active { background:var(--clp-btn-white-hover); }
+  .btn:disabled { opacity:.5; cursor:not-allowed; background:var(--clp-btn-white); }
+  .btn.pri { background:var(--clp-btn); color:#ffffff; border-color:var(--clp-btn); }
+  .btn.pri:hover  { background:var(--clp-btn-hover); border-color:var(--clp-btn-hover); }
+  .btn.pri:disabled { background:var(--clp-btn); opacity:.45; }
+  .btn.danger { background:#dc3545; color:#ffffff; border-color:#dc3545; }
+  .btn.danger:hover { background:#dd4b5a; border-color:#dd4b5a; }
+  .btn.small { min-height:26px; padding:0 10px; font-size:13px; }
   a.btn { text-decoration:none; display:inline-flex; }
-  /* text button — the flat toolbar/icon affordance used all over the SSH + updates tabs */
+  /* text button — CloudPanel's inline action links (blue, underline-free, tinted on hover) */
   .upd-test-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px;
-    min-height:32px; padding:0 12px; background:transparent; border:none; border-radius:var(--md-shape-s);
-    color:var(--md-primary); font-family:inherit; font-size:13px; font-weight:500; letter-spacing:.8px;
-    text-transform:uppercase; cursor:pointer; white-space:nowrap;
+    min-height:32px; padding:0 10px; background:transparent; border:none; border-radius:var(--md-shape-s);
+    color:var(--md-primary); font-family:inherit; font-size:14px; font-weight:500; letter-spacing:0;
+    text-transform:none; cursor:pointer; white-space:nowrap;
     transition:background-color var(--md-dur-short) var(--md-ease-standard); }
   .upd-test-btn:hover  { background:var(--md-state-primary-h); }
   .upd-test-btn:active { background:var(--md-state-selected); }
   .upd-test-btn:disabled { color:var(--md-on-surface-dis); cursor:not-allowed; background:transparent; }
-  /* inline two-step confirm: the armed state borrows the error container */
-  .arm-confirm { background:var(--md-error-container) !important; color:var(--md-error-bright) !important;
-                 border-color:var(--md-error) !important; animation:arm-pulse 1.2s var(--md-ease-standard) infinite; }
-  @keyframes arm-pulse { 0%,100%{ box-shadow:0 0 0 0 rgba(207,102,121,.45); } 50%{ box-shadow:0 0 0 6px rgba(207,102,121,0); } }
+  /* inline two-step confirm: the armed state turns red */
+  .arm-confirm { background:#dc3545 !important; color:#ffffff !important;
+                 border-color:#dc3545 !important; animation:arm-pulse 1.2s var(--md-ease-standard) infinite; }
+  @keyframes arm-pulse { 0%,100%{ box-shadow:0 0 0 0 rgba(220,53,69,.45); } 50%{ box-shadow:0 0 0 6px rgba(220,53,69,0); } }
 
   /* ============================== CHIPS ================================
-     MD2 choice chip: 32dp high, fully rounded, body2, selected = primary. */
-  .chip { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 12px;
-          background:var(--md-surface-08dp); border:none; border-radius:var(--md-shape-pill);
-          color:var(--md-on-surface-med); font-family:inherit; font-size:13px; font-weight:500;
-          line-height:18px; letter-spacing:.25px; cursor:pointer;
+     Filter toggles drawn as CloudPanel's white buttons; the selected one is blue. */
+  .chip { display:inline-flex; align-items:center; gap:6px; height:34px; padding:0 14px;
+          background:var(--clp-btn-white); border:1px solid var(--clp-input-border); border-radius:var(--md-shape-s);
+          color:var(--clp-btn-white-text); font-family:inherit; font-size:14px; font-weight:500;
+          line-height:18px; cursor:pointer;
           transition:background-color var(--md-dur-short) var(--md-ease-standard), color var(--md-dur-short) var(--md-ease-standard); }
-  .chip:hover { color:var(--md-on-surface); background:var(--md-surface-12dp); }
-  .chip:focus-visible { outline:none; box-shadow:0 0 0 2px var(--md-primary); }
-  .chip.active { background:var(--md-primary); color:var(--md-on-primary); }
-  .chip.active.down-chip { background:var(--md-error); color:var(--md-on-error); }
-  .chip.toggle { background:var(--md-surface-08dp); border:1px solid transparent; color:var(--md-on-surface-med); }
+  .chip:hover { background:var(--clp-btn-white-hover); }
+  .chip:focus-visible { outline:2px solid var(--md-primary); outline-offset:1px; }
+  .chip.active { background:var(--clp-btn); border-color:var(--clp-btn); color:#ffffff; }
+  .chip.active.down-chip { background:#dc3545; border-color:#dc3545; color:#ffffff; }
   .chip.toggle.active { background:var(--md-state-selected); border-color:var(--md-primary); color:var(--md-primary); }
 
-  /* ======================= TEXT FIELDS (filled) ========================
-     MD2 filled field: tinted box, 4dp top corners, 1dp resting underline that
-     thickens to 2dp in primary on focus. */
+  /* =========================== TEXT FIELDS =============================
+     CloudPanel .form-control: white box, 1px #d3d3d3 border, 4px corners;
+     focus turns the border blue. */
   .toolbar input, .toolbar select, .upd-field input, .upd-field select, .upd-field textarea,
   .site-toolbar input, .ev-filters select, .ev-filters input, .fm-bar select, .fm-bar input,
   .ssh-side input.q, .auto-row input[type=number], .auto-row input[type=text], .site-code {
-    background-color:var(--md-surface-04dp); color:var(--md-on-surface);
-    border:none; border-bottom:1px solid var(--md-outline);
-    border-radius:var(--md-shape-s) var(--md-shape-s) 0 0;
-    padding:8px 12px; font-family:inherit; font-size:14px; line-height:20px; letter-spacing:.25px; outline:none;
-    transition:background-color var(--md-dur-short) var(--md-ease-standard),
-               border-color var(--md-dur-short) var(--md-ease-standard),
+    background-color:var(--clp-input); color:var(--md-on-surface);
+    border:1px solid var(--clp-input-border); border-radius:var(--md-shape-s);
+    padding:8px 12px; font-family:inherit; font-size:14px; line-height:20px; outline:none;
+    transition:border-color var(--md-dur-short) var(--md-ease-standard),
                box-shadow var(--md-dur-short) var(--md-ease-standard); }
-  .toolbar input:hover, .upd-field input:hover, .upd-field select:hover, .upd-field textarea:hover,
-  .site-toolbar input:hover, .ev-filters input:hover, .ssh-side input.q:hover, .auto-row input:hover {
-    background-color:var(--md-surface-06dp); border-bottom-color:var(--md-on-surface); }
+  .toolbar input:hover, .toolbar select:hover, .upd-field input:hover, .upd-field select:hover, .upd-field textarea:hover,
+  .site-toolbar input:hover, .ev-filters input:hover, .ev-filters select:hover, .fm-bar input:hover, .fm-bar select:hover,
+  .ssh-side input.q:hover, .auto-row input:hover {
+    border-color:var(--clp-input-hover); }
   .toolbar input:focus, .toolbar select:focus, .upd-field input:focus, .upd-field select:focus,
   .upd-field textarea:focus, .site-toolbar input:focus, .ev-filters select:focus, .ev-filters input:focus,
   .fm-bar select:focus, .fm-bar input:focus, .ssh-side input.q:focus, .auto-row input:focus, .site-code:focus {
-    background-color:var(--md-surface-06dp); border-bottom-color:var(--md-primary);
-    box-shadow:inset 0 -1px 0 0 var(--md-primary); }
+    border-color:var(--md-primary); box-shadow:0 0 0 3px var(--md-state-focus); }
   input::placeholder, textarea::placeholder { color:var(--md-on-surface-dis); }
   .toolbar input[type=search], .site-toolbar input { min-height:40px; }
-  .toolbar { display:flex; align-items:center; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
+  .toolbar { display:flex; align-items:center; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
   .toolbar input { flex:1 1 220px; min-width:160px; }
   .toolbar select, .ev-filters select, .fm-bar select, .upd-field select {
-    cursor:pointer; -webkit-appearance:none; appearance:none; padding-right:30px;
-    background-image:linear-gradient(45deg, transparent 50%, rgba(255,255,255,.6) 50%),
-                     linear-gradient(135deg, rgba(255,255,255,.6) 50%, transparent 50%);
-    background-position:calc(100% - 16px) 55%, calc(100% - 11px) 55%;
+    cursor:pointer; -webkit-appearance:none; appearance:none; padding-right:32px;
+    background-image:linear-gradient(45deg, transparent 50%, var(--md-on-surface-med) 50%),
+                     linear-gradient(135deg, var(--md-on-surface-med) 50%, transparent 50%);
+    background-position:calc(100% - 17px) 55%, calc(100% - 12px) 55%;
     background-size:5px 5px, 5px 5px; background-repeat:no-repeat; }
   .toolbar select option, .upd-field select option, .ev-filters select option, .fm-bar select option {
-    background:var(--md-surface-08dp); color:var(--md-on-surface); }
-  /* field + label + helper text: the label is MD2 caption, the hint helper text */
-  .upd-field { display:flex; flex-direction:column; gap:4px; margin-bottom:16px; }
-  .upd-field label { font-size:12px; font-weight:400; line-height:16px; letter-spacing:.4px;
-                     color:var(--md-on-surface-med); text-transform:none; }
-  .upd-field .hint { font-size:12px; line-height:16px; letter-spacing:.4px; color:var(--md-on-surface-med); padding:0 12px; }
+    background:var(--clp-input); color:var(--md-on-surface); }
+  /* field + label + helper text, as in CloudPanel's forms */
+  .upd-field { display:flex; flex-direction:column; gap:6px; margin-bottom:18px; }
+  .upd-field label { font-size:14px; font-weight:500; line-height:20px; color:var(--md-on-surface); text-transform:none; }
+  .upd-field .hint { font-size:13px; line-height:18px; color:var(--md-on-surface-med); padding:0; }
   .upd-field textarea { width:100%; resize:vertical; }
-  .upd-field input:disabled, .upd-field select:disabled { color:var(--md-on-surface-dis);
-    border-bottom-style:dotted; background:rgba(255,255,255,.02); }
-  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:0 16px; }
-  .row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:0 16px; }
+  .upd-field input:disabled, .upd-field select:disabled { color:var(--md-on-surface-med); background:var(--md-surface-04dp); }
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:0 20px; }
+  .row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:0 20px; }
   .row2 .upd-field, .row3 .upd-field { min-width:0; }
   .row2 input, .row3 input, .row2 select, .row3 select, .row2 textarea, .row3 textarea { width:100%; }
   .cron-grid { display:grid; grid-template-columns:repeat(5, 1fr); gap:0 8px; }
-  .site-toolbar { display:flex; gap:12px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+  .site-toolbar { display:flex; gap:10px; align-items:center; margin-bottom:20px; flex-wrap:wrap; }
   .site-toolbar input { min-width:220px; }
   .site-pw { display:flex; gap:8px; align-items:flex-end; } .site-pw input { flex:1; }
   .site-code { width:100%; font-family:var(--md-font-mono); font-size:13px; line-height:1.55;
@@ -273,72 +356,68 @@
   textarea.mono, .ssh-modal textarea.mono { font-family:var(--md-font-mono); font-size:13px; }
 
   /* ===================== SELECTION CONTROLS ============================
-     MD2 switch: 34×14 track, 20dp thumb at elevation 1, ripple halo on hover. */
-  .switch { position:relative; display:inline-block; width:34px; height:20px; flex-shrink:0; }
+     CloudPanel .form-switch: 36×20 track, grey knob → blue track, white knob. */
+  .switch { position:relative; display:inline-block; width:36px; height:20px; flex-shrink:0; }
   .switch input { opacity:0; width:0; height:0; }
-  .switch .slider { position:absolute; cursor:pointer; left:0; right:0; top:3px; height:14px;
-                    background:rgba(255,255,255,.30); border-radius:7px;
-                    transition:background-color var(--md-dur-short) var(--md-ease-standard); }
-  .switch .slider::before { content:''; position:absolute; width:20px; height:20px; left:-1px; top:-3px;
-                    background:#bdbdbd; border-radius:50%; box-shadow:var(--md-elev-1);
-                    transition:transform var(--md-dur-short) var(--md-ease-standard),
-                               background-color var(--md-dur-short) var(--md-ease-standard),
-                               box-shadow var(--md-dur-short) var(--md-ease-standard); }
-  .switch:hover .slider::before { box-shadow:var(--md-elev-1), 0 0 0 10px var(--md-state-hover); }
-  .switch input:checked + .slider { background:rgba(92,221,139,.5); }
-  .switch input:checked + .slider::before { background:var(--md-primary); transform:translateX(16px); }
-  .switch input:checked:hover + .slider::before { box-shadow:var(--md-elev-1), 0 0 0 10px var(--md-state-primary-h); }
-  .switch input:focus-visible + .slider::before { box-shadow:var(--md-elev-1), 0 0 0 10px var(--md-state-focus); }
-  input[type=checkbox], input[type=radio] { accent-color:var(--md-primary); width:16px; height:16px; cursor:pointer; }
+  .switch .slider { position:absolute; cursor:pointer; inset:0; background:var(--clp-input);
+                    border:1px solid #bfbfbf; border-radius:10px;
+                    transition:background-color var(--md-dur-short) var(--md-ease-standard), border-color var(--md-dur-short) var(--md-ease-standard); }
+  html.dark .switch .slider { border-color:var(--clp-input-border); }
+  .switch .slider::before { content:''; position:absolute; width:14px; height:14px; left:2px; top:2px;
+                    background:#bfbfbf; border-radius:50%;
+                    transition:transform var(--md-dur-short) var(--md-ease-standard), background-color var(--md-dur-short) var(--md-ease-standard); }
+  .switch input:checked + .slider { background:var(--clp-btn); border-color:var(--clp-btn); }
+  .switch input:checked + .slider::before { background:#ffffff; transform:translateX(16px); }
+  .switch input:focus-visible + .slider { box-shadow:0 0 0 3px var(--md-state-focus); }
+  input[type=checkbox], input[type=radio] { accent-color:var(--clp-btn); width:16px; height:16px; cursor:pointer; }
   .upd-toggle { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
-  .upd-toggle label { font-size:14px; font-weight:400; letter-spacing:.25px; cursor:pointer; }
+  .upd-toggle label { font-size:14px; font-weight:400; cursor:pointer; }
   .upd-chk-grid { display:flex; flex-wrap:wrap; gap:8px 16px; margin-bottom:16px; }
   .upd-chk-grid label { font-size:14px; display:flex; align-items:center; gap:8px; cursor:pointer; }
 
   /* ============================== CARDS ================================
-     MD2 card: surface at elevation 1, 4dp corners, 16dp internal padding. */
+     CloudPanel .card: white, 1px border, faint shadow, roomy padding. */
   .group, .upd-card, .mod-card, .site-card, .auto-card, .mod-stat, .ssh-inst {
-    background:var(--md-surface-01dp); border-radius:var(--md-shape-m); box-shadow:var(--md-elev-1); }
-  .group { padding:4px 16px 12px; margin-bottom:16px; }
-  .group h2 { font-size:16px; font-weight:500; line-height:24px; letter-spacing:.15px;
-              color:var(--md-on-surface); margin:16px 0 4px; }
-  .group h2 .dim { color:var(--md-on-surface-dis); font-weight:400; font-size:13px; margin-left:8px; letter-spacing:.25px; }
-  .group h2 .pcounts { font-weight:400; font-size:13px; color:var(--md-on-surface-med); margin-left:8px; }
-  .group h2 .pcounts .up { color:var(--md-primary); }
+    background:var(--md-surface-01dp); border:1px solid var(--clp-border); border-radius:var(--md-shape-m); box-shadow:var(--md-elev-1); }
+  .group { padding:4px 20px 14px; margin-bottom:24px; }
+  .group h2 { font-size:18px; font-weight:600; line-height:26px; color:var(--md-on-surface); margin:18px 0 6px; }
+  .group h2 .dim { color:var(--md-on-surface-dis); font-weight:400; font-size:14px; margin-left:8px; }
+  .group h2 .pcounts { font-weight:400; font-size:14px; color:var(--md-on-surface-med); margin-left:8px; }
+  .group h2 .pcounts .up { color:var(--md-ok-text); }
   .group h2 .pcounts .down { color:var(--md-error-bright); }
-  .upd-card { padding:16px; }
-  .upd-card h3 { margin:0 0 12px; color:var(--md-on-surface); }
-  .upd-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-  .auto-card { padding:16px; margin-bottom:16px; border-left:4px solid var(--md-primary); }
+  .upd-card { padding:22px 24px; }
+  .upd-card h3 { margin:0 0 16px; color:var(--md-on-surface); }
+  .upd-grid { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+  .auto-card { padding:22px 24px; margin-bottom:24px; border-left:4px solid var(--clp-btn); }
   .auto-card.disabled { border-left-color:var(--md-on-surface-dis); }
   .auto-row { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:16px; }
   .auto-row:last-child { margin-bottom:0; }
-  .auto-row label { font-size:14px; font-weight:400; letter-spacing:.25px; color:var(--md-on-surface); }
-  .auto-row .hint { font-size:12px; letter-spacing:.4px; color:var(--md-on-surface-med); font-weight:400; }
+  .auto-row label { font-size:14px; font-weight:400; color:var(--md-on-surface); }
+  .auto-row .hint { font-size:13px; color:var(--md-on-surface-med); font-weight:400; }
   .auto-row input[type=number] { width:72px; text-align:center; font-variant-numeric:tabular-nums; }
   .auto-row input[type=text] { flex:1 1 320px; min-width:200px; font-family:var(--md-font-mono); font-size:13px; }
   .auto-row[style*="column"] input[type=text] { flex:0 0 auto; width:100%; }
   .auto-stat { display:inline-flex; align-items:center; gap:6px; padding:4px 12px;
-               background:var(--md-surface-04dp); border-radius:var(--md-shape-pill);
+               background:var(--md-surface-04dp); border:1px solid var(--md-divider); border-radius:var(--md-shape-s);
                font-size:13px; color:var(--md-on-surface-med); }
-  .auto-stat .v { color:var(--md-on-surface); font-weight:500; }
-  .auto-projlist { max-height:180px; overflow-y:auto; background:var(--md-surface-04dp);
+  .auto-stat .v { color:var(--md-on-surface); font-weight:600; }
+  .auto-projlist { max-height:180px; overflow-y:auto; background:var(--md-surface-04dp); border:1px solid var(--md-divider);
                    border-radius:var(--md-shape-s); padding:8px 12px; font-size:14px; }
   .auto-projlist label { display:flex; align-items:center; gap:12px; padding:4px 0; cursor:pointer; }
-  .warnbox { background:var(--md-warn-container); color:var(--md-warning); border-radius:var(--md-shape-s);
-             padding:12px 16px; font-size:13px; line-height:20px; margin-top:16px; }
+  .warnbox { background:var(--md-warn-container); color:var(--md-warning); border:1px solid currentColor;
+             border-radius:var(--md-shape-s); padding:12px 16px; font-size:13px; line-height:20px; margin-top:16px; }
 
   /* =========================== DATA TABLES =============================
-     MD2 data table: 56dp header row in caption/overline type, 48dp data rows,
-     1dp dividers at 12 % and a 4 % hover overlay on interactive rows. */
+     CloudPanel .table: #fbfcfc head row in bold uppercase #9bacb6, roomy cells,
+     #eaeaea row dividers, links turn blue + underline on hover. */
   .upd-table, .mod-table, .creds table, .site-table, .ev-table, .fm-table {
-    width:100%; border-collapse:collapse; font-size:14px; letter-spacing:.25px; }
+    width:100%; border-collapse:collapse; font-size:14px; }
   .upd-table th, .mod-table th, .creds th, .site-table th, .ev-table th, .fm-table th {
-    height:48px; text-align:left; vertical-align:middle; padding:0 16px 0 0;
-    color:var(--md-on-surface-med); font-size:12px; font-weight:500; line-height:16px; letter-spacing:.4px;
-    text-transform:none; border-bottom:1px solid var(--md-divider); white-space:nowrap; }
+    height:50px; text-align:left; vertical-align:middle; padding:0 16px;
+    background:var(--clp-th-bg); color:var(--clp-th); font-size:13px; font-weight:700; line-height:16px;
+    letter-spacing:.3px; text-transform:uppercase; border-bottom:1px solid var(--md-divider); white-space:nowrap; }
   .upd-table td, .mod-table td, .creds td, .site-table td, .ev-table td, .fm-table td {
-    height:48px; padding:8px 16px 8px 0; vertical-align:middle;
+    height:52px; padding:10px 16px; vertical-align:middle;
     border-bottom:1px solid var(--md-divider); color:var(--md-on-surface); }
   .upd-table tr:last-child td, .mod-table tr:last-child td, .creds tr:last-child td { border-bottom:none; }
   .mod-table th, .site-table th.sortable { cursor:pointer; user-select:none;
@@ -347,70 +426,69 @@
   .mod-table th.active, .site-table th.on { color:var(--md-primary); }
   .mod-table tr:hover td, .ev-row.ev-has-data:hover td, .site-table .site-row:hover td { background:var(--md-state-hover); }
   .mod-table tr.toolrow:hover td { background:transparent; }
-  .upd-table .btn { font-size:12px; }
-  .upd-table .btn.update { background:var(--md-primary); color:var(--md-on-primary); border-color:transparent; box-shadow:var(--md-elev-2); }
-  .upd-table .btn.update:hover { background:var(--md-primary-light); box-shadow:var(--md-elev-4); }
-  .upd-table .btn.running { background:var(--md-warning); color:var(--md-on-warning); border-color:transparent; }
+  .upd-table .btn { font-size:13px; }
+  .upd-table .btn.update { background:var(--clp-btn); color:#ffffff; border-color:var(--clp-btn); }
+  .upd-table .btn.update:hover { background:var(--clp-btn-hover); }
+  .upd-table .btn.running { background:var(--md-warning); color:#ffffff; border-color:transparent; }
   .creds code { background:var(--md-surface-04dp); padding:2px 8px; border-radius:var(--md-shape-s);
                 color:var(--md-on-surface); font-family:var(--md-font-mono); font-size:13px; word-break:break-all; }
   .creds { margin-top:8px; }
-  .creds summary { cursor:pointer; color:var(--md-on-surface-med); font-size:14px; font-weight:500;
-                   letter-spacing:.1px; padding:12px 0; }
-  .creds summary:hover { color:var(--md-on-surface); }
+  .creds summary { cursor:pointer; color:var(--md-primary); font-size:14px; font-weight:500; padding:12px 0; }
+  .creds summary:hover { text-decoration:underline; }
   .creds .pwwrap { display:flex; align-items:center; gap:8px; }
   .creds .reveal { cursor:pointer; color:var(--md-on-surface-med); font-size:16px; user-select:none; flex:0 0 auto; }
   .creds .reveal:hover { color:var(--md-primary); }
   .creds .src { color:var(--md-on-surface-dis); font-size:12px; }
 
   /* ================== STATUS: chips, badges, pills =====================
-     Tonal containers, MD2 caption type, fully rounded. */
+     Tinted labels in the CloudPanel style: small, 4px corners, semibold. */
   .pill { display:inline-block; min-width:52px; text-align:center; padding:2px 10px; border-radius:var(--md-shape-pill);
-          font-size:12px; font-weight:500; line-height:18px; letter-spacing:.4px; }
-  .pill.up   { background:var(--md-primary); color:var(--md-on-primary); }
-  .pill.down { background:var(--md-error); color:var(--md-on-error); }
+          font-size:12px; font-weight:600; line-height:18px; }
+  .pill.up   { background:var(--md-ok); color:#ffffff; }
+  .pill.down { background:var(--md-error); color:#ffffff; }
   .badge, .upd-badge, .sev, .ev-level, .site-card .badge {
     display:inline-block; padding:2px 10px; border-radius:var(--md-shape-pill);
-    font-size:12px; font-weight:500; line-height:18px; letter-spacing:.4px; white-space:nowrap; }
-  .badge.online, .upd-badge.ok, .sev.patch, .ev-level.info   { background:var(--md-ok-container); color:var(--md-primary); }
+    font-size:12px; font-weight:600; line-height:18px; white-space:nowrap; }
+  .badge.online, .upd-badge.ok, .sev.patch, .ev-level.info   { background:var(--md-ok-container); color:var(--md-ok-text); }
   .badge.degraded, .upd-badge.new, .sev.minor, .ev-level.warn { background:var(--md-warn-container); color:var(--md-warning); }
   .badge.down, .upd-badge.err, .sev.major, .ev-level.error   { background:var(--md-error-container); color:var(--md-error-bright); }
   .badge.type, .badge.unknown, .upd-badge.na, .sev.none      { background:var(--md-neutral-container); color:var(--md-on-surface-med); }
-  .sev, .ev-level { text-transform:uppercase; letter-spacing:.8px; font-size:11px; }
+  .sev, .ev-level { text-transform:uppercase; letter-spacing:.5px; font-size:11px; }
   .statuses { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
   .st { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 12px;
-        border-radius:var(--md-shape-pill); font-size:13px; font-weight:500; letter-spacing:.25px;
+        border-radius:var(--md-shape-s); font-size:13px; font-weight:600;
         background:var(--md-surface-08dp); border:1px solid transparent; color:var(--md-on-surface); }
   .st .sub { font-weight:400; color:var(--md-on-surface-med); margin:0; font-size:13px; }
-  .st.ok   { background:var(--md-ok-container);    color:var(--md-primary); }
+  .st.ok   { background:var(--md-ok-container);    color:var(--md-ok-text); }
   .st.warn { background:var(--md-warn-container);  color:var(--md-warning); }
   .st.bad  { background:var(--md-error-container); color:var(--md-error-bright); }
   .st.info { background:var(--md-surface-08dp);    color:var(--md-on-surface-med); }
   .st.ok .sub, .st.warn .sub, .st.bad .sub { color:inherit; opacity:.75; }
   .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
-  .dot.online { background:var(--md-primary); } .dot.degraded { background:var(--md-warning); } .dot.down { background:var(--md-error-bright); }
+  .dot.online { background:var(--md-ok); } .dot.degraded { background:var(--md-warning); } .dot.down { background:var(--md-error-bright); }
 
   /* ============================= BANNER ================================
-     MD2 banner: surface at elevation 0 with a bottom divider, text + emphasis. */
+     CloudPanel alert: tinted box with a matching border. */
   .banner { display:flex; align-items:center; gap:16px; border-radius:var(--md-shape-m);
             padding:16px 20px; margin-bottom:24px; font-size:14px; font-weight:400; line-height:20px;
-            letter-spacing:.25px; box-shadow:var(--md-elev-1); }
-  .banner.ok  { background:var(--md-ok-container);    color:var(--md-primary); }
+            border:1px solid currentColor; }
+  .banner.ok  { background:var(--md-ok-container);    color:var(--md-ok-text); }
   .banner.bad { background:var(--md-error-container); color:var(--md-error-bright); }
   .banner .ico { font-size:22px; }
   .err { color:var(--md-error-bright); font-size:14px; padding:12px 0; }
 
   /* ============================ SNACKBAR ===============================
-     MD2 snackbar: elevation 6, 4dp corners, bottom-leading, body2. */
+     Toasts: white card with a coloured leading edge, bottom-left. */
   #toast-host { position:fixed; bottom:24px; left:24px; display:flex; flex-direction:column; gap:8px;
                 z-index:9999; max-width:min(480px, calc(100vw - 48px)); pointer-events:none; }
   .toast { display:flex; align-items:flex-start; gap:12px; min-height:48px;
-           background:var(--md-surface-06dp); color:var(--md-on-surface);
+           background:var(--md-surface-24dp); color:var(--md-on-surface); border:1px solid var(--clp-border);
            border-left:4px solid var(--md-on-surface-dis); border-radius:var(--md-shape-s);
            padding:12px 16px; font-size:14px; line-height:20px; letter-spacing:.25px;
            box-shadow:var(--md-elev-6); pointer-events:auto;
            animation:toast-in var(--md-dur-medium) var(--md-ease-decelerate); }
   .toast.fade    { animation:toast-out var(--md-dur-short) var(--md-ease-accelerate) forwards; }
-  .toast.success { border-left-color:var(--md-primary); }
+  .toast.success { border-left-color:var(--md-ok); }
   .toast.error   { border-left-color:var(--md-error); }
   .toast.warn    { border-left-color:var(--md-warning); }
   .toast .ico  { flex:0 0 auto; font-size:16px; line-height:20px; }
@@ -426,71 +504,70 @@
   @keyframes toast-out { to { opacity:0; transform:translateY(8px) scale(.98); } }
 
   /* ============================= DIALOG ================================
-     MD2 dialog: elevation 24, 4dp corners, 24dp padding, scrim at 32 %. */
-  .ssh-modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.32); z-index:900;
+     Modal: white card over a 40 % scrim, CloudPanel card-header type. */
+  .ssh-modal-bg { position:fixed; inset:0; background:rgba(15,20,25,.45); z-index:900;
                   display:flex; align-items:flex-start; justify-content:center; padding:64px 16px 24px;
                   overflow-y:auto; animation:scrim-in var(--md-dur-short) var(--md-ease-standard); }
   @keyframes scrim-in { from { opacity:0; } to { opacity:1; } }
-  .ssh-modal { background:var(--md-surface-24dp); border-radius:var(--md-shape-m); padding:24px;
+  .ssh-modal { background:var(--md-surface-24dp); border:1px solid var(--clp-border); border-radius:var(--md-shape-m); padding:26px;
                width:100%; max-width:560px; box-shadow:var(--md-elev-24);
                animation:dialog-in var(--md-dur-medium) var(--md-ease-decelerate); }
-  @keyframes dialog-in { from { opacity:0; transform:scale(.88); } to { opacity:1; transform:none; } }
-  .ssh-modal h3 { margin:0 0 16px; font-size:20px; font-weight:500; line-height:28px; letter-spacing:.15px; }
+  @keyframes dialog-in { from { opacity:0; transform:translateY(-12px); } to { opacity:1; transform:none; } }
+  .ssh-modal h3 { margin:-26px -26px 20px; padding:20px 26px; font-size:18px; font-weight:600; line-height:26px; border-bottom:1px solid var(--md-divider); }
   .ssh-modal-bg.wide .ssh-modal { max-width:1100px; }
   .ssh-modal.wide { width:min(960px, 96vw); max-width:none; }
   .ssh-modal .row2 { display:grid; grid-template-columns:1fr 1fr; gap:0 16px; }
   .ssh-modal .row3 { display:grid; grid-template-columns:2fr 1fr 1fr; gap:0 16px; }
   .ssh-modal .upd-field { min-width:0; }
   .ssh-modal .upd-field input, .ssh-modal .upd-field select, .ssh-modal .upd-field textarea { width:100%; max-width:100%; min-width:0; }
-  .ssh-modal .box { background:var(--md-surface-08dp); border:1px solid transparent;
+  .ssh-modal .box { background:var(--md-surface-04dp); border:1px solid var(--md-divider);
                     border-radius:var(--md-shape-s); padding:12px 16px;
                     margin-bottom:16px; font-size:13px; color:var(--md-on-surface-med); line-height:20px;
                     overflow-wrap:anywhere; }
   .ssh-modal .box b { color:var(--md-on-surface); }
-  /* dialog actions sit bottom-trailing as text buttons */
+  /* dialog actions sit bottom-right */
   .ssh-modal .foot { display:flex; gap:8px; justify-content:flex-end; align-items:center; margin-top:16px; flex-wrap:wrap; }
   .ssh-modal .foot .left { margin-right:auto; display:flex; gap:8px; }
-  .ssh-modal .btn { min-height:36px; padding:0 16px; font-size:14px; letter-spacing:1.25px; }
+  .ssh-modal .btn { min-height:36px; padding:0 18px; font-size:14px; }
   .ssh-modal .test-out { margin-top:12px; background:var(--md-background); border-radius:var(--md-shape-s);
                          padding:12px; font-size:12px; font-family:var(--md-font-mono); white-space:pre-wrap;
                          color:var(--md-on-surface-med); max-height:160px; overflow:auto; }
-  .ssh-modal .test-out.ok  { border-left:4px solid var(--md-primary); }
+  .ssh-modal .test-out.ok  { border-left:4px solid var(--md-ok); }
   .ssh-modal .test-out.bad { border-left:4px solid var(--md-error); }
 
   /* ==================== MONITOR / POSTGRES LIST ROWS ===================
-     MD2 two-line list item (64dp) with a leading status pill and trailing
-     numeric columns. Flex bases are unchanged so the header keeps tracking
+     Two-line rows with a leading status label and trailing numeric columns. Flex bases are unchanged so the header keeps tracking
      the rows at every breakpoint. */
-  .row { display:flex; align-items:center; gap:16px; padding:10px 0; border-top:1px solid var(--md-divider);
+  .row { display:flex; align-items:center; gap:16px; padding:12px 0; border-top:1px solid var(--md-divider);
          transition:background-color var(--md-dur-short) var(--md-ease-standard); }
   .row:first-of-type { border-top:none; }
   .stat { flex:0 0 64px; }
   .meta { flex:1 1 180px; min-width:140px; }
-  .name { font-size:14px; font-weight:500; line-height:20px; letter-spacing:.1px; color:var(--md-on-surface);
+  .name { font-size:15px; font-weight:600; line-height:20px; color:var(--md-on-surface);
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .info { color:var(--md-on-surface-med); font-size:13px; line-height:18px; letter-spacing:.25px; margin-top:1px; }
   .col { flex:0 0 58px; text-align:right; font-size:14px; font-variant-numeric:tabular-nums; color:var(--md-on-surface-med); }
   .col.warm { color:var(--md-warning); } .col.hot { color:var(--md-error-bright); font-weight:500; }
   .pct { flex:0 0 60px; text-align:right; font-size:14px; font-weight:500; font-variant-numeric:tabular-nums; }
-  .pct.good { color:var(--md-primary); } .pct.mid { color:var(--md-warning); } .pct.poor { color:var(--md-error-bright); }
+  .pct.good { color:var(--md-ok-text); } .pct.mid { color:var(--md-warning); } .pct.poor { color:var(--md-error-bright); }
   .act { flex:0 0 92px; display:flex; gap:4px; justify-content:flex-end; }
-  /* table header row in MD2 overline type */
-  .hdr { display:flex; align-items:center; gap:16px; padding:12px 0 4px; color:var(--md-on-surface-dis);
-         font-size:10px; font-weight:400; text-transform:uppercase; letter-spacing:1.5px; line-height:16px; }
+  /* list header row in CloudPanel's table-head type */
+  .hdr { display:flex; align-items:center; gap:16px; padding:12px 0 6px; color:var(--clp-th);
+         font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; line-height:16px; }
   .hdr .beats-h { flex:0 1 497px; min-width:0; }
-  .hdr .col, .hdr .pct { font-weight:400; }
+  .hdr .col, .hdr .pct { font-weight:700; }
   /* heartbeat bars */
   .beats { display:flex; align-items:center; gap:3px; flex:0 1 497px; min-width:0; overflow:hidden; justify-content:flex-end; }
   .beat { width:7px; height:24px; border-radius:2px; background:var(--md-surface-12dp); position:relative;
           transition:transform var(--md-dur-short) var(--md-ease-standard); }
-  .beat.up { background:var(--md-primary); }
+  .beat.up { background:var(--md-ok); }
   .beat.down { background:var(--md-error); }
   .beat.restart { background:var(--md-warning); }
   .beat:hover { transform:scaleY(1.2) scaleX(1.4); }
-  /* MD2 tooltip: 24dp tall, 10px caption, surface at 90 % */
+  /* CloudPanel tooltip: white, bold, small shadow */
   .beat:hover::after { content:attr(data-tip); position:absolute; bottom:32px; left:50%; transform:translateX(-50%);
-        background:var(--md-surface-24dp); color:var(--md-on-surface); font-size:10px; letter-spacing:.4px;
-        padding:4px 8px; border-radius:var(--md-shape-s); white-space:nowrap; z-index:10; box-shadow:var(--md-elev-4); }
+        background:var(--md-surface-24dp); color:var(--md-on-surface); font-size:12px; font-weight:600;
+        border:1px solid var(--clp-border); padding:6px 12px; border-radius:var(--md-shape-s); white-space:nowrap; z-index:10; box-shadow:var(--md-elev-4); }
 
   /* ============================= EVENTS ================================ */
   .ev-bar { padding:12px 16px; }
@@ -515,31 +592,31 @@
   .site-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:16px; }
   .site-card { padding:16px; }
   .site-card .top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:8px; }
-  .site-card .domain { font-size:16px; font-weight:500; line-height:24px; letter-spacing:.15px;
+  .site-card .domain { font-size:17px; font-weight:600; line-height:24px;
                        color:var(--md-on-surface); word-break:break-all; }
   .site-card .domain .hint { font-weight:400; font-size:12px; color:var(--md-on-surface-dis); margin-left:6px; }
   .site-card .meta { display:flex; flex-wrap:wrap; gap:4px 16px; font-size:13px; letter-spacing:.25px;
                      color:var(--md-on-surface-med); margin-bottom:12px; }
   .site-card .meta span { display:flex; align-items:center; gap:4px; }
-  .site-card .meta .val { color:var(--md-on-surface); font-weight:500; }
+  .site-card .meta .val { color:var(--md-on-surface); font-weight:600; }
   .site-card .procs { margin-top:8px; border-top:1px solid var(--md-divider); padding-top:8px; }
   .site-card .procs .prow { display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:4px 0; }
   .site-card .procs .prow .pname { color:var(--md-on-surface); font-weight:500; }
   .site-card .procs .prow .pstat { font-size:12px; }
-  .site-card .procs .prow .pstat.up   { color:var(--md-primary); }
+  .site-card .procs .prow .pstat.up   { color:var(--md-ok-text); }
   .site-card .procs .prow .pstat.down { color:var(--md-error-bright); }
   .site-card .procs .prow .pstat .dim { color:var(--md-on-surface-dis); }
-  /* MD2 cards raise to elevation 8 while being pressed/hovered */
+  /* clickable cards lift slightly and take a blue border on hover */
   .site-card.clickable { cursor:pointer; transition:box-shadow var(--md-dur-short) var(--md-ease-standard),
                                                     transform var(--md-dur-short) var(--md-ease-standard); }
-  .site-card.clickable:hover { box-shadow:var(--md-elev-8); transform:translateY(-1px); }
+  .site-card.clickable:hover { box-shadow:var(--md-elev-4); border-color:var(--md-primary); transform:translateY(-1px); }
   .site-why { font-size:12px; line-height:18px; color:var(--md-warning); background:var(--md-warn-container);
               border-radius:var(--md-shape-s); padding:8px 12px; margin-top:8px; }
   .site-ctl { display:inline-flex; gap:4px; align-items:center; }
   .site-ctl.on-card { margin-top:12px; border-top:1px solid var(--md-divider); padding-top:12px; display:flex; }
   .site-ctl .btn:disabled { opacity:.38; cursor:default; }
   .site-daemon { font-size:13px; color:var(--md-on-surface-med); padding:8px 0; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .site-daemon .up { color:var(--md-primary); } .site-daemon .down { color:var(--md-error-bright); }
+  .site-daemon .up { color:var(--md-ok-text); } .site-daemon .down { color:var(--md-error-bright); }
   .site-health { display:flex; flex-direction:column; gap:8px; align-items:flex-start; }
   .site-probe { margin:0; padding-left:20px; font-size:13px; color:var(--md-on-surface-med); line-height:1.8; }
   .site-probe b { color:var(--md-on-surface); }
@@ -548,39 +625,40 @@
   .site-viewsw { display:flex; gap:4px; } .site-viewsw .chip { height:32px; padding:0 12px; }
   .site-table td { white-space:nowrap; } .site-table .site-td-domain { white-space:normal; word-break:break-all; }
   .site-table .site-row { cursor:pointer; }
-  .site-table .up { color:var(--md-primary); font-weight:500; } .site-table .down { color:var(--md-error-bright); font-weight:500; }
+  .site-table .site-row:hover .site-td-domain { color:var(--md-primary); text-decoration:underline; }
+  .site-table .up { color:var(--md-ok-text); font-weight:600; } .site-table .down { color:var(--md-error-bright); font-weight:600; }
   .site-head { margin-bottom:16px; position:relative; }
   .site-head-actions { position:absolute; top:0; right:0; }
   .site-back { color:var(--md-on-surface-med); font-size:14px; text-decoration:none; display:inline-flex;
                align-items:center; gap:4px; margin-bottom:12px; }
   .site-back:hover { color:var(--md-primary); }
   .site-head-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px 24px; }
-  .site-head-grid .k { font-size:10px; color:var(--md-on-surface-dis); text-transform:uppercase;
-                       letter-spacing:1.5px; line-height:16px; margin-bottom:2px; }
+  .site-head-grid .k { font-size:12px; font-weight:700; color:var(--clp-th); text-transform:uppercase;
+                       letter-spacing:.3px; line-height:16px; margin-bottom:4px; }
   .site-head-grid .v { font-size:16px; font-weight:400; letter-spacing:.15px; word-break:break-all; }
   .site-head-grid .v a { color:var(--md-on-surface); text-decoration:none; }
   .site-head-grid .v a:hover { color:var(--md-primary); }
-  /* MD2 fixed tabs: 48dp, button type, 2dp primary indicator */
-  .site-tabs { display:flex; gap:0; border-bottom:1px solid var(--md-divider); margin-bottom:16px;
-               overflow-x:auto; overflow-y:hidden; }
-  .site-tab { display:inline-flex; align-items:center; height:48px; padding:0 16px; color:var(--md-on-surface-med);
-              font-size:14px; font-weight:500; letter-spacing:1.25px; text-transform:uppercase; text-decoration:none;
-              border-bottom:2px solid transparent; margin-bottom:-1px; white-space:nowrap; flex-shrink:0;
+  /* CloudPanel .tab-container: white bordered strip, 3px blue underline on the active tab */
+  .site-tabs { display:flex; gap:0; background:var(--md-surface-01dp); border:1px solid var(--clp-border);
+               border-radius:var(--md-shape-m); padding:0 12px; margin-bottom:24px; overflow-x:auto; overflow-y:hidden; }
+  .site-tab { display:inline-flex; align-items:center; height:60px; padding:0 15px; color:var(--clp-tab);
+              font-size:15px; font-weight:500; letter-spacing:0; text-transform:none; text-decoration:none;
+              border-bottom:3px solid transparent; border-top:3px solid transparent; white-space:nowrap; flex-shrink:0;
               transition:color var(--md-dur-short) var(--md-ease-standard),
                          background-color var(--md-dur-short) var(--md-ease-standard); }
-  .site-tab:hover { color:var(--md-on-surface); background:var(--md-state-hover); }
-  .site-tab.active { color:var(--md-primary); border-bottom-color:var(--md-primary); }
-  .site-body .upd-card { margin-bottom:16px; }
+  .site-tab:hover { color:var(--md-primary); }
+  .site-tab.active { color:var(--clp-title); border-bottom-color:var(--md-primary); }
+  .site-body .upd-card { margin-bottom:24px; }
   .site-card-hd { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
   .site-card-hd h3 { margin:0; }
   .site-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:8px; }
-  .site-actions .btn { min-height:36px; padding:0 16px; font-size:14px; letter-spacing:1.25px; }
+  .site-actions .btn { min-height:36px; padding:0 18px; font-size:14px; }
   .site-code-pre { margin:12px 0 0; background:var(--md-background); border-radius:var(--md-shape-s); padding:12px 16px;
                    font-family:var(--md-font-mono); font-size:12px; line-height:18px; max-height:420px; overflow:auto;
                    white-space:pre-wrap; word-break:break-word; color:var(--md-on-surface-med); }
   .site-code-pre.log { max-height:60vh; min-height:200px; white-space:pre; word-break:normal; }
   .db-srv  { font-size:13px; color:var(--md-on-surface-med); padding:6px 0; }
-  .db-srv .up { color:var(--md-primary); } .db-srv .down { color:var(--md-error-bright); }
+  .db-srv .up { color:var(--md-ok-text); } .db-srv .down { color:var(--md-error-bright); }
   .db-user { display:flex; align-items:center; gap:8px; padding:2px 0; font-size:12px; flex-wrap:wrap; }
   .db-root { padding:12px 0; border-bottom:1px solid var(--md-divider); font-size:13px; }
   .db-root:last-child { border-bottom:none; }
@@ -593,7 +671,7 @@
   .site-cf-alt { margin-top:16px; border-top:1px solid var(--md-divider); padding-top:16px; }
   .site-cf-howto { background:var(--md-surface-04dp); border-radius:var(--md-shape-s); padding:12px 16px;
                    margin-bottom:16px; font-size:13px; color:var(--md-on-surface-med); line-height:20px; }
-  .site-cf-howto summary { cursor:pointer; color:var(--md-on-surface); font-weight:500; font-size:14px; letter-spacing:.1px; }
+  .site-cf-howto summary { cursor:pointer; color:var(--md-on-surface); font-weight:600; font-size:14px; }
   .site-cf-howto[open] summary { margin-bottom:8px; }
   .site-cf-howto ol { margin:8px 0; padding-left:20px; } .site-cf-howto li { margin-bottom:8px; }
   .site-cf-howto p { margin:8px 0; } .site-cf-howto b { color:var(--md-on-surface); }
@@ -610,22 +688,22 @@
 
   /* ============================= MODULES =============================== */
   .mod-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:16px; margin-bottom:24px; }
-  .mod-stat { padding:16px; }
-  .mod-stat .v { font-size:34px; font-weight:400; line-height:40px; letter-spacing:.25px; font-variant-numeric:tabular-nums; }
-  .mod-stat .l { color:var(--md-on-surface-med); font-size:10px; text-transform:uppercase; letter-spacing:1.5px;
-                 line-height:16px; margin-top:4px; font-weight:400; }
+  .mod-stat { padding:18px 20px; }
+  .mod-stat .v { font-size:32px; font-weight:600; line-height:40px; font-variant-numeric:tabular-nums; }
+  .mod-stat .l { color:var(--clp-th); font-size:12px; text-transform:uppercase; letter-spacing:.3px;
+                 line-height:16px; margin-top:4px; font-weight:700; }
   .mod-stat.major .v, .mod-stat.err .v { color:var(--md-error-bright); }
   .mod-stat.minor .v { color:var(--md-warning); }
-  .mod-stat.patch .v, .mod-stat.ok .v { color:var(--md-primary); }
-  .mod-card { padding:16px; margin-bottom:16px; }
+  .mod-stat.patch .v, .mod-stat.ok .v { color:var(--md-ok-text); }
+  .mod-card { padding:22px 24px; margin-bottom:24px; }
   .mod-card h3 { margin:0 0 12px; }
   .mod-card .head { display:flex; align-items:center; justify-content:space-between; gap:12px;
                     margin-bottom:8px; flex-wrap:wrap; }
-  .mod-pkg { font-weight:500; color:var(--md-on-surface); font-family:var(--md-font-mono); font-size:13px; }
+  .mod-pkg { font-weight:600; color:var(--md-on-surface); font-family:var(--md-font-mono); font-size:13px; }
   .mod-pkg.dev { color:var(--md-on-surface-med); }
   .mod-ver { font-variant-numeric:tabular-nums; font-family:var(--md-font-mono); font-size:13px; }
   .mod-ver .arrow { color:var(--md-on-surface-dis); margin:0 4px; }
-  .mod-ver .new { color:var(--md-primary); }
+  .mod-ver .new { color:var(--md-ok-text); }
   .mod-path { color:var(--md-on-surface-dis); font-size:12px; font-family:var(--md-font-mono); max-width:340px;
               display:inline-block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle; }
   .mod-cmd { background:var(--md-surface-04dp); color:var(--md-on-surface-med); padding:4px 10px;
@@ -647,7 +725,7 @@
   .upd-log-detail, .au-log-entry .child { padding:12px; background:var(--md-surface-04dp);
                     border-radius:var(--md-shape-s); margin-top:8px; font-size:13px; }
   .upd-log-detail.fail, .au-log-entry .child.fail { border-left:4px solid var(--md-error); }
-  .upd-log-detail.ok,   .au-log-entry .child.ok   { border-left:4px solid var(--md-primary); }
+  .upd-log-detail.ok,   .au-log-entry .child.ok   { border-left:4px solid var(--md-ok); }
   .upd-log-detail .top, .au-log-entry .top { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
   .upd-log-detail .top .when, .au-log-entry .top .when { color:var(--md-on-surface-dis); font-size:12px;
                     font-family:var(--md-font-mono); }
@@ -660,56 +738,56 @@
                     font-size:12px; line-height:18px; white-space:pre-wrap; word-break:break-word; }
   .au-log-entry .summary-pills { display:flex; gap:8px; margin-left:auto; flex-wrap:wrap; }
   .au-log-entry details summary { cursor:pointer; color:var(--md-primary); font-size:13px; font-weight:500;
-                    letter-spacing:1.25px; text-transform:uppercase; padding:8px 0; user-select:none; }
+                    padding:8px 0; user-select:none; }
 
   /* ============================== SSH TAB ==============================
      Left: a navigation list inside a card. Right: the terminal surface,
-     which stays near-black (elevation 0) because xterm renders on it. */
+     which stays dark in both themes because xterm renders on it. */
   .ssh-layout { display:flex; gap:16px; align-items:stretch;
                 height:calc(100vh - 210px); height:calc(100dvh - 210px); min-height:460px; }
-  .ssh-side { flex:0 0 256px; background:var(--md-surface-01dp); border-radius:var(--md-shape-m);
+  .ssh-side { flex:0 0 256px; background:var(--md-surface-01dp); border:1px solid var(--clp-border); border-radius:var(--md-shape-m);
               box-shadow:var(--md-elev-1); display:flex; flex-direction:column; min-width:0; overflow:hidden; }
   .ssh-side-hd { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:56px;
-                 padding:8px 8px 8px 16px; font-size:16px; font-weight:500; letter-spacing:.15px; }
+                 padding:8px 8px 8px 16px; font-size:16px; font-weight:600; border-bottom:1px solid var(--md-divider); margin-bottom:10px; }
   .ssh-side input.q { margin:0 12px 8px; }
   .ssh-hostlist { flex:1; overflow-y:auto; padding:0 8px 8px; }
-  /* MD2 list subheader */
-  .ssh-grp { display:flex; align-items:center; height:32px; padding:0 8px; font-size:10px; text-transform:uppercase;
-             letter-spacing:1.5px; color:var(--md-on-surface-dis); font-weight:400; }
-  /* MD2 single-line list item, 40dp dense */
+  /* list subheader */
+  .ssh-grp { display:flex; align-items:center; height:32px; padding:0 8px; font-size:12px; text-transform:uppercase;
+             letter-spacing:.3px; color:var(--clp-th); font-weight:700; }
+  /* single-line host row, 40px */
   .ssh-host { display:flex; align-items:center; gap:12px; min-height:40px; padding:4px 8px;
               border-radius:var(--md-shape-s); cursor:pointer; font-size:14px; letter-spacing:.25px; user-select:none;
               transition:background-color var(--md-dur-short) var(--md-ease-standard); }
   .ssh-host:hover { background:var(--md-state-hover); }
   .ssh-host .dot { width:8px; height:8px; border-radius:50%; background:var(--md-on-surface-dis); flex-shrink:0; }
-  .ssh-host .dot.on { background:var(--md-primary); box-shadow:0 0 0 4px rgba(92,221,139,.16); }
+  .ssh-host .dot.on { background:var(--md-ok); box-shadow:0 0 0 4px rgba(115,191,76,.18); }
   .ssh-host .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
   .ssh-host .nm small { display:block; font-weight:400; color:var(--md-on-surface-med); font-size:12px;
                         overflow:hidden; text-overflow:ellipsis; }
   .ssh-host .mon { font-size:12px; flex-shrink:0; opacity:.9; }
   .ssh-host .acts { display:none; gap:2px; flex-shrink:0; }
   .ssh-host:hover .acts { display:flex; }
-  /* MD2 icon button: 32dp target, circular state layer */
+  /* icon buttons: 32px circular hover */
   .ssh-host .acts button { background:transparent; border:none; color:var(--md-on-surface-med); border-radius:50%;
                            width:32px; height:32px; font-size:14px; cursor:pointer; padding:0;
                            transition:background-color var(--md-dur-short) var(--md-ease-standard); }
   .ssh-host .acts button:hover { background:var(--md-state-focus); color:var(--md-on-surface); }
   .ssh-side-ft { padding:12px 16px; font-size:12px; color:var(--md-on-surface-dis);
                  border-top:1px solid var(--md-divider); line-height:16px; letter-spacing:.4px; }
-  .ssh-main { flex:1; min-width:0; display:flex; flex-direction:column; background:var(--md-background);
-              border-radius:var(--md-shape-m); box-shadow:var(--md-elev-1); overflow:hidden; }
-  /* terminal tab strip = MD2 scrollable tabs on a surface */
-  .ssh-tabbar { display:flex; align-items:stretch; background:var(--md-surface-02dp);
+  .ssh-main { flex:1; min-width:0; display:flex; flex-direction:column; background:var(--term-bg);
+              border:1px solid var(--clp-border); border-radius:var(--md-shape-m); box-shadow:var(--md-elev-1); overflow:hidden; }
+  /* terminal tab strip: CloudPanel tabs on a white strip above the dark terminals */
+  .ssh-tabbar { display:flex; align-items:stretch; background:var(--md-surface-01dp);
                 border-bottom:1px solid var(--md-divider); overflow-x:auto; overflow-y:hidden; flex-shrink:0; }
   .ssh-tab { display:flex; align-items:center; gap:8px; padding:0 8px 0 16px; height:40px; font-size:13px;
              font-weight:500; letter-spacing:.25px; color:var(--md-on-surface-med); cursor:pointer;
              white-space:nowrap; max-width:220px; user-select:none;
              transition:background-color var(--md-dur-short) var(--md-ease-standard), color var(--md-dur-short) var(--md-ease-standard); }
   .ssh-tab:hover { background:var(--md-state-hover); color:var(--md-on-surface); }
-  .ssh-tab.active { background:var(--md-background); color:var(--md-on-surface); box-shadow:inset 0 -2px 0 var(--md-primary); }
+  .ssh-tab.active { background:var(--md-surface-01dp); color:var(--clp-title); box-shadow:inset 0 -3px 0 var(--md-primary); }
   .ssh-tab .st { width:8px; height:8px; min-height:0; padding:0; border-radius:50%; background:var(--md-warning);
                  flex-shrink:0; border:none; }
-  .ssh-tab .st.open { background:var(--md-primary); }
+  .ssh-tab .st.open { background:var(--md-ok); }
   .ssh-tab .st.dead { background:var(--md-error); }
   .ssh-tab .st.reconnecting { background:var(--md-warning); animation:ssh-blink 1s var(--md-ease-standard) infinite; }
   @keyframes ssh-blink { 50% { opacity:.25; } }
@@ -722,13 +800,19 @@
   .ssh-tabbar .sp { flex:1; }
   .ssh-tabbar .tools { display:flex; align-items:center; gap:4px; padding:0 8px; }
   .ssh-tabbar .tools button { background:transparent; border:none; color:var(--md-on-surface-med);
-             border-radius:var(--md-shape-s); padding:4px 10px; font-family:inherit; font-size:12px; font-weight:500;
-             letter-spacing:.8px; text-transform:uppercase; cursor:pointer; white-space:nowrap;
+             border-radius:var(--md-shape-s); padding:4px 10px; font-family:inherit; font-size:13px; font-weight:500;
+             cursor:pointer; white-space:nowrap;
              transition:background-color var(--md-dur-short) var(--md-ease-standard); }
   .ssh-tabbar .tools button:hover { color:var(--md-on-surface); background:var(--md-state-hover); }
   .ssh-tabbar .tools .lay { padding:4px 8px; letter-spacing:-1px; }
   .ssh-tabbar .tools .lay.on { color:var(--md-primary); background:var(--md-state-selected); }
-  .ssh-terms { flex:1; position:relative; min-height:0; overflow:hidden; }
+  .ssh-terms { flex:1; position:relative; min-height:0; overflow:hidden; background:var(--term-bg);
+               /* everything drawn on the terminal surface reads the dark-theme tokens */
+               --md-on-surface:rgba(255,255,255,.87); --md-on-surface-med:rgba(255,255,255,.60); --md-on-surface-dis:rgba(255,255,255,.38);
+               --md-divider:rgba(255,255,255,.12); --md-outline:rgba(255,255,255,.24); --md-state-hover:rgba(255,255,255,.06);
+               --md-state-focus:rgba(255,255,255,.12); --md-background:var(--term-bg); --md-surface:#151821;
+               --md-surface-06dp:#292d3c; --md-surface-08dp:#2c3041; --md-error-container:#4a1420; --md-error-bright:#ff8a95;
+               --md-primary:#5aaef2; color:var(--md-on-surface); }
   .ssh-term { position:absolute; inset:0; padding:6px 0 4px 8px; display:none; flex-direction:column; min-width:0; min-height:0; }
   .ssh-term.active { display:flex; }
   .ssh-term .pane-hd { display:none; align-items:center; gap:8px; font-size:12px; color:var(--md-on-surface-med);
@@ -768,15 +852,14 @@
                  color:var(--md-error-bright); font-size:14px; padding:12px 16px; display:flex; align-items:center;
                  gap:16px; z-index:2; box-shadow:var(--md-elev-6); }
   .ssh-deadbar button { background:transparent; border:1px solid var(--md-outline); color:var(--md-on-surface);
-                 border-radius:var(--md-shape-s); padding:6px 12px; font-family:inherit; font-size:12px;
-                 font-weight:500; letter-spacing:.8px; text-transform:uppercase; cursor:pointer; }
-  .ssh-deadbar button.re { background:var(--md-primary); color:var(--md-on-primary); border-color:transparent;
-                 box-shadow:var(--md-elev-2); }
+                 border-radius:var(--md-shape-s); padding:6px 12px; font-family:inherit; font-size:13px;
+                 font-weight:500; cursor:pointer; }
+  .ssh-deadbar button.re { background:var(--clp-btn); color:#ffffff; border-color:transparent; }
   .ssh-installs { display:grid; grid-template-columns:1fr; gap:16px; max-height:min(70vh, 640px);
                   overflow:auto; padding-right:2px; }
   .ssh-inst { padding:16px; }
   .ssh-inst .top { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:4px; }
-  .ssh-inst .top b { font-size:16px; font-weight:500; letter-spacing:.15px; }
+  .ssh-inst .top b { font-size:16px; font-weight:600; }
   .ssh-inst .meta { font-size:12px; color:var(--md-on-surface-dis); margin-bottom:12px; letter-spacing:.4px; }
   .ssh-inst .acts { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
   .ssh-inst pre .err { color:var(--md-error-bright); }
@@ -796,26 +879,26 @@
 
   /* ============================ RESPONSIVE ============================= */
   @media (max-width:860px){ .beats, .hdr .beats-h { display:none; } }
-  /* the drawer becomes a top tab bar (MD2 scrollable tabs) on narrow screens */
+  /* narrow screens: 56px header, the sidebar becomes a scrollable tab strip under it */
   @media (max-width:900px){
+    .topbar { height:56px; }
+    .topbar .logo { flex:0 0 auto; padding:0 14px; font-size:16px; border-right:none; }
+    .topbar .logo svg { width:28px; height:28px; }
+    .topnav { display:none; }
+    .topright { margin-left:auto; }
+    .topright > * { padding:0 12px; }
+    .userbar .who { display:none; }
     .wrap { flex-direction:column; }
-    .sidenav { position:sticky; top:0; z-index:30; flex:none; width:auto; height:auto; flex-direction:row;
-               align-items:center; gap:8px; border-right:none; border-bottom:1px solid var(--md-divider);
-               padding:0 8px; overflow:visible; box-shadow:var(--md-elev-4); }
-    .brand { height:56px; }
-    .brand .brand-name { display:none; }
+    .sidenav { position:sticky; top:56px; z-index:30; flex:none; width:auto; height:auto; flex-direction:row;
+               align-items:stretch; border-right:none; border-bottom:1px solid var(--clp-border); padding:0; overflow:visible; }
+    .sidenav .grp, .sidenav .side-ft { display:none; }
     .tabs { flex-direction:row; flex:1; min-width:0; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
     .tabs::-webkit-scrollbar { display:none; }
-    .tab { height:56px; padding:0 16px; margin:0; border-radius:0; border-bottom:2px solid transparent;
-           font-size:13px; letter-spacing:.8px; }
-    .tab.active { background:transparent; border-bottom-color:var(--md-primary); }
-    .sidenav .userbar { margin-top:0; flex-direction:row; align-items:center; border-top:none;
-                        padding:0; flex-shrink:0; }
-    .sidenav .userbar .who { padding:0; }
-    .sidenav .userbar button { width:auto; }
-    .sidenav .userbar .who small { display:none; }
+    .tab { padding:12px 14px 9px; border-left:none; border-bottom:3px solid transparent; font-size:14px; gap:8px; }
+    .tab:hover, .tab.active { border-bottom-color:var(--md-primary); }
     .content { padding:0 16px 32px; }
-    .hdr-row { margin:0 -16px; padding:8px 16px; top:56px; }
+    .hdr-row { margin-top:18px; }
+    h1 { font-size:24px; line-height:30px; }
   }
   @media (max-width:820px){
     .upd-grid { grid-template-columns:1fr; }
@@ -845,12 +928,14 @@
     .content { padding:0 8px 40px; }
     .statuses { justify-content:flex-start; }
     #sitesview .site-table { display:block; overflow-x:auto; }
-    .hdr-row { flex-direction:column; align-items:flex-start; gap:4px; padding:12px 8px; margin:0 -8px; }
-    .userbar { margin-top:0; flex-wrap:wrap; }
+    .hdr-row { flex-direction:column; align-items:flex-start; gap:8px; }
+    .userbar .upd-test-btn { padding:0 6px; }
+    .tab span { display:none; }
+    .tab.active span { display:inline; }
     .banner { padding:12px 16px; margin-bottom:16px; }
     .group, .upd-card, .mod-card, .auto-card, .site-card, .ssh-inst { padding-left:12px; padding-right:12px; }
     .group { margin-bottom:12px; }
-    .sidenav { padding:0 4px; }
+    
     .toolbar { gap:8px; margin-bottom:16px; }
     .toolbar input { flex:1 1 100%; }
     /* service / database rows: status + name on the first line, numbers with labels underneath */
@@ -862,7 +947,7 @@
     .info { display:block; white-space:normal; }
     .act { flex:0 0 auto; }
     .row > .col, .row > .pct { flex:0 0 auto; text-align:left; order:2; font-size:12px; padding:2px 10px;
-                               background:var(--md-surface-04dp); border-radius:var(--md-shape-pill); }
+                               background:var(--md-surface-04dp); border-radius:var(--md-shape-s); }
     .row > .col::before, .row > .pct::before { color:var(--md-on-surface-dis); font-weight:400; font-size:11px; margin-right:4px; }
     #pm2view .row > div:nth-child(4)::before { content:'CPU'; }
     #pm2view .row > div:nth-child(5)::before { content:'Mem'; }
@@ -898,7 +983,7 @@
     .beat:hover::after { display:none; }
   }
 
-  /* MD2 icon button variant of the flat text button (circular 36dp state layer) */
+  /* icon variant of the text button (circular 36px hover) */
   .upd-test-btn.icon { width:36px; min-width:36px; padding:0; border-radius:50%; font-size:16px; color:var(--md-on-surface-med); }
   .upd-test-btn.icon:hover { background:var(--md-state-hover); color:var(--md-on-surface); }
   .ssh-side-acts { display:flex; align-items:center; gap:2px; }
