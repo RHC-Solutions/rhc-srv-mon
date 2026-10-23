@@ -516,6 +516,7 @@ if (NO_JOBS) {
   // auto-update: tick every minute, fires if config matches the configured HH:MM (cleanup rides on it)
   setInterval(modules.autoUpdateTick, 60_000);
   // pm2 daemons on a node binary an upgrade replaced: restart them onto the new one (one user at a time)
+  setInterval(() => require('./lib/sites/hold').enforce().catch((e) => console.error('held-stopped check failed:', e.message)), 2 * 60_000);
   setInterval(() => require('./lib/sites/daemons').refreshStale().catch((e) => console.error('pm2 daemon refresh failed:', e.message)), 5 * 60_000);
   // backups: tick every minute for the daily scheduled run
   setInterval(backups.backupTick, 60_000);

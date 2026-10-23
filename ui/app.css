@@ -452,7 +452,7 @@
   .badge.online, .upd-badge.ok, .sev.patch, .ev-level.info   { background:var(--md-ok-container); color:var(--md-ok-text); }
   .badge.degraded, .upd-badge.new, .sev.minor, .ev-level.warn { background:var(--md-warn-container); color:var(--md-warning); }
   .badge.down, .upd-badge.err, .sev.major, .ev-level.error   { background:var(--md-error-container); color:var(--md-error-bright); }
-  .badge.type, .badge.unknown, .upd-badge.na, .sev.none      { background:var(--md-neutral-container); color:var(--md-on-surface-med); }
+  .badge.type, .badge.unknown, .badge.stopped, .upd-badge.na, .sev.none      { background:var(--md-neutral-container); color:var(--md-on-surface-med); }
   .sev, .ev-level { text-transform:uppercase; letter-spacing:.5px; font-size:11px; }
   .statuses { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
   .st { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 12px;
@@ -465,7 +465,7 @@
   .st.info { background:var(--md-surface-08dp);    color:var(--md-on-surface-med); }
   .st.ok .sub, .st.warn .sub, .st.bad .sub { color:inherit; opacity:.75; }
   .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
-  .dot.online { background:var(--md-ok); } .dot.degraded { background:var(--md-warning); } .dot.down { background:var(--md-error-bright); }
+  .dot.stopped { background:var(--md-on-surface-med); } .dot.online { background:var(--md-ok); } .dot.degraded { background:var(--md-warning); } .dot.down { background:var(--md-error-bright); }
 
   /* ============================= BANNER ================================
      CloudPanel alert: tinted box with a matching border. */

@@ -8,7 +8,7 @@ let siteQ = state.siteQ || '';
 let siteViewMode = state.siteViewMode || 'cards';      // cards | table
 let siteSort = state.siteSort || 'status';             // table sort column
 let siteSortDir = state.siteSortDir || 1;
-let siteStatusFilter = '';                              // toolbar pill filter: online | degraded | down
+let siteStatusFilter = '';                              // toolbar pill filter: online | degraded | down | stopped
 
 function siteParams(){ return new URLSearchParams(location.search); }
 function siteGo(domain, tab, opts){
@@ -53,19 +53,19 @@ function renderSitesList(){
   document.getElementById('host').textContent = '';
   document.getElementById('updated').textContent = 'Last checked: ' + (d.generated_at ? new Date(d.generated_at).toLocaleString() : 'never') + ' · auto-refresh 5 min';
   // no banner when everything is fine — problems show as a red banner, counts live in the toolbar pills
-  const down = d.sites.filter(s => s.status === 'down').length, degraded = d.sites.filter(s => s.status === 'degraded').length, total = d.sites.length, online = d.sites.filter(s => s.status === 'online').length;
+  const down = d.sites.filter(s => s.status === 'down').length, degraded = d.sites.filter(s => s.status === 'degraded').length, total = d.sites.length, online = d.sites.filter(s => s.status === 'online').length, stopped = d.sites.filter(s => s.status === 'stopped').length;
   if (down === 0 && degraded === 0) { showBanner(null); setStatus([{ level:'ok', icon:'✅', text:'All sites operational', sub: total + ' sites' }]); }
   else { const parts = []; if (down) parts.push(down + ' down'); if (degraded) parts.push(degraded + ' degraded'); showBanner('<span class="ico">🔴</span> ' + parts.join(', ') + ' <span style="margin-left:auto;font-size:15px;font-weight:400">'+(total-down-degraded)+'/'+total+' ok</span>'); setStatus([{ level: down ? 'bad' : 'warn', icon: down ? '🔴' : '🟠', text: parts.join(', '), sub: (total-down-degraded)+'/'+total+' ok' }]); }
   const pill = (st, n) => n ? '<button class="chip' + (siteStatusFilter === st ? ' active' : '') + '" onclick="siteStatusFilter = siteStatusFilter === \'' + st + '\' ? \'\' : \'' + st + '\'; renderSitesList()" title="Show only ' + st + ' sites"><span class="dot ' + st + '"></span>' + n + ' ' + st + '</button>' : '';
 
   let html = '<div class="site-toolbar"><input id="siteQ" type="search" placeholder="Filter sites…" autocomplete="off" value="' + esc(siteQ) + '" oninput="siteQ=this.value; state.siteQ=siteQ; saveState(); renderSitesList()">'
-    + '<div class="site-stats">' + pill('online', online) + pill('degraded', degraded) + pill('down', down) + '<span class="dim" style="font-size:14px;margin-left:4px">' + total + ' sites' + (d.sites.some(s => s.managed_by === 'clp') ? ' · ' + d.sites.filter(s => s.managed_by === 'clp').length + ' owned by CloudPanel' : '') + '</span></div>'
+    + '<div class="site-stats">' + pill('online', online) + pill('degraded', degraded) + pill('down', down) + pill('stopped', stopped) + '<span class="dim" style="font-size:14px;margin-left:4px">' + total + ' sites' + (d.sites.some(s => s.managed_by === 'clp') ? ' · ' + d.sites.filter(s => s.managed_by === 'clp').length + ' owned by CloudPanel' : '') + '</span></div>'
     + '<span style="flex:1"></span>'
     + '<div class="site-viewsw"><button class="chip' + (siteViewMode === 'cards' ? ' active' : '') + '" onclick="siteSetView(\'cards\')" title="Cards">▦</button><button class="chip' + (siteViewMode === 'table' ? ' active' : '') + '" onclick="siteSetView(\'table\')" title="Table">☰</button></div>'
     + '<button class="btn" onclick="siteSyncClp()" title="Re-read CloudPanel\'s database (sites this panel already manages are left alone)">⟳ Sync from CloudPanel</button>'
     + '<button class="btn" onclick="siteCfBulk()" title="Allow traffic from Cloudflare only — for every site at once">☁ Cloudflare-only…</button>'
     + '<button class="btn pri" onclick="siteNewDialog()">＋ New Site</button></div>';
-  const sortOrder = { 'down': 0, 'degraded': 1, 'online': 2 };
+  const sortOrder = { 'down': 0, 'degraded': 1, 'stopped': 2, 'online': 3 };
   const q = siteQ.trim().toLowerCase();
   const filtered = [...d.sites].filter(s => (!siteStatusFilter || s.status === siteStatusFilter) && (!q || s.domain.toLowerCase().includes(q) || (s.user||'').toLowerCase().includes(q) || (s.type||'').includes(q)));
   const byStatus = (a, b) => (sortOrder[a.status]||9) - (sortOrder[b.status]||9) || a.domain.localeCompare(b.domain);
