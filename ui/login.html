@@ -155,7 +155,7 @@ function tsReset(step){ const box = TS_BOX[step]; if (!box) return; tsTok[box] =
 function show(id){ document.querySelectorAll('.step').forEach(s => s.classList.toggle('on', s.id === id)); $('err').style.display='none'; tsStep = id; tsMount(id);
   const f = document.querySelector('#' + id + ' input:not([value]), #' + id + ' input'); if (f) setTimeout(() => f.focus(), 30);
   $('sub').textContent = id === 's-login' ? 'Sign in' : id === 's-totp' ? 'Two-factor authentication' : id === 's-setup1' ? 'Initial setup (1/2)' : 'Set up authenticator (2/2)'; }
-function err(m){ $('err').textContent = m; $('err').style.display = ''; }
+function err(m){ $('err').textContent = m; $('err').style.display = 'block'; }
 // after sign-in go back to the tab that was requested (login?next=ssh), else the root
 const NEXT = (function(){ const n = new URLSearchParams(location.search).get('next') || ''; return /^[a-z0-9-]{1,20}$/.test(n) ? './' + n : './'; })();
 async function post(url, body){ const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{}) }); let d = {}; try { d = await r.json(); } catch(e){} if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }
