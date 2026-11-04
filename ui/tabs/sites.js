@@ -207,6 +207,7 @@ function siteNewDialog(){
     + '<div id="nsCert" class="dim" style="font-size:13.5px;margin:6px 0 2px">Certificate: the central store is checked once the domain is typed.</div>'
     + ' <label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsCf" checked> allow traffic from Cloudflare only (and log the real client IP)</label>'
     + ' <label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsSqlite" checked> create a SQLite database for it</label>'
+    + ' <label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsClaude" checked> install Claude Code CLI for the site user</label>'
     + '<div id="nsSteps" class="site-cf-detail" style="display:none"></div>'
     + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" id="nsGo" onclick="siteNewGo(this)">Create site</button></div>');
   siteNewType();
@@ -251,7 +252,8 @@ async function siteNewGo(btn){
   const body = { domain: v('nsDomain'), type: v('nsType'), template: v('nsTpl') || undefined, user: v('nsUser') || undefined,
     self_signed: !!(document.getElementById('nsSelfSigned') || {}).checked,
     cf_only: !!(document.getElementById('nsCf') || {}).checked,
-    sqlite: !!(document.getElementById('nsSqlite') || {}).checked };
+    sqlite: !!(document.getElementById('nsSqlite') || {}).checked,
+    claude: !!(document.getElementById('nsClaude') || {}).checked };
   if (v('nsPw')) body.password = v('nsPw');
   if (body.type === 'nodejs' && v('nsPort')) body.port = Number(v('nsPort'));
   if (body.type === 'reverse-proxy') body.reverse_proxy_url = v('nsProxy');
@@ -1153,7 +1155,7 @@ function siteSshAdd(){
   const bg = sshModal('<h3>Add SSH user</h3><div class="row2">' + sshField('User name', '<input id="suName" value="' + esc(s.user.replace(/[^a-z0-9_-]/g, '')) + '_ssh">', 'lowercase letters, digits, _ and -') + sshField('Password', '<input id="suPw" placeholder="leave empty to generate">') + '</div>'
     + sshField('SSH keys (optional)', '<textarea id="suKeys" rows="3" class="mono"></textarea>') + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" id="suGo">Create</button></div>');
   bg.querySelector('#suGo').onclick = async () => {
-    try { const r = await siteApi('POST', siteUrl('/ssh-users'), { username: bg.querySelector('#suName').value.trim(), password: bg.querySelector('#suPw').value || undefined, ssh_keys: bg.querySelector('#suKeys').value }); sshModalClose(); siteShowSecret('SSH user created', r.username, r.password); siteSubReload('ssh'); }
+    try { const r = await siteApi('POST', siteUrl('/ssh-users'), { username: bg.querySelector('#suName').value.trim(), password: bg.querySelector('#suPw').value || undefined, ssh_keys: bg.querySelector('#suKeys').value }); sshModalClose(); siteShowSecret('SSH user created', r.username, r.password); if (r.claude) toast('Installing Claude Code for ' + r.username + ' in the background — result in Events', 'info'); siteSubReload('ssh'); }
     catch(e){ siteErr(e, 'SSH user'); }
   };
 }

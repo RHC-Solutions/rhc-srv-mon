@@ -11,3 +11,6 @@ fi
 # User specific aliases and functions
 
 umask 007
+
+# Claude Code CLI (installed per user by the panel into ~/.local/bin)
+export PATH="$HOME/.local/bin:$PATH"
