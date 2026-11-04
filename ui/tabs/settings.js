@@ -81,6 +81,8 @@ function renderSettings(){
     html += '</table><div class="dim" style="font-size:14px;margin-top:8px">Zones this token can see: ' + cfDomains.zones.map(z => esc(z.name) + (z.status !== 'active' ? ' (' + esc(z.status) + ')' : '')).join(', ') + '</div>';
   }
   html += '</div>';
+  // Central certificate store
+  html += '<div class="upd-card" style="margin-top:14px" id="certStoreCard">' + certStoreCardHtml() + '</div>';
   // Cleanup (moved from Modules)
   const d2 = { cleanup: (lastModules && lastModules.cleanup) || { config: {}, preview: null, running: false, log: [] } };
   html += '<div style="margin-top:14px">' + cleanupCardHtml(d2) + '</div>';
@@ -236,4 +238,66 @@ async function runCleanupNow() {
     if (j.cleanup && lastModules) lastModules.cleanup = j.cleanup;
     if (state.tab === 'settings') renderSettings();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+/* ---- central certificate store ---- */
+let certStore = null, certStoreLoading = false;
+async function loadCertStore(){
+  certStoreLoading = true;
+  try { certStore = await stApi('GET', 'api/certstore'); } catch(e){ certStore = { error: e.message }; }
+  certStoreLoading = false;
+  const el = document.getElementById('certStoreCard'); if (el) el.innerHTML = certStoreCardHtml();
+}
+function certStoreCardHtml(){
+  let h = '<div class="site-card-hd"><h3>Certificate store</h3><span><button class="btn small" onclick="certStoreImport()">Import from sites</button> <button class="btn small pri" onclick="certStoreUpload()">＋ Add certificate…</button> <button class="btn small" onclick="certStore=null; loadCertStore()">↻</button></span></div>'
+    + '<p class="dim" style="margin:0 0 8px;font-size:14.5px">One copy of each certificate (e.g. the Cloudflare origin wildcard <span class="mono">*.rhc.pw</span>), keys stored encrypted. '
+    + '<b>A new site automatically gets the matching certificate from here</b> instead of a self-signed one; existing sites can take one under SSL/TLS. Certificates uploaded to any site are added here too.</p>';
+  if (!certStore) { if (!certStoreLoading) loadCertStore(); return h + '<p class="dim">Loading…</p>'; }
+  if (certStore.error) return h + '<p style="color:var(--md-error-bright)">⚠ ' + esc(certStore.error) + '</p>';
+  const rows = certStore.certificates.map(c => {
+    const days = c.expires_at ? Math.floor((Date.parse(c.expires_at) - Date.now()) / 86400e3) : null;
+    const pending = c.matches.filter(d => !c.used_by.includes(d));
+    return '<tr><td><b>' + esc(c.name) + '</b><div class="dim mono" style="font-size:13px">' + esc(c.sans.join(', ')) + '</div></td>'
+      + '<td>' + esc(c.type.replace('_', ' ')) + '</td>'
+      + '<td' + (days != null && days < 30 ? ' style="color:var(--md-error-bright)"' : '') + '>' + (c.expires_at ? c.expires_at.slice(0, 10) + ' <span class="dim">(' + (days < 0 ? 'expired' : days + 'd') + ')</span>' : '') + '</td>'
+      + '<td style="font-size:13px">' + (c.used_by.length ? c.used_by.map(esc).join('<br>') : '<span class="dim">–</span>')
+      + (pending.length ? '<div style="color:var(--md-warning);margin-top:4px">' + pending.length + ' covered site(s) serve another cert: ' + pending.map(esc).join(', ') + '</div>' : '') + '</td>'
+      + '<td style="text-align:right;white-space:nowrap">' + (pending.length && !c.expired ? '<button class="btn small" onclick="certStoreDeploy(' + c.id + ', this)">Deploy to ' + pending.length + '</button> ' : '')
+      + '<button class="btn small" onclick="certStoreRename(' + c.id + ')">Rename</button> <button class="btn small" onclick="armConfirm(this, \'Click again\', () => certStoreDelete(' + c.id + '))">Delete</button></td></tr>';
+  }).join('');
+  return h + '<table class="upd-table"><tr><th>Certificate</th><th>Type</th><th>Expires</th><th>Served by</th><th></th></tr>' + (rows || '<tr><td colspan="5" class="dim">Empty — add one or import from sites</td></tr>') + '</table>';
+}
+function certStoreUpload(){
+  const bg = sshModal('<h3>Add certificate to the store</h3>' + stField('Name (optional)', '<input id="csName" placeholder="defaults to the SAN list, e.g. *.rhc.pw, rhc.pw">')
+    + stField('Certificate (PEM)', '<textarea id="csCrt" rows="5" class="mono" placeholder="-----BEGIN CERTIFICATE-----"></textarea>', 'Cloudflare → SSL/TLS → Origin Server → Create certificate; a full bundle may be pasted here')
+    + stField('Private key (PEM)', '<textarea id="csKey" rows="5" class="mono" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>')
+    + stField('Chain (optional)', '<textarea id="csChain" rows="3" class="mono"></textarea>')
+    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" id="csGo">Add</button></div>');
+  bg.querySelector('#csGo').onclick = async () => {
+    try {
+      const r = await stApi('POST', 'api/certstore', { name: bg.querySelector('#csName').value, certificate: bg.querySelector('#csCrt').value, key: bg.querySelector('#csKey').value, chain: bg.querySelector('#csChain').value });
+      sshModalClose(); toast(r.created ? 'Certificate added to the store' : 'Already in the store', 'success'); loadCertStore();
+    } catch(e){ stErr(e, 'Certificate'); }
+  };
+}
+async function certStoreImport(){
+  try { const r = await stApi('POST', 'api/certstore/import'); toast('Imported ' + r.added + ' new certificate(s) (' + r.seen + ' checked)', 'success'); loadCertStore(); }
+  catch(e){ stErr(e, 'Import'); }
+}
+async function certStoreRename(id){
+  const c = (certStore.certificates || []).find(x => x.id === id); const name = prompt('Name', c ? c.name : '');
+  if (name == null) return;
+  try { await stApi('PATCH', 'api/certstore/' + id, { name }); loadCertStore(); } catch(e){ stErr(e, 'Rename'); }
+}
+async function certStoreDelete(id){
+  try { await stApi('DELETE', 'api/certstore/' + id); toast('Removed from the store (sites keep their copy)', 'success'); loadCertStore(); } catch(e){ stErr(e, 'Delete'); }
+}
+async function certStoreDeploy(id, btn){
+  btn.disabled = true;
+  try {
+    const r = await stApi('POST', 'api/certstore/' + id + '/deploy', {});
+    const bad = r.results.filter(x => !x.ok);
+    toast('Deployed to ' + (r.results.length - bad.length) + ' site(s)' + (bad.length ? ', ' + bad.length + ' failed' : ''), bad.length ? 'warn' : 'success', bad.length ? { detail: bad.map(x => x.domain + ': ' + x.error).join('\n'), duration: 15000 } : {});
+  } catch(e){ stErr(e, 'Deploy'); }
+  loadCertStore();
 }

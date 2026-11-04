@@ -21,6 +21,7 @@ require('./lib/api/events');
 require('./lib/api/sites');
 require('./lib/api/backups');
 require('./lib/api/settings');
+require('./lib/api/certstore');
 require('./lib/api/ssh');
 const notifyEvents = require('./lib/notify-events');
 const clpImport = require('./lib/clp-import');
@@ -488,6 +489,8 @@ if (cloudpanel.exists()) {                 // coexistence: pull CloudPanel's sit
   try { const r = clpImport.run(); console.log('cloudpanel import: ' + r.sites + ' new, ' + r.updated + ' refreshed, ' + r.skipped + ' ours' + (r.errors.length ? ', errors: ' + r.errors.join('; ') : '')); }
   catch (e) { console.error('cloudpanel import failed:', e.message); }
 }
+try { const r = require('./lib/sites/certstore').seed(); if (r) console.log('cert store: seeded ' + r.added + ' certificate(s) from ' + r.seen + ' found'); }
+catch (e) { console.error('cert store seed failed:', e.message); }
 ssh.ensureSshHelpers();
 ssh.loadSsh();
 ssh.sshAdoptDaemons();

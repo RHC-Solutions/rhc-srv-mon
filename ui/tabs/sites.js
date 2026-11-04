@@ -203,7 +203,8 @@ function siteNewDialog(){
     + siteField('Site user *', '<input id="nsUser" autocomplete="off">', '<span id="nsUserHint" class="dim">owns /home/&lt;user&gt;; php-fpm runs as this account</span>') + '</div>'
     + '<div class="row2" id="nsTypeFields"></div>'
     + siteField('Site user password', '<input id="nsPw" placeholder="leave empty to generate one" autocomplete="off">', 'shown once after creation and stored encrypted')
-    + '<label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsSelfSigned" checked> install a self-signed certificate so https answers immediately</label>'
+    + '<label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsSelfSigned" checked> no store certificate covers it → install a self-signed one so https answers immediately</label>'
+    + '<div id="nsCert" class="dim" style="font-size:13.5px;margin:6px 0 2px">Certificate: the central store is checked once the domain is typed.</div>'
     + ' <label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsCf" checked> allow traffic from Cloudflare only (and log the real client IP)</label>'
     + ' <label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsSqlite" checked> create a SQLite database for it</label>'
     + '<div id="nsSteps" class="site-cf-detail" style="display:none"></div>'
@@ -238,6 +239,9 @@ function siteNewSuggest(){
         : r.managed ? '<span style="color:var(--md-error-bright)">this panel already manages it</span>'
         : r.vhostExists ? '<span style="color:var(--md-error-bright)">a vhost for it already exists on disk</span>'
         : '<span class="up">available</span>';
+      const nc = document.getElementById('nsCert');
+      if (nc) nc.innerHTML = r.storeCert ? '🔒 Certificate: <b>' + esc(r.storeCert.name) + '</b> from the central store (' + esc(r.storeCert.type.replace('_', ' ')) + ', until ' + esc(String(r.storeCert.expires_at).slice(0, 10)) + ')'
+        : r.valid ? '<span style="color:var(--md-warning)">No certificate in the central store covers this domain' + '</span> — falls back to self-signed if ticked' : '';
       if (uh) uh.innerHTML = r.userTaken ? '<span style="color:var(--md-warning)">the unix user ' + esc(r.user) + ' already exists — pick another</span>' : 'owns /home/' + esc(r.user) + '; php-fpm runs as this account';
     } catch(e){}
   }, 350);
@@ -258,7 +262,7 @@ async function siteNewGo(btn){
   try {
     const r = await siteApi('POST', 'api/sites', body);
     if (box) box.textContent = r.steps.map(s => '✓ ' + s.name + (s.detail ? ' — ' + s.detail : '')).join('\n');
-    toast('Created ' + r.site.domain, 'success', { detail: 'site user: ' + r.user + '\npassword: ' + r.password + '\ndocument root: ' + r.docroot + '\n\nPoint DNS at this server, then replace the self-signed certificate under SSL/TLS.', duration: 40000 });
+    toast('Created ' + r.site.domain, 'success', { detail: 'site user: ' + r.user + '\npassword: ' + r.password + '\ndocument root: ' + r.docroot + '\n\nPoint DNS at this server, then check the certificate under SSL/TLS.', duration: 40000 });
     setTimeout(() => { sshModalClose(); refresh(); siteGo(r.site.domain, 'settings'); }, 900);
   } catch(e){
     if (box) box.textContent = (e.message || 'failed') + (e.detail ? '\n\n' + e.detail : '');
@@ -1000,8 +1004,9 @@ function siteTabSsl(s){
     const rows = v.certificates.map(c => { const days = siteDays(c.expires_at); return '<tr' + (c.is_active ? ' style="background:var(--md-divider)"' : '') + '><td>' + (c.is_active ? '<span class="upd-badge ok">active</span>' : '<span class="upd-badge na">stored</span>') + '</td><td>' + esc(c.type.replace('_', ' ')) + '</td><td>' + esc(c.subject || '') + '<div class="dim" style="font-size:13px">' + esc((c.sans || []).join(', ')) + '</div></td><td>' + esc((c.issuer || '').split(',')[1] || c.issuer || '') + '</td><td' + (days != null && days < 30 ? ' style="color:var(--md-error-bright)"' : '') + '>' + (c.expires_at ? c.expires_at.slice(0, 10) + (days != null ? ' <span class="dim">(' + (days < 0 ? 'expired' : days + 'd') + ')</span>' : '') : '') + '</td><td style="text-align:right;white-space:nowrap">'
       + (!c.is_active && c.has_key ? '<button class="btn small" onclick="siteCertActivate(' + c.id + ')">Activate</button> ' : '') + (!c.is_active ? '<button class="btn small" onclick="armConfirm(this, \'⚠ Delete?\', () => siteCertDelete(' + c.id + '))">Delete</button>' : '') + '</td></tr>'; }).join('');
     const inst = v.installed;
-    return siteCard('Certificates', '<p class="dim" style="margin:0 0 8px;font-size:14.5px">nginx serves ' + (inst ? '<b>' + esc(inst.subject) + '</b> from ' + esc((inst.issuer || '').split(',')[1] || inst.issuer) + ', valid until ' + inst.expires_at.slice(0, 10) : '<span style="color:var(--md-error-bright)">no certificate file</span>') + '. Let\'s Encrypt and Cloudflare-issued origin certificates come with the Settings → Cloudflare phase; upload a PEM pair for now.</p>'
+    return siteCard('Certificates', '<p class="dim" style="margin:0 0 8px;font-size:14.5px">nginx serves ' + (inst ? '<b>' + esc(inst.subject) + '</b> from ' + esc((inst.issuer || '').split(',')[1] || inst.issuer) + ', valid until ' + inst.expires_at.slice(0, 10) : '<span style="color:var(--md-error-bright)">no certificate file</span>') + '. Real certificates come from the central store (Settings → Certificate store); an uploaded one is added there too.</p>'
       + '<table class="upd-table"><tr><th></th><th>Type</th><th>Subject / SANs</th><th>Issuer</th><th>Expires</th><th></th></tr>' + (rows || '<tr><td colspan="6" class="dim">No certificates stored</td></tr>') + '</table>'
+      + siteCertStoreHtml(v.store || [])
       + '<div class="site-actions"><button class="btn" onclick="siteCertSelfSigned()">Self-signed</button><button class="btn pri" onclick="siteCertUpload()">Upload certificate…</button></div>');
   });
 }
@@ -1015,6 +1020,16 @@ function siteCertUpload(){
     try { const r = await siteApi('POST', siteUrl('/certificates'), { key: bg.querySelector('#ceKey').value, certificate: bg.querySelector('#ceCrt').value, chain: bg.querySelector('#ceChain').value, activate: bg.querySelector('#ceAct').checked }); sshModalClose(); toast('Certificate ' + (r.activated ? 'installed' : 'stored'), 'success'); siteReloadAll(); }
     catch(e){ siteErr(e, 'Certificate'); }
   };
+}
+function siteCertStoreHtml(list){
+  if (!list.length) return '<p class="dim" style="font-size:13.5px;margin-top:10px">The central store has no certificate covering this domain — add one under Settings → Certificate store.</p>';
+  return '<h4 style="margin:14px 0 6px">From the central store</h4><table class="upd-table">' + list.map(c => '<tr><td><b>' + esc(c.name) + '</b><div class="dim mono" style="font-size:13px">' + esc(c.sans.join(', ')) + '</div></td><td>' + esc(c.type.replace('_', ' ')) + '</td><td>' + esc(String(c.expires_at || '').slice(0, 10)) + (c.expired ? ' <span style="color:var(--md-error-bright)">expired</span>' : '') + '</td><td style="text-align:right">'
+    + (c.in_use ? '<span class="upd-badge ok">serving</span>' : c.expired ? '' : '<button class="btn small pri" onclick="siteCertFromStore(' + c.id + ', this)">Use this</button>') + '</td></tr>').join('') + '</table>';
+}
+async function siteCertFromStore(id, btn){
+  btn.disabled = true;
+  try { await siteApi('POST', siteUrl('/certificates'), { store_id: id }); toast('Certificate from the store installed · nginx reloaded', 'success'); siteReloadAll(); }
+  catch(e){ btn.disabled = false; siteErr(e, 'Certificate'); }
 }
 async function siteCertSelfSigned(){
   try { await siteApi('POST', siteUrl('/certificates'), { self_signed: true, activate: false }); toast('Self-signed certificate stored (activate it when you want)', 'success'); siteSubReload('ssl'); }
