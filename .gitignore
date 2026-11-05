@@ -11,3 +11,5 @@ rhc.sqlite
 rhc.sqlite-*
 secret.key
 backup-state/
+brand-logo
+brand-logo.json
