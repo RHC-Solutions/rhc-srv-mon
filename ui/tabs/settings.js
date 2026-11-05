@@ -23,7 +23,8 @@ function renderSettings(){
   let html = '<div class="upd-grid">';
   // General
   html += '<div class="upd-card"><h3>General</h3><div class="row2">'
-    + stField('Panel name', '<input id="stName" value="' + esc(g.panelName || '') + '" maxlength="60" placeholder="' + esc(g.panelNameDefault || '') + '">', 'shown in the logo, page title, sign-in page and notifications on this server') + '</div><div class="row2">'
+    + stField('Panel name', '<input id="stName" value="' + esc(g.panelName || '') + '" maxlength="60" placeholder="' + esc(g.panelNameDefault || '') + '">', 'shown in the logo, page title, sign-in page and notifications on this server')
+    + stField('Logo', '<div style="display:flex;gap:8px;align-items:center">' + (g.logo ? '<img src="brand-logo?v=' + g.logo.v + '" alt="" style="height:32px;width:auto">' : '') + '<input id="stLogo" type="url" value="' + esc(g.logo ? g.logo.source || '' : '') + '" placeholder="https://…/logo.png (empty = built-in mark)" style="flex:1"></div>', 'downloaded once and served by this panel: top bar, sign-in page, favicon') + '</div><div class="row2">'
     + stField('Panel domain', '<input value="' + esc(g.panelDomain) + '" disabled>', 'from ' + esc(g.panelDomainSource || 'nginx custom-domain.conf'))
     + stField('Server IP', '<input value="' + esc(g.ip || '') + '" disabled>', [g.ipSource, (g.lanIps || []).length ? 'LAN ' + g.lanIps.join(', ') : ''].filter(Boolean).map(esc).join(' · ')) + '</div><div class="row2">'
     + stField('Timezone', '<input value="' + esc(g.timezone) + '" disabled>')
@@ -102,7 +103,7 @@ async function loadCfDomains(){
   if (state.tab === 'settings') renderSettings();
 }
 async function saveGeneralSettings(){
-  try { await stApi('PUT', 'api/settings/general', { panelName: document.getElementById('stName').value, eventsRetentionDays: document.getElementById('stRet').value, acmeEmail: document.getElementById('stAcme').value }); toast('Saved', 'success'); const nm = document.getElementById('stName').value.trim(); if (nm !== (lastSettings && lastSettings.general.panelName)) { location.reload(); return; } lastSettings = null; renderSettings(); }
+  try { await stApi('PUT', 'api/settings/general', { panelName: document.getElementById('stName').value, eventsRetentionDays: document.getElementById('stRet').value, acmeEmail: document.getElementById('stAcme').value }); const lg = document.getElementById('stLogo').value.trim(), g0 = lastSettings && lastSettings.general; if (lg !== ((g0 && g0.logo && g0.logo.source) || '')) await stApi('PUT', 'api/settings/logo', { url: lg }); toast('Saved', 'success'); const nm = document.getElementById('stName').value.trim(); if (nm !== (g0 && g0.panelName) || lg !== ((g0 && g0.logo && g0.logo.source) || '')) { location.reload(); return; } lastSettings = null; renderSettings(); }
   catch(e){ stErr(e, 'Save'); }
 }
 async function saveTelegramSettings(){

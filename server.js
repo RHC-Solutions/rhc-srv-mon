@@ -31,6 +31,7 @@ const auth = require('./lib/auth');
 const history = require('./lib/history');
 const postgres = require('./lib/postgres');
 const tunnels = require('./lib/sites/tunnels');
+const brand = require('./lib/brand');
 const updates = require('./lib/updates');
 const sites = require('./lib/sites');
 const modules = require('./lib/modules');
@@ -45,6 +46,7 @@ let allUsersRun = null;   // background "Update All Users" batch: { running, tot
 const server = http.createServer((req, res) => {
   const url = (req.url || '/').split('?')[0];
   if (!auth.authGate(req, res, url)) return;
+  if (url === '/brand-logo') return brand.serve(req, res);
   if (url === '/login' || url.startsWith('/api/auth/')) { if (auth.handleAuthRoute(req, res, url)) return; }
   if (url.startsWith('/ws/')) return auth.wsNotUpgraded(req, res, url);   // upgrade was not forwarded by the proxy
   if (url === '/' || url === '/index.html' || auth.TAB_ROUTES.has(url.slice(1).toLowerCase())) {
