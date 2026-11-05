@@ -30,6 +30,7 @@ const page = require('./lib/page');
 const auth = require('./lib/auth');
 const history = require('./lib/history');
 const postgres = require('./lib/postgres');
+const tunnels = require('./lib/sites/tunnels');
 const updates = require('./lib/updates');
 const sites = require('./lib/sites');
 const modules = require('./lib/modules');
@@ -165,7 +166,7 @@ const server = http.createServer((req, res) => {
   }
   if (url === '/api/sites') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify(sites.getCache() || { sites: [], generated_at: null }));
+    return res.end(JSON.stringify(Object.assign({ sites: [], generated_at: null }, sites.getCache() || {}, { tunnels: tunnels.get() })));
   }
   if (url.startsWith('/api/pm2/') && req.method === 'POST') {
     const parts = url.slice('/api/pm2/'.length).split('/');

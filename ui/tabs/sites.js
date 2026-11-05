@@ -69,7 +69,7 @@ function renderSitesList(){
   const q = siteQ.trim().toLowerCase();
   const filtered = [...d.sites].filter(s => (!siteStatusFilter || s.status === siteStatusFilter) && (!q || s.domain.toLowerCase().includes(q) || (s.user||'').toLowerCase().includes(q) || (s.type||'').includes(q)));
   const byStatus = (a, b) => (sortOrder[a.status]||9) - (sortOrder[b.status]||9) || a.domain.localeCompare(b.domain);
-  if (siteViewMode === 'table') { view.innerHTML = html + siteTableHtml(filtered, byStatus); return; }
+  if (siteViewMode === 'table') { view.innerHTML = html + siteTableHtml(filtered, byStatus) + siteTunnelHtml(d.tunnels, q); return; }
   const sorted = filtered.sort(byStatus);
   html += '<div class="site-grid">';
   for (const s of sorted) {
@@ -89,9 +89,31 @@ function renderSitesList(){
     if (s.canControl) html += siteCtlHtml(s.domain, null, null, 'card');
     html += '</div>';
   }
-  if (!sorted.length) html += '<div class="upd-card dim">No sites match.</div>';
+  if (!sorted.length) html += '<div class="upd-card dim">' + (d.sites.length ? 'No sites match.' : 'No nginx sites on this host.') + '</div>';
   html += '</div>';
-  view.innerHTML = html;
+  view.innerHTML = html + siteTunnelHtml(d.tunnels, q);
+}
+// Apps this host serves through Cloudflare Tunnel (cloudflared → 127.0.0.1:port) rather than
+// through a vhost of its own. Read-only: their routes live in Cloudflare / cloudflared's config.
+function siteTunnelHtml(t, q){
+  if (!t || !t.tunnels || !t.tunnels.length) return '';
+  const rows = [];
+  for (const tn of t.tunnels) for (const r of tn.routes) {
+    if (q && !(r.hostname + ' ' + r.service + ' ' + (tn.name || '')).toLowerCase().includes(q)) continue;
+    const ok = r.local != null && r.local > 0 && r.local < 500;
+    const st = !tn.active ? 'down' : (r.local == null ? 'online' : ok ? 'online' : 'down');
+    const url = 'https://' + r.hostname + (r.path ? r.path.replace(/[\^$*]/g, '') : '/');
+    rows.push('<tr><td><a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(r.hostname + (r.path || '')) + '</a></td>'
+      + '<td><code>' + esc(r.service) + '</code>' + (r.local != null ? ' <span class="dim">' + (r.local ? 'HTTP ' + r.local : 'no answer') + '</span>' : '') + '</td>'
+      + '<td>' + esc(tn.name || tn.id || '?') + ' <span class="dim">' + esc(tn.unit) + (tn.status ? ' · ' + tn.status : '') + '</span></td>'
+      + '<td>' + (r.access === true ? '🔒 Access' : r.access === false ? '<span class="dim">public</span>' : '<span class="dim">?</span>') + '</td>'
+      + '<td><span class="badge ' + st + '">' + (st === 'online' ? 'Online' : 'Down') + '</span></td></tr>');
+  }
+  return '<div class="group" style="margin-top:18px"><h2>☁ Cloudflare Tunnel apps <span class="dim">served by cloudflared, not by an nginx site — read-only</span></h2>'
+    + (t.error ? '<div class="err">⚠ ' + esc(t.error) + '</div>' : '')
+    + (rows.length ? '<table class="upd-table" style="width:100%"><tr><th>Hostname</th><th>Local target</th><th>Tunnel</th><th>Login</th><th>Status</th></tr>' + rows.join('') + '</table>'
+                   : '<div class="upd-card dim">' + (t.generated_at ? 'No routes match.' : 'Reading tunnels…') + '</div>')
+    + '</div>';
 }
 // Start/stop/restart for a site's PM2 apps. Rendered on the list (whole site) and per process in the
 // Processes tab; clicks never bubble into the card/row navigation.

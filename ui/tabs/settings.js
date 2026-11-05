@@ -23,8 +23,8 @@ function renderSettings(){
   let html = '<div class="upd-grid">';
   // General
   html += '<div class="upd-card"><h3>General</h3><div class="row2">'
-    + stField('Panel domain', '<input value="' + esc(g.panelDomain) + '" disabled>', 'from nginx custom-domain.conf')
-    + stField('Server IP', '<input value="' + esc(g.ip || '') + '" disabled>') + '</div><div class="row2">'
+    + stField('Panel domain', '<input value="' + esc(g.panelDomain) + '" disabled>', 'from ' + esc(g.panelDomainSource || 'nginx custom-domain.conf'))
+    + stField('Server IP', '<input value="' + esc(g.ip || '') + '" disabled>', [g.ipSource, (g.lanIps || []).length ? 'LAN ' + g.lanIps.join(', ') : ''].filter(Boolean).map(esc).join(' · ')) + '</div><div class="row2">'
     + stField('Timezone', '<input value="' + esc(g.timezone) + '" disabled>')
     + stField('Event log retention (days)', '<input id="stRet" type="number" min="1" max="3650" value="' + esc(g.eventsRetentionDays) + '">') + '</div>'
     + stField('ACME / Let\'s Encrypt e-mail', '<input id="stAcme" type="email" value="' + esc(g.acmeEmail || '') + '" placeholder="admin@example.com">', 'used when certificates are issued from this panel (upcoming)')
