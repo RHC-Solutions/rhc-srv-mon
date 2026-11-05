@@ -26,8 +26,9 @@ function renderDb(){
   const mariaUp = d.mariadb && !d.mariadb.error;
   if (d.notInstalled) {
     showBanner(null);
-    setStatus(mariaUp ? [{ level:'ok', icon:'✅', text:'MariaDB ' + String(d.mariadb.version||'').split('-')[0] + ' online' }]
-                      : [{ level:'info', text:'No database server installed on this host' }]);
+    const nSql = (d.sqlites || []).length;
+    setStatus([mariaUp ? { level:'ok', icon:'✅', text:'MariaDB ' + String(d.mariadb.version||'').split('-')[0] + ' online' } : { level:'info', text:'No database server installed' }]
+      .concat(nSql ? [{ level:'ok', icon:'🗄️', text: nSql + ' SQLite database' + (nSql === 1 ? '' : 's'), sub: fmtMem(d.sqlites.reduce((s, x) => s + x.size + x.wal, 0)) }] : []));
   } else if (d.error) {
     showBanner('<span class="ico">🔴</span> PostgreSQL unreachable <span style="margin-left:auto;font-size:15px;font-weight:400">'+esc(d.error)+'</span>');
     setStatus([{ level:'bad', icon:'🔴', text:'PostgreSQL unreachable' }]);
@@ -72,6 +73,21 @@ function renderDb(){
       html += '<div class="row" style="background:var(--md-surface-02dp);border-bottom:1px solid var(--md-divider)"><div class="meta"><div class="name">Location</div><div class="info">file</div></div><div class="col" style="flex:0 0 auto;word-break:break-all;font-size:12.5px;max-width:400px">' + esc(d.sqlite.path || '') + '</div></div>';
       html += '<div class="hdr"><div class="meta">Name</div><div class="col" style="flex:0 0 auto">Size</div></div>';
       html += '<div class="row"><div class="meta"><div class="name">CloudPanel DB</div><div class="info">' + d.sqlite.tables + ' tables · ' + d.sqlite.pageCount.toLocaleString() + ' pages</div></div><div class="col" style="flex:0 0 auto">' + fmtMem(d.sqlite.size) + '</div></div>';
+    }
+    html += '</div>';
+  }
+
+  // Every SQLite file on the host (apps' own databases, not only the panel's sites)
+  if (d.sqlites && d.sqlites.length) {
+    html += '<div class="group" style="margin-top:18px"><h2>🗄️ SQLite <span class="dim">' + d.sqlites.length + ' on this host · /opt /srv /var/lib /var/www /home</span></h2>';
+    html += '<div class="hdr"><div class="meta">Database</div><div class="col" style="flex:0 0 160px">Used by</div><div class="col">Tables</div><div class="col">Size</div></div>';
+    for (const s of d.sqlites) {
+      const info = [s.encrypted ? '🔒 encrypted — contents not readable here' : (s.journal ? s.journal.toUpperCase() + ' journal' : ''), s.error ? '⚠ ' + s.error : '',
+        'modified ' + new Date(s.modified).toLocaleString()].filter(Boolean).join(' · ');
+      html += '<div class="row"><div class="meta"><div class="name" style="word-break:break-all">' + esc(s.path) + '</div><div class="info">' + esc(info) + '</div></div>'
+        + '<div class="col" style="flex:0 0 160px">' + (s.usedBy && s.usedBy.length ? esc(s.usedBy.join(', ')) : '<span class="dim">not open</span>') + '</div>'
+        + '<div class="col">' + (s.tables == null ? '–' : s.tables) + '</div>'
+        + '<div class="col" title="' + esc(fmtMem(s.size) + ' file' + (s.wal ? ' + ' + fmtMem(s.wal) + ' WAL' : '')) + '">' + fmtMem(s.size + s.wal) + '</div></div>';
     }
     html += '</div>';
   }
