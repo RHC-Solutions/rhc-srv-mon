@@ -1,4 +1,4 @@
-/* ------------------------------------------------------------- postgresql */
+/* -------------------------------------------------------------- databases */
 function dbRow(db){
   const cache = db.cache_hit==null ? '–' : db.cache_hit.toFixed(1)+'%';
   const cacheCls = db.cache_hit==null ? '' : (db.cache_hit>=99?'good':(db.cache_hit>=90?'mid':'poor'));
@@ -23,15 +23,22 @@ function renderDb(){
   if (!lastDb) return;
   const d = lastDb;
   document.getElementById('host').textContent = '';
-  if (d.error) {
+  const mariaUp = d.mariadb && !d.mariadb.error;
+  if (d.notInstalled) {
+    showBanner(null);
+    setStatus(mariaUp ? [{ level:'ok', icon:'✅', text:'MariaDB ' + String(d.mariadb.version||'').split('-')[0] + ' online' }]
+                      : [{ level:'info', text:'No database server installed on this host' }]);
+  } else if (d.error) {
     showBanner('<span class="ico">🔴</span> PostgreSQL unreachable <span style="margin-left:auto;font-size:15px;font-weight:400">'+esc(d.error)+'</span>');
     setStatus([{ level:'bad', icon:'🔴', text:'PostgreSQL unreachable' }]);
   } else {
     showBanner(null);
     setStatus([{ level:'ok', icon:'✅', text:'PostgreSQL ' + String(d.version||'').split(' ')[0] + ' online', sub: d.summary.databases+' databases · '+fmtMem(d.summary.total_size)+' · '+d.total_conns+'/'+d.max_connections+' conns' }]);
   }
-  let html = '<div class="group"><h2>🐘 PostgreSQL <span class="dim">/var/run/postgresql/.s.PGSQL.5432</span></h2>';
-  if (d.error) {
+  let html = '<div class="group"><h2>🐘 PostgreSQL <span class="dim">' + (d.notInstalled ? 'not installed' : '/var/run/postgresql/.s.PGSQL.5432') + '</span></h2>';
+  if (d.notInstalled) {
+    html += '<div class="row"><div class="meta"><div class="name">Not installed</div><div class="info">No <code>psql</code> on this host. Install PostgreSQL and it shows up here on the next sample.</div></div></div>';
+  } else if (d.error) {
     html += '<div class="err">⚠ '+esc(d.error)+'</div>';
   } else {
     html += '<div class="row" style="background:var(--md-surface-02dp);border-bottom:1px solid var(--md-divider)"><div class="meta"><div class="name">Location</div><div class="info">Unix socket · cluster 17/main</div></div><div class="col" style="flex:0 0 auto">' + esc(d.version || '') + '</div></div>';
@@ -72,7 +79,9 @@ function renderDb(){
   // MariaDB section
   if (d.mariadb) {
     html += '<div class="group" style="margin-top:18px"><h2>🐬 MariaDB</h2>';
-    if (d.mariadb.error) {
+    if (d.mariadb.notInstalled) {
+      html += '<div class="row"><div class="meta"><div class="name">Not installed</div><div class="info">No <code>mariadb</code> client on this host.</div></div></div>';
+    } else if (d.mariadb.error) {
       html += '<div class="err">⚠ ' + esc(d.mariadb.error) + '</div>';
     } else {
       const upStr = d.mariadb.uptime ? fmtUp(d.mariadb.uptime * 1000) : '?';

@@ -37,7 +37,7 @@ const store2 = () => require('/opt/rhc-srv-mon-v2/lib/sites/store');
 
   /* ---------------------------------------------------------------- pages */
   section('pages & auth gate');
-  for (const p of ['/', '/index.html', '/sites', '/monitor', '/pm2', '/services', '/postgres', '/postgresql', '/updates', '/modules', '/backups', '/ssh', '/terminal', '/events', '/settings'])
+  for (const p of ['/', '/index.html', '/sites', '/monitor', '/pm2', '/services', '/Databases', '/databases', '/postgres', '/postgresql', '/updates', '/modules', '/backups', '/ssh', '/terminal', '/events', '/settings'])
     await check('GET ' + p + ' serves the app', async () => { const r = await req('GET', p); eq(r.status, 200); ok(/<div class="wrap">/.test(r.text), 'no app shell'); });
   await check('GET /login', async () => { const r = await req('GET', '/login'); eq(r.status, 200); ok(/s-login/.test(r.text)); });
   await check('GET /nope → 404', async () => eq((await req('GET', '/nope')).status, 404));

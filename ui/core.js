@@ -104,7 +104,7 @@ function askModal(opts){
   });
 }
 function sshField(label, inner, hint){ return '<div class="upd-field"><label>' + label + '</label>' + inner + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</div>'; }
-// Each tab has its own URL (…/rhc-admin/ssh, …/postgres, …). Slugs are single path
+// Each tab has its own URL (…/rhc-admin/ssh, …/Databases, …). Slugs are single path
 // segments so every relative URL in this page (api/…, login, ws/ssh) keeps resolving.
 // Compact status pills on the subtitle line (right side). items: [{ level: ok|warn|bad|info, text, sub }].
 // Green/amber states never use the big banner any more; call showBanner() only for real outages.
@@ -118,7 +118,7 @@ function showBanner(html){ const b = document.getElementById('banner'); if (html
 const TABS = {
   sites:   { slug:'sites',    label:'Sites',      view:'sitesview',   render: () => renderSites(),   onRefresh: () => { if (!siteView.domain) renderSitesList(); } },
   pm2:     { slug:'monitor',  label:'Monitor',    view:'pm2view',     render: () => render(),        onRefresh: () => render() },
-  db:      { slug:'postgres', label:'PostgreSQL', view:'dbview',      render: () => renderDb(),      onRefresh: () => renderDb() },
+  db:      { slug:'Databases', label:'Databases', view:'dbview',      render: () => renderDb(),      onRefresh: () => renderDb() },
   updates: { slug:'updates',  label:'Updates',    view:'updatesview', render: () => renderUpdates(), onRefresh: () => renderUpdates() },
   modules: { slug:'modules',  label:'Modules',    view:'modulesview', render: () => renderModules(), onRefresh: () => renderModules() },
   backup:  { slug:'backups',  label:'Backups',    view:'backupview',  render: () => renderBackup(),  onRefresh: () => renderBackup() },
@@ -128,7 +128,7 @@ const TABS = {
 };
 const TAB_SLUG = Object.fromEntries(Object.entries(TABS).map(([k, v]) => [k, v.slug]));
 const SLUG_TAB = Object.assign(Object.fromEntries(Object.entries(TAB_SLUG).map(([k,v]) => [v,k])),
-  { pm2:'pm2', services:'pm2', postgresql:'db', db:'db', backup:'backup', terminal:'ssh' });
+  { pm2:'pm2', services:'pm2', databases:'db', postgres:'db', postgresql:'db', db:'db', backup:'backup', terminal:'ssh' });
 function tabFromPath(){ const seg = (location.pathname.split('/').filter(Boolean).pop() || '').toLowerCase(); return SLUG_TAB[seg] || null; }
 function setTab(tab, opts){
   opts = opts || {};
