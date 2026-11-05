@@ -10,7 +10,7 @@ function renderBackup(){
   if (view.contains(document.activeElement) && ['INPUT','SELECT','TEXTAREA'].includes((document.activeElement.tagName||''))) return;
   const d = lastBackup, sc = d.scope||{}, sch = d.schedule||{}, lr = d.lastRun;
   document.getElementById('host').textContent = '';
-  document.getElementById('updated').textContent = 'Wasabi · ' + (sch.enabled ? 'daily at ' + String(sch.hour).padStart(2,'0') + ':' + String(sch.minute).padStart(2,'0') + ' · ' + bkModeText(sch) : 'schedule off') + ' · keep ' + (d.retentionDays||14) + ' days, ≥' + (d.keepFulls||4) + ' fulls';
+  document.getElementById('updated').textContent = (d.target ? 'Wasabi · ' : 'Wasabi not configured · ') + (sch.enabled ? 'daily at ' + String(sch.hour).padStart(2,'0') + ':' + String(sch.minute).padStart(2,'0') + ' · ' + bkModeText(sch) : 'schedule off') + ' · keep ' + (d.retentionDays||14) + ' days, ≥' + (d.keepFulls||4) + ' fulls';
   showBanner(null);
   setStatus(d.running ? [{ level:'info', icon:'⏳', text:'Backup running' }]
     : lr ? [{ level: lr.success ? 'ok' : 'bad', icon: lr.success ? '✅' : '🔴', text: lr.success ? 'Last backup ok' : 'Last backup failed', sub: new Date(lr.finishedAt).toLocaleString() + ' · ' + bkBytes(lr.bytes) }]
@@ -20,9 +20,10 @@ function renderBackup(){
   html += '<div class="upd-card" style="grid-column:1/-1">';
   html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">';
   html += '<h3 style="margin:0">💾 Backup to Wasabi</h3>';
-  html += '<span style="font-size:14px;color:var(--md-on-surface-dis)">remote:rhcsolutions/web01-backups · s3.eu-central-1.wasabisys.com</span>';
+  html += '<span style="font-size:14px;color:var(--md-on-surface-dis)">' + (d.target ? esc(d.target.label) : '⚠ not configured — <a href="settings#wasabi">Settings → Wasabi</a>') + '</span>';
   html += '<div style="margin-left:auto;display:flex;gap:8px">';
-  if (d.running) html += '<button class="btn running" disabled>⏳ backing up…</button>';
+  if (!d.target) html += '<a class="btn update" href="settings#wasabi">Set up Wasabi</a>';
+  else if (d.running) html += '<button class="btn running" disabled>⏳ backing up…</button>';
   else html += '<button class="btn update" id="bkRun" title="Everything in scope, complete; becomes the base for later diffs">▶ Full backup</button><button class="btn" id="bkRunDiff" title="Databases and configs complete; site files only what changed since the last full backup">▶ Diff backup</button>';
   html += '<button class="btn" id="bkList">↻ List remote</button>';
   html += '</div></div>';
@@ -55,8 +56,10 @@ function renderBackup(){
   html += sub + '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="bkSitesAll" '+(siteSel?'':'checked')+'> all sites ('+av.sites.length+')</label>';
   for (const st of av.sites) html += '<label style="display:flex;gap:6px;align-items:center;margin-left:16px"><input type="checkbox" class="bkSite" data-domain="'+esc(st.domain)+'" '+(!siteSel||siteSel.includes(st.domain)?'checked':'')+' '+(siteSel?'':'disabled')+'> '+esc(st.domain)+' <span class="hint" style="'+mono+'">'+esc(st.user||'')+'</span></label>';
   html += '</div></div>';
+  // SQLite
+  html += box + scopeChk('bkScopeSqlite','<strong>SQLite databases</strong> <span class="hint">every one on this host (' + (d.sqliteCount||0) + ') — consistent snapshots, see the Databases tab</span>',sc.sqlite!==false) + '</div>';
   // Configs
-  html += box + scopeChk('bkScopeCfg','<strong>App + system configs</strong> <span class="hint">/etc/nginx, systemd units, rclone.conf, this app</span>',sc.configs);
+  html += box + scopeChk('bkScopeCfg','<strong>App + system configs</strong> <span class="hint">/etc/nginx, systemd units, cloudflared, ssh, ufw, /usr/local/bin, this app</span>',sc.configs);
   html += sub;
   html += scopeChk('bkCfgClp','CloudPanel database <span class="hint">db.sq3 snapshot: sites, users, vhosts</span>',sc.cloudpanelDb!==false);
   html += scopeChk('bkCfgCron','crontabs <span class="hint">/var/spool/cron/crontabs, /etc/cron.d, /etc/crontab</span>',sc.crontabs!==false);
@@ -188,6 +191,7 @@ function saveBackupConfig(){
     keepFulls: parseInt(document.getElementById('bkKeepFulls').value)||4,
     scope: { postgres: document.getElementById('bkScopePg').checked,
       sites: document.getElementById('bkScopeSites').checked,
+      sqlite: document.getElementById('bkScopeSqlite').checked,
       configs: document.getElementById('bkScopeCfg').checked,
       pgDatabases: (pgAll && !pgAll.checked) ? Array.from(document.querySelectorAll('.bkPgDb')).filter(c=>c.checked).map(c=>c.dataset.db) : null,
       siteDomains: (siteAll && !siteAll.checked) ? Array.from(document.querySelectorAll('.bkSite')).filter(c=>c.checked).map(c=>c.dataset.domain) : null,

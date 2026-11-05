@@ -350,10 +350,11 @@ const server = http.createServer((req, res) => {
   }
   if (url === '/api/backup') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify(Object.assign({}, backups.getState(), { available: backups.backupAvailableFull() })));
+    return res.end(JSON.stringify(Object.assign({}, backups.getState(), { available: backups.backupAvailableFull(), target: require('./lib/wasabi').view().target, sqliteCount: require('./lib/sqlite-scan').get().length })));
   }
   if (url === '/api/backup/run' && req.method === 'POST') {
     if (backups.isRunning()) { res.writeHead(409, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'A backup is already running' })); }
+    if (!require('./lib/wasabi').target()) { res.writeHead(409, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Wasabi is not configured — Settings → Wasabi' })); }
     const mode = /[?&]mode=diff(&|$)/.test(req.url || '') ? 'diff' : 'full';
     backups.runBackup('manual', actorOf(req), { mode }).catch((e) => console.error('backup run failed:', e.message));  // async; UI polls /api/backup
     res.writeHead(200, { 'Content-Type': 'application/json' });

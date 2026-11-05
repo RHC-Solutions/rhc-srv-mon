@@ -49,6 +49,17 @@ function renderSettings(){
     + '<p class="dim" style="margin:0 0 8px;font-size:14.5px">API token with <b>Zone:Read</b> and <b>DNS:Edit</b> (Cloudflare dashboard → My Profile → API Tokens). Stored encrypted. Powers the domains overview below; DNS records for new sites and origin certificates come next.</p>'
     + stField('API token', '<input type="password" id="cfToken" placeholder="' + (cf.configured ? esc(cf.token) + ' (leave empty to keep, type REMOVE to delete)' : 'paste token') + '">')
     + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'cloudflare\')">Verify token</button><button class="btn pri" onclick="saveCloudflareSettings()">Save</button></div></div>';
+  // Wasabi (backup target)
+  const wb = lastSettings.wasabi || {};
+  html += '<div class="upd-card" id="wasabi"><h3>Wasabi (backups)</h3>'
+    + '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Where the Backups tab uploads to. Wasabi console → Access Keys → create a key (a sub-user limited to this bucket is best). The secret is stored encrypted and never shown again. '
+    + (wb.target ? 'Uploading to <b>' + esc(wb.target.label) + '</b>.' : '<b>Not configured</b> — scheduled backups are skipped until it is.') + '</p><div class="row2">'
+    + stField('Access key', '<input id="wbKey" autocomplete="off" spellcheck="false" value="' + esc(wb.accessKey || '') + '" placeholder="WASABI ACCESS KEY">')
+    + stField('Secret key', '<input id="wbSecret" type="password" autocomplete="new-password" placeholder="' + (wb.hasSecret ? '•••••••• (leave empty to keep)' : 'secret key') + '">') + '</div><div class="row2">'
+    + stField('Region', '<select id="wbRegion">' + (wb.regions || ['eu-central-1']).map((r) => '<option' + (r === (wb.region || 'eu-central-1') ? ' selected' : '') + '>' + esc(r) + '</option>').join('') + '</select>', 'endpoint s3.&lt;region&gt;.wasabisys.com')
+    + stField('Bucket', '<input id="wbBucket" spellcheck="false" value="' + esc(wb.bucket || '') + '" placeholder="my-backups">') + '</div>'
+    + stField('Folder in the bucket', '<input id="wbPrefix" spellcheck="false" value="' + esc(wb.prefix || '') + '" placeholder="' + esc(wb.defaultPrefix || '') + '">', 'one folder per server — retention only ever prunes inside it')
+    + '<div class="site-actions" style="justify-content:space-between"><span><button class="btn" onclick="testWasabi()">Test</button>' + (wb.configured ? ' <button class="btn" onclick="removeWasabi()">Remove</button>' : '') + '</span><button class="btn pri" onclick="saveWasabiSettings()">Save</button></div></div>';
   // Turnstile (login page challenge)
   html += '<div class="upd-card"><h3>Turnstile (login page)</h3>'
     + '<div class="upd-toggle"><label class="switch"><input type="checkbox" id="tsOn"' + (ts.enabled ? ' checked' : '') + '><span class="slider"></span></label><label>Challenge visitors on the sign-in form</label></div>'
@@ -89,6 +100,7 @@ function renderSettings(){
   const d2 = { cleanup: (lastModules && lastModules.cleanup) || { config: {}, preview: null, running: false, log: [] } };
   html += '<div style="margin-top:14px">' + cleanupCardHtml(d2) + '</div>';
   view.innerHTML = html;
+  if (location.hash.length > 1 && !view.dataset.jumped) { const el = document.getElementById(location.hash.slice(1)); if (el) { view.dataset.jumped = '1'; el.scrollIntoView({ block: 'start' }); } }
   const cuSaveBtn = document.getElementById('cuSave');
   if (cuSaveBtn) cuSaveBtn.addEventListener('click', () => saveCleanupConfig(false));
   const cuMeasureBtn = document.getElementById('cuMeasure');
@@ -125,6 +137,24 @@ async function saveCloudflareSettings(){
   if (!v) return toast('Nothing to save — paste a token, or type REMOVE to delete the stored one', 'warn');
   try { const r = await stApi('PUT', 'api/settings/cloudflare', { token: v === 'REMOVE' ? '' : v }); toast(r.configured ? 'Cloudflare token verified and saved' : 'Cloudflare token removed', 'success'); cfDomains = null; lastSettings = null; renderSettings(); }
   catch(e){ stErr(e, 'Cloudflare'); }
+}
+async function saveWasabiSettings(){
+  const g = (id) => document.getElementById(id).value.trim();
+  const body = { accessKey: g('wbKey'), region: g('wbRegion'), bucket: g('wbBucket'), prefix: g('wbPrefix') };
+  if (g('wbSecret')) body.secretKey = g('wbSecret');
+  try { await stApi('PUT', 'api/settings/wasabi', body); toast('Wasabi saved — testing…', 'success'); lastSettings = null; await renderSettings(); testWasabi(); }
+  catch(e){ stErr(e, 'Wasabi'); }
+}
+async function testWasabi(){
+  toast('Testing Wasabi (list, write, delete)…');
+  try { const r = await stApi('POST', 'api/settings/wasabi/test');
+    if (r.ok) toast('Wasabi works: ' + r.steps.join(' · '), 'success'); else toast('Wasabi test failed: ' + r.error, 'error', { detail: (r.steps || []).join('\n'), duration: 12000 }); }
+  catch(e){ stErr(e, 'Wasabi'); }
+}
+async function removeWasabi(){
+  if (!confirm('Remove the Wasabi settings? Scheduled backups stop until it is set up again. Nothing in the bucket is deleted.')) return;
+  try { await stApi('PUT', 'api/settings/wasabi', { remove: true }); toast('Wasabi settings removed', 'success'); lastSettings = null; renderSettings(); }
+  catch(e){ stErr(e, 'Wasabi'); }
 }
 async function saveTurnstileSettings(){
   const g = (id) => document.getElementById(id);
