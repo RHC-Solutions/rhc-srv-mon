@@ -4,7 +4,10 @@
 let lastSites = null;
 const SITE_TABS = [['settings', 'Settings'], ['procs', 'Processes'], ['vhost', 'Vhost'], ['databases', 'Databases'], ['ssl', 'SSL/TLS'], ['cloudflare', 'Cloudflare'], ['rules', 'Domains & Rules'], ['security', 'Security'], ['ssh', 'SSH/FTP'], ['files', 'File Manager'], ['cron', 'Cron Jobs'], ['logs', 'Logs']];
 let siteView = { domain: null, tab: 'settings', data: null, loading: false, sub: {} };   // sub: per-tab fetched data
-let siteQ = state.siteQ || '';
+// Not kept across visits: Chrome autofills the saved sign-in name into this box, and keeping it
+// turned that into a filter that hid every site ("No sites match.") on every visit.
+let siteQ = '';
+if (state.siteQ) { delete state.siteQ; try { saveState(); } catch(e){} }
 let siteViewMode = state.siteViewMode || 'cards';      // cards | table
 let siteSort = state.siteSort || 'status';             // table sort column
 let siteSortDir = state.siteSortDir || 1;
@@ -58,7 +61,7 @@ function renderSitesList(){
   else { const parts = []; if (down) parts.push(down + ' down'); if (degraded) parts.push(degraded + ' degraded'); showBanner('<span class="ico">🔴</span> ' + parts.join(', ') + ' <span style="margin-left:auto;font-size:15px;font-weight:400">'+(total-down-degraded)+'/'+total+' ok</span>'); setStatus([{ level: down ? 'bad' : 'warn', icon: down ? '🔴' : '🟠', text: parts.join(', '), sub: (total-down-degraded)+'/'+total+' ok' }]); }
   const pill = (st, n) => n ? '<button class="chip' + (siteStatusFilter === st ? ' active' : '') + '" onclick="siteStatusFilter = siteStatusFilter === \'' + st + '\' ? \'\' : \'' + st + '\'; renderSitesList()" title="Show only ' + st + ' sites"><span class="dot ' + st + '"></span>' + n + ' ' + st + '</button>' : '';
 
-  let html = '<div class="site-toolbar"><input id="siteQ" type="search" placeholder="Filter sites…" autocomplete="off" value="' + esc(siteQ) + '" oninput="siteQ=this.value; state.siteQ=siteQ; saveState(); renderSitesList()">'
+  let html = '<div class="site-toolbar"><input id="siteQ" name="site-filter" type="search" placeholder="Filter sites…" autocomplete="off" data-lpignore="true" data-1p-ignore readonly onfocus="this.removeAttribute(\'readonly\')" value="' + esc(siteQ) + '" oninput="siteQ=this.value; renderSitesList()">'
     + '<div class="site-stats">' + pill('online', online) + pill('degraded', degraded) + pill('down', down) + pill('stopped', stopped) + '<span class="dim" style="font-size:14px;margin-left:4px">' + total + ' sites' + (d.sites.some(s => s.managed_by === 'clp') ? ' · ' + d.sites.filter(s => s.managed_by === 'clp').length + ' owned by CloudPanel' : '') + '</span></div>'
     + '<span style="flex:1"></span>'
     + '<div class="site-viewsw"><button class="chip' + (siteViewMode === 'cards' ? ' active' : '') + '" onclick="siteSetView(\'cards\')" title="Cards">▦</button><button class="chip' + (siteViewMode === 'table' ? ' active' : '') + '" onclick="siteSetView(\'table\')" title="Table">☰</button></div>'

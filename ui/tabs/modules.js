@@ -117,7 +117,7 @@ function renderModules(){
   // Toolbar (Orient): filter chips + search + refresh
   html += '<div class="mod-card"><div class="head">';
   html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1">';
-  html += '<input id="modQ" type="search" placeholder="Filter package, project, user…" value="'+esc(state.modQ||'')+'" style="background:var(--md-surface-04dp);border:1px solid var(--md-divider);color:var(--md-on-surface);border-radius:10px;padding:8px 12px;font-size:15px;outline:none;flex:1 1 220px;min-width:160px">';
+  html += '<input id="modQ" name="module-filter" type="search" placeholder="Filter package, project, user…" autocomplete="off" data-lpignore="true" data-1p-ignore readonly onfocus="this.removeAttribute(\'readonly\')" value="'+esc(state.modQ||'')+'" style="background:var(--md-surface-04dp);border:1px solid var(--md-divider);color:var(--md-on-surface);border-radius:10px;padding:8px 12px;font-size:15px;outline:none;flex:1 1 220px;min-width:160px">';
   for (const f of [['all','All'],['major','Major'],['minor','Minor'],['patch','Patch']]) {
     const cls = (state.modFilter===f[0])?'chip active'+(f[0]==='major'?' down-chip':''):'chip';
     html += '<button class="'+cls+'" data-modf="'+f[0]+'">'+f[1]+'</button>';
