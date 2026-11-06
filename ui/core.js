@@ -150,14 +150,24 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', (e) =
   e.preventDefault(); setTab(t.dataset.tab, { fromBar: true });
 }));
 
+// Each feed on its own: one failing endpoint (an error page, an expired session, a timeout) used to
+// throw all six away, which left the Sites tab on "Loading…" for good with no word of why.
+let refreshErrors = {};
 async function refresh(){
-  try { [lastData, lastDb, lastUpdates, lastSites, lastModules, lastBackup] = await Promise.all([
-    fetch('api/status').then(r=>r.json()),
-    fetch('api/db').then(r=>r.json()),
-    fetch('api/updates').then(r=>r.json()),
-    fetch('api/sites').then(r=>r.json()),
-    fetch('api/modules').then(r=>r.json()),
-    fetch('api/backup').then(r=>r.json()),
-  ]); } catch(e){ return; }
+  const get = (url) => fetch(url).then(async (r) => {
+    let j; try { j = await r.json(); } catch(e){ throw new Error(url + ': HTTP ' + r.status + ', not JSON'); }
+    if (!r.ok) throw new Error(url + ': ' + ((j && j.error) || 'HTTP ' + r.status));
+    return j;
+  });
+  const [st, db, up, si, mo, bk] = await Promise.allSettled(['api/status', 'api/db', 'api/updates', 'api/sites', 'api/modules', 'api/backup'].map(get));
+  refreshErrors = {};
+  const take = (res, key, ok) => { if (res.status === 'fulfilled' && (!ok || ok(res.value))) return res.value; refreshErrors[key] = res.status === 'rejected' ? res.reason.message : key + ': unexpected answer'; return undefined; };
+  lastData = take(st, 'status') || lastData;
+  lastDb = take(db, 'db') || lastDb;
+  lastUpdates = take(up, 'updates') || lastUpdates;
+  lastSites = take(si, 'sites', (v) => v && Array.isArray(v.sites)) || lastSites;
+  lastModules = take(mo, 'modules') || lastModules;
+  lastBackup = take(bk, 'backup') || lastBackup;
+  if (Object.keys(refreshErrors).length) console.warn('refresh:', refreshErrors);
   const t = TABS[state.tab]; if (t && t.onRefresh) t.onRefresh();
 }

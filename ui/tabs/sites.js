@@ -47,7 +47,7 @@ function renderSites(){
 /* ================================================================= list */
 function renderSitesList(){
   const view = document.getElementById('sitesview');
-  if (!lastSites) { view.innerHTML = '<div class="upd-card">Loading…</div>'; return; }
+  if (!lastSites) { view.innerHTML = '<div class="upd-card">' + (refreshErrors.sites ? '<span class="down">⚠ Could not load the site list — ' + esc(refreshErrors.sites) + '</span>' : 'Loading…') + '</div>'; return; }
   if (view.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
   const d = lastSites;
   document.getElementById('host').textContent = '';
