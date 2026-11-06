@@ -231,6 +231,7 @@ function siteNewDialog(){
     + '<label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsSelfSigned" checked> no store certificate covers it → install a self-signed one so https answers immediately</label>'
     + '<div id="nsCert" class="dim" style="font-size:13.5px;margin:6px 0 2px">Certificate: the central store is checked once the domain is typed.</div>'
     + ' <label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsCf" checked> allow traffic from Cloudflare only (and log the real client IP)</label>'
+    + ' <label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsTunnel" checked> publish through its own Cloudflare Tunnel (tunnel, route and DNS created automatically)</label>'
     + ' <label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsSqlite" checked> create a SQLite database for it</label>'
     + ' <label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsClaude" checked> install Claude Code CLI for the site user</label>'
     + '<div id="nsSteps" class="site-cf-detail" style="display:none"></div>'
@@ -277,6 +278,7 @@ async function siteNewGo(btn){
   const body = { domain: v('nsDomain'), type: v('nsType'), template: v('nsTpl') || undefined, user: v('nsUser') || undefined,
     self_signed: !!(document.getElementById('nsSelfSigned') || {}).checked,
     cf_only: !!(document.getElementById('nsCf') || {}).checked,
+    tunnel: !!(document.getElementById('nsTunnel') || {}).checked,
     sqlite: !!(document.getElementById('nsSqlite') || {}).checked,
     claude: !!(document.getElementById('nsClaude') || {}).checked };
   if (v('nsPw')) body.password = v('nsPw');
