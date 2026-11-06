@@ -1051,7 +1051,7 @@ function siteCertUpload(){
   };
 }
 function siteCertStoreHtml(list){
-  if (!list.length) return '<p class="dim" style="font-size:13.5px;margin-top:10px">The central store has no certificate covering this domain — add one under Settings → Certificate store.</p>';
+  if (!list.length) return '<p class="dim" style="font-size:13.5px;margin-top:10px">The central store has no certificate covering this domain — add one under <a href="certificates">Certificates</a>.</p>';
   return '<h4 style="margin:14px 0 6px">From the central store</h4><table class="upd-table">' + list.map(c => '<tr><td><b>' + esc(c.name) + '</b><div class="dim mono" style="font-size:13px">' + esc(c.sans.join(', ')) + '</div></td><td>' + esc(c.type.replace('_', ' ')) + '</td><td>' + esc(String(c.expires_at || '').slice(0, 10)) + (c.expired ? ' <span style="color:var(--md-error-bright)">expired</span>' : '') + '</td><td style="text-align:right">'
     + (c.in_use ? '<span class="upd-badge ok">serving</span>' : c.expired ? '' : '<button class="btn small pri" onclick="siteCertFromStore(' + c.id + ', this)">Use this</button>') + '</td></tr>').join('') + '</table>';
 }

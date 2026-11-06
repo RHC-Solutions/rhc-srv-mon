@@ -95,7 +95,6 @@ function renderSettings(){
   }
   html += '</div>';
   // Central certificate store
-  html += '<div class="upd-card" style="margin-top:14px" id="certStoreCard">' + certStoreCardHtml() + '</div>';
   // Cleanup (moved from Modules)
   const d2 = { cleanup: (lastModules && lastModules.cleanup) || { config: {}, preview: null, running: false, log: [] } };
   html += '<div style="margin-top:14px">' + cleanupCardHtml(d2) + '</div>';
@@ -107,6 +106,67 @@ function renderSettings(){
   if (cuMeasureBtn) cuMeasureBtn.addEventListener('click', () => measureCleanupNow());
   const cuRunBtn = document.getElementById('cuRun');
   if (cuRunBtn) cuRunBtn.addEventListener('click', () => armConfirm(cuRunBtn, '⚠ Click again to delete', () => runCleanupNow()));
+}
+// Certificates and Tunnels are their own left-menu pages; the cards keep their element ids so
+// their loaders re-render them in place.
+function plainTabHeader(sub){
+  document.getElementById('host').textContent = lastSettings ? lastSettings.general.hostname : '';
+  showBanner(null); setStatus([]);
+  document.getElementById('updated').textContent = sub || '';
+}
+function renderCertsTab(){
+  plainTabHeader('Certificates kept by this panel — deploy them to sites from here');
+  document.getElementById('certsview').innerHTML = '<div class="upd-card" id="certStoreCard">' + certStoreCardHtml() + '</div>';
+}
+function renderTunnelsTab(){
+  plainTabHeader('Cloudflare Tunnels running on this server');
+  document.getElementById('tunnelsview').innerHTML = '<div class="upd-card" id="tunnels"><div class="site-card-hd"><h3>Cloudflare Tunnels</h3><button class="btn small" onclick="loadTunnels(true)">↻</button></div>' + tunnelsCardHtml() + '</div>';
+}
+let stTunnels = null, stTunnelsLoading = false;
+const stTunnelTokens = {};   // unit → full token, only after an explicit Show / Copy
+function tunnelsCardHtml(){
+  if (!stTunnels) { if (!stTunnelsLoading) loadTunnels(false); return '<p class="dim">Loading tunnels…</p>'; }
+  if (stTunnels.loadError) return '<p style="color:var(--md-error-bright)">⚠ ' + esc(stTunnels.loadError) + '</p>';
+  const list = stTunnels.tunnels || [];
+  let h = '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Every <span class="mono">cloudflared</span> service on this server. A tunnel token lets whoever holds it run that tunnel — '
+    + 'revealing one is recorded in the event log.</p>';
+  if (stTunnels.error) h += '<div class="site-why">' + esc(stTunnels.error) + '</div>';
+  if (!list.length) return h + '<p class="dim">No cloudflared tunnels found.</p>';
+  h += '<table class="upd-table"><tr><th>Tunnel</th><th>IDs</th><th>Routes</th><th>Token</th></tr>';
+  for (const t of list) {
+    const u = esc(t.unit), full = stTunnelTokens[t.unit];
+    const routes = t.routes.length ? t.routes.map(r => '<b>' + esc(r.hostname) + '</b>' + (r.path ? esc(r.path) : '') + ' → <span class="mono">' + esc(r.service) + '</span>'
+      + (r.local == null ? '' : r.local > 0 ? ' <span class="dim">(' + r.local + ')</span>' : ' <span style="color:var(--md-warning)">(not answering)</span>')).join('<br>') : '<span class="dim">none</span>';
+    h += '<tr><td><b>' + u + '</b>' + (t.name && t.name !== t.unit ? '<br><span class="dim">' + esc(t.name) + '</span>' : '')
+      + '<br>' + (t.active ? '<span style="color:var(--md-success, #2e7d32)">● running</span>' : '<span style="color:var(--md-error-bright)">● stopped</span>') + (t.status ? ' <span class="dim">· ' + esc(t.status) + '</span>' : '') + '</td>'
+      + '<td class="mono" style="font-size:13px">' + [t.id && 'tunnel ' + esc(t.id), t.account && 'account ' + esc(t.account), t.config && 'config ' + esc(t.config)].filter(Boolean).join('<br>') + '</td>'
+      + '<td>' + routes + (t.routesFrom === 'cloudflared' ? '<br><span class="dim" style="font-size:13px">from the running cloudflared</span>' : '') + '</td>'
+      + '<td>' + (t.token
+        ? '<input class="mono" readonly value="' + esc(full || t.token) + '" style="width:100%;min-width:14em;font-size:13px" onclick="this.select()">'
+          + '<div class="dim" style="font-size:13px">' + esc(t.tokenSource || '') + '</div>'
+          + '<div style="display:flex;gap:6px;margin-top:4px"><button class="btn small" onclick="toggleTunnelToken(\'' + u + '\')">' + (full ? 'Hide' : 'Show') + '</button><button class="btn small" onclick="copyTunnelToken(\'' + u + '\')">Copy</button></div>'
+        : '<span class="dim">' + (t.managed === 'local' ? 'credentials file (locally managed)' : 'no token') + '</span>') + '</td></tr>';
+  }
+  return h + '</table>';
+}
+function rerenderTunnels(){ if (state.tab === 'tunnels') renderTunnelsTab(); }
+async function loadTunnels(refresh){
+  stTunnelsLoading = true;
+  try { stTunnels = await stApi('GET', 'api/settings/tunnels' + (refresh ? '?refresh=1' : '')); } catch(e){ stTunnels = { loadError: e.message }; }
+  stTunnelsLoading = false;
+  rerenderTunnels();
+}
+async function fetchTunnelToken(unit){
+  if (!stTunnelTokens[unit]) stTunnelTokens[unit] = (await stApi('GET', 'api/settings/tunnels/' + encodeURIComponent(unit) + '/token')).token;
+  return stTunnelTokens[unit];
+}
+async function toggleTunnelToken(unit){
+  if (stTunnelTokens[unit]) { delete stTunnelTokens[unit]; rerenderTunnels(); return; }
+  try { await fetchTunnelToken(unit); rerenderTunnels(); } catch(e){ stErr(e, 'Tunnel token'); }
+}
+async function copyTunnelToken(unit){
+  try { const t = await fetchTunnelToken(unit); await navigator.clipboard.writeText(t); toast('Token of ' + unit + ' copied', 'success'); rerenderTunnels(); }
+  catch(e){ stErr(e, 'Copy'); }
 }
 async function loadCfDomains(){
   cfDomainsLoading = true;
