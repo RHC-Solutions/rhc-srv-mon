@@ -27,6 +27,7 @@ require('./lib/api/vault');
 require('./lib/api/cluster');
 require('./lib/api/agents');
 require('./lib/api/appstore');
+require('./lib/api/security');
 const notifyEvents = require('./lib/notify-events');
 const clpImport = require('./lib/clp-import');
 const cloudpanel = require('./lib/cloudpanel');
@@ -529,6 +530,8 @@ if (NO_JOBS) {
   // pm2 daemons on a node binary an upgrade replaced: restart them onto the new one (one user at a time)
   setInterval(() => require('./lib/sites/hold').enforce().catch((e) => console.error('held-stopped check failed:', e.message)), 2 * 60_000);
   setInterval(() => require('./lib/sites/daemons').refreshStale().catch((e) => console.error('pm2 daemon refresh failed:', e.message)), 5 * 60_000);
+  // Security: report new fail2ban bans to AbuseIPDB (when switched on), every 5 min
+  setInterval(() => require('./lib/security').reportNewBans().catch((e) => console.error('abuse report failed:', e.message)), 5 * 60_000);
   // GitHub: commit & push every connected site with auto-sync on, every 15 min
   setInterval(() => require('./lib/sites/github').tick().catch((e) => console.error('github sync failed:', e.message)), 15 * 60_000);
   // self-repair: the OODA loop (observe → orient → decide → act) once a minute
