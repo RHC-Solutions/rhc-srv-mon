@@ -137,3 +137,44 @@ async function pm2Action(action, user, app) {
     refresh();
   } catch(e) { toast('Error: ' + e, 'error'); }
 }
+
+// ---- Uptime Kuma section of the Monitor page: every service, port and public hostname Kuma watches
+// (kuma-sync adds new ones automatically). Data is cached 30 s on the server; fetched at most every 30 s here.
+let kumaData = null, kumaAt = 0, kumaLoading = false;
+const KUMA_SECTIONS = [['public', 'Public hostnames'], ['services', 'Services'], ['ports', 'Ports'], ['other', 'Added in Kuma']];
+async function loadKuma(force){
+  if (kumaLoading) return; kumaLoading = true;
+  try { kumaData = await fetch('api/kuma' + (force ? '?refresh=1' : '')).then(r => r.json()); kumaAt = Date.now(); } catch(e){ kumaData = { error: e.message, monitors: [] }; }
+  kumaLoading = false;
+  if (state.tab === 'pm2') renderKuma(true);
+}
+function renderKuma(fromLoad){
+  const el = document.getElementById('kumaPanel'); if (!el) return;
+  if (!fromLoad && Date.now() - kumaAt > 30000) loadKuma(false);
+  if (!kumaData) { el.innerHTML = '<div class="upd-card" style="margin-top:14px"><h3>Uptime Kuma</h3><p class="dim">Loading…</p></div>'; return; }
+  const d = kumaData, s = d.summary || { total: 0, up: 0, down: 0, pending: 0 };
+  const q = ((document.getElementById('q') || {}).value || '').trim().toLowerCase(), f = state.f || 'all';
+  const ok = (m) => (!q || (m.name + ' ' + m.url + ' ' + m.hostname).toLowerCase().includes(q)) && (f === 'all' || (f === 'up' ? m.status === 'up' : m.status !== 'up'));
+  const dot = (st) => '<span style="color:' + (st === 'up' ? 'var(--md-success, #2e7d32)' : st === 'down' ? 'var(--md-error-bright)' : 'var(--md-warning)') + '">●</span> ' + esc(st);
+  const pct = (v) => v == null ? '–' : (v * 100).toFixed(v >= 0.9995 ? 0 : 2) + '%';
+  let h = '<div class="upd-card" style="margin-top:14px"><div class="site-card-hd"><h3>Uptime Kuma</h3><span>'
+    + (d.publicUrl ? '<a class="btn small" href="' + esc(d.publicUrl) + '" target="_blank" rel="noopener">Open Kuma ↗</a> ' : '')
+    + '<button class="btn small" onclick="loadKuma(true)">↻</button></span></div>'
+    + '<div class="dim" style="font-size:14px;margin-bottom:8px">' + s.total + ' monitors · <b style="color:var(--md-success, #2e7d32)">' + s.up + ' up</b>'
+    + (s.down ? ' · <b style="color:var(--md-error-bright)">' + s.down + ' down</b>' : '') + (s.pending ? ' · ' + s.pending + ' pending' : '')
+    + ' · new services, ports and sites are added automatically</div>';
+  if (d.error) h += '<div class="site-why">⚠ ' + esc(d.error) + '</div>';
+  for (const [key, label] of KUMA_SECTIONS) {
+    const rows = (d.monitors || []).filter(m => m.section === key && ok(m));
+    if (!rows.length) continue;
+    h += '<h4 style="margin:14px 0 6px">' + esc(label) + ' <span class="dim" style="font-weight:400">' + rows.length + '</span></h4><table class="upd-table"><tr><th>Monitor</th><th>Status</th><th>Response</th><th>Uptime 24h</th><th>30d</th><th>Target</th></tr>';
+    for (const m of rows) {
+      const name = esc(m.name.replace(/^public · /, ''));
+      h += '<tr><td>' + (m.link ? '<a href="' + esc(m.link) + '" target="_blank" rel="noopener">' + name + '</a>' : name) + '</td><td>' + dot(m.status) + '</td>'
+        + '<td>' + (m.responseMs != null ? m.responseMs + ' ms' : '–') + '</td><td>' + pct(m.uptime24h) + '</td><td>' + pct(m.uptime30d) + '</td>'
+        + '<td class="mono dim" style="font-size:13px">' + esc(m.url || (m.hostname ? m.hostname + (m.port ? ':' + m.port : '') : '')) + (m.certDays != null && m.certDays >= 0 ? ' · cert ' + Math.floor(m.certDays) + 'd' : '') + '</td></tr>';
+    }
+    h += '</table>';
+  }
+  el.innerHTML = h + '</div>';
+}

@@ -117,7 +117,7 @@ function showBanner(html){ const b = document.getElementById('banner'); if (html
 // while the tab is active — omitted for tabs that fetch their own data on their own schedule).
 const TABS = {
   sites:   { slug:'sites',    label:'Sites',      view:'sitesview',   render: () => renderSites(),   onRefresh: () => { if (!siteView.domain) renderSitesList(); } },
-  pm2:     { slug:'monitor',  label:'Monitor',    view:'pm2view',     render: () => render(),        onRefresh: () => render() },
+  pm2:     { slug:'monitor',  label:'Monitor',    view:'pm2view',     render: () => { render(); renderKuma(); }, onRefresh: () => { render(); renderKuma(); } },
   db:      { slug:'Databases', label:'Databases', view:'dbview',      render: () => renderDb(),      onRefresh: () => renderDb() },
   updates: { slug:'updates',  label:'Updates',    view:'updatesview', render: () => renderUpdates(), onRefresh: () => renderUpdates() },
   modules: { slug:'modules',  label:'Modules',    view:'modulesview', render: () => renderModules(), onRefresh: () => renderModules() },
