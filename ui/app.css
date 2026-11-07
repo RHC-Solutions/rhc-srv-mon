@@ -76,6 +76,8 @@
     --md-warn-container:   #fff3e8;
     --md-error-container:  #fdeced;
     --md-neutral-container:#eef1f4;
+    --md-info-container:   #e6f1fb;
+    --md-info-text:        #0067b8;
 
     /* --- shadows: CloudPanel cards sit almost flat ---------------------- */
     --md-elev-1: 0 2px 4px rgba(157,161,164,.19);
@@ -162,6 +164,8 @@
     --md-warn-container:   #3a2610;
     --md-error-container:  #3d1a1e;
     --md-neutral-container:#2a2e37;
+    --md-info-container:   #16283b;
+    --md-info-text:        #5aaef2;
 
     --md-elev-1: none;
     --md-elev-2: none;
@@ -462,7 +466,9 @@
   .badge.online, .upd-badge.ok, .sev.patch, .ev-level.info   { background:var(--md-ok-container); color:var(--md-ok-text); }
   .badge.degraded, .upd-badge.new, .sev.minor, .ev-level.warn { background:var(--md-warn-container); color:var(--md-warning); }
   .badge.down, .upd-badge.err, .sev.major, .ev-level.error   { background:var(--md-error-container); color:var(--md-error-bright); }
-  .badge.type, .badge.unknown, .badge.stopped, .upd-badge.na, .sev.none      { background:var(--md-neutral-container); color:var(--md-on-surface-med); }
+  .badge.stopped { background:var(--md-error-container); color:var(--md-error-bright); }
+  .badge.moved   { background:var(--md-info-container);  color:var(--md-info-text); }
+  .badge.type, .badge.unknown, .upd-badge.na, .sev.none      { background:var(--md-neutral-container); color:var(--md-on-surface-med); }
   .sev, .ev-level { text-transform:uppercase; letter-spacing:.5px; font-size:11px; }
   .statuses { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
   .st { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 12px;

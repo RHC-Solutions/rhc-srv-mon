@@ -1,3 +1,5 @@
+// badge colour: a site moved to another server is 'stopped' here but shown in blue as Moved
+const badgeCls = (x) => (x && x.movedTo ? 'moved' : (x && x.status) || 'unknown');
 /* ---------------------------------------------------------------- sites */
 // List (cards with health) → detail with CloudPanel-style sub-tabs. Sub-navigation lives in the
 // query string (sites?d=<domain>&t=<tab>) so every relative api/ URL keeps working behind nginx.
@@ -81,7 +83,7 @@ function renderSitesList(){
     const healthIcon = s.httpUp ? '✅' : (s.httpUp === false ? '❌' : '—');
     html += '<div class="site-card clickable" onclick="siteGo(\'' + esc(s.domain) + '\', state.siteTab || \'settings\')">';
     html += '<div class="top"><div class="domain">' + esc(s.domain) + '<span class="hint">' + esc(siteTypeLabel(s.type)) + (s.managed_by === 'clp' ? ' · CLP' : '') + '</span></div>';
-    html += '<span class="badge ' + s.status + '">' + s.statusLabel + '</span></div>';
+    html += '<span class="badge ' + badgeCls(s) + '">' + s.statusLabel + '</span></div>';
     html += '<div class="meta"><span>Port: <span class="val">' + (portInfo || 'n/a') + '</span></span><span>HTTP: <span class="val">' + healthIcon + '</span></span><span title="' + esc(rt.title) + '">' + rt.text + '</span><span>Disk: <span class="val">' + esc(s.disk || '?') + '</span></span></div>';
     if (s.statusReason) html += '<div class="site-why">' + esc(s.statusReason) + '</div>';
     if (s.pm2 && s.pm2.length) {
@@ -197,7 +199,7 @@ function siteTableHtml(list, byStatus){
     const port = s.nodePort || s.poolPort || '';
     const pm2 = s.pm2 && s.pm2.length ? '<span class="' + (s.pm2.every(p => p.status === 'online') ? 'up' : 'down') + '">' + s.pm2.filter(p => p.status === 'online').length + '/' + s.pm2.length + '</span> <span class="dim" title="' + esc(s.pm2.map(p => p.name + ' ' + p.status).join('\n')) + '">' + esc(s.pm2.map(p => p.name).join(', ')).slice(0, 60) + '</span>' : '<span class="dim">–</span>';
     h += '<tr class="site-row" onclick="siteGo(\'' + esc(s.domain) + '\', state.siteTab || \'settings\')">'
-      + '<td><span class="badge ' + s.status + '"' + (s.statusReason ? ' title="' + esc(s.statusReason) + '"' : '') + '>' + esc(s.statusLabel) + '</span></td>'
+      + '<td><span class="badge ' + badgeCls(s) + '"' + (s.statusReason ? ' title="' + esc(s.statusReason) + '"' : '') + '>' + esc(s.statusLabel) + '</span></td>'
       + '<td class="site-td-domain"><b>' + esc(s.domain) + '</b></td>'
       + '<td>' + esc(siteTypeLabel(s.type)) + (s.application && !['Nodejs','Static','ReverseProxy','Python','Generic'].includes(s.application) ? ' <span class="dim">' + esc(s.application) + '</span>' : '') + '</td>'
       + '<td class="mono">' + esc(s.user || '') + '</td>'
@@ -382,7 +384,7 @@ function siteHeader(s){
     + '<div><div class="k">Site User</div><div class="v mono">' + esc(s.user) + '</div></div>'
     + '<div><div class="k">IP Address</div><div class="v mono">' + esc(s.ip || '?') + '</div></div>'
     + '<div><div class="k">Type</div><div class="v">' + esc(siteTypeLabel(s.type)) + (s.application && s.application !== siteTypeLabel(s.type) ? ' · ' + esc(s.application) : '') + '</div></div>'
-    + '<div><div class="k">Status</div><div class="v">' + (s.health ? '<span class="badge ' + s.health.status + '">' + esc(s.health.statusLabel) + '</span>' : '<span class="dim">unknown</span>') + (s.managed_by === 'clp' ? ' <span class="badge type" title="Imported from CloudPanel. The first change made here takes it over — do not edit it in CloudPanel afterwards.">owned by CloudPanel</span>' : '') + '</div></div>'
+    + '<div><div class="k">Status</div><div class="v">' + (s.health ? '<span class="badge ' + badgeCls(s.health) + '">' + esc(s.health.statusLabel) + '</span>' : '<span class="dim">unknown</span>') + (s.managed_by === 'clp' ? ' <span class="badge type" title="Imported from CloudPanel. The first change made here takes it over — do not edit it in CloudPanel afterwards.">owned by CloudPanel</span>' : '') + '</div></div>'
     + '</div>'
     + '<div class="site-head-actions"><button class="btn small danger" onclick="siteDeleteDialog()" title="Delete this site and everything belonging to it">🗑 Delete site</button></div></div>'
     + '<div class="site-tabs">' + SITE_TABS.map(([k, l]) => '<a class="site-tab' + (k === t ? ' active' : '') + '" href="sites?d=' + esc(encodeURIComponent(s.domain)) + '&t=' + k + '" onclick="event.preventDefault(); state.siteTab=\'' + k + '\'; saveState(); siteGo(\'' + esc(s.domain) + '\', \'' + k + '\')">' + l + '</a>').join('') + '</div>';
@@ -429,7 +431,7 @@ function siteTabProcs(s){
     else if (h.originError) bits.push('nginx on this host did not answer <span class="dim">(' + esc(h.originError) + ')</span>');
     if (h.appStatus != null) bits.push('the app answered <b>' + h.appStatus + '</b> on its own port');
     else if (h.appError) bits.push('the app did not answer on its own port <span class="dim">(' + esc(h.appError) + ')</span>');
-    head = siteCard('Health', '<div class="site-health"><span class="badge ' + h.status + '">' + esc(h.statusLabel) + '</span>'
+    head = siteCard('Health', '<div class="site-health"><span class="badge ' + badgeCls(h) + '">' + esc(h.statusLabel) + '</span>'
       + (h.statusReason ? '<div class="site-why">' + esc(h.statusReason) + '</div>' : '')
       + '<ul class="site-probe">' + bits.map(b => '<li>' + b + '</li>').join('') + '</ul></div>',
       '<button class="btn small" onclick="siteRecheck(this)">Re-check now</button>');
