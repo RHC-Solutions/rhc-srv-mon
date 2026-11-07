@@ -65,11 +65,6 @@ function renderSettings(){
     + stField('Recipients', '<input id="brTo" value="' + esc(br.to || '') + '" placeholder="sys@synergybeam.com">', 'separate several with commas')
     + '<div class="upd-chk-grid"><label><input type="checkbox" id="brUpd"' + (br.notifyOnUpdate !== false ? ' checked' : '') + '> Updates available</label><label><input type="checkbox" id="brDone"' + (br.notifyOnComplete !== false ? ' checked' : '') + '> Update / backup / cleanup results</label><label><input type="checkbox" id="brAuth"' + (br.notifyOnAuth !== false ? ' checked' : '') + '> Web login attempts</label><label><input type="checkbox" id="brSite"' + (br.notifyOnSite !== false ? ' checked' : '') + '> Site start / stop / restart</label></div>'
     + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'brevo\')">📨 Send test</button><button class="btn pri" onclick="saveBrevoSettings()">Save</button></div></div>';
-  // Cloudflare
-  html += '<div class="upd-card"><h3>Cloudflare</h3>'
-    + '<p class="dim" style="margin:0 0 8px;font-size:14.5px">API token with <b>Zone:Read</b> and <b>DNS:Edit</b> (Cloudflare dashboard → My Profile → API Tokens). Stored encrypted. Powers the domains overview below; DNS records for new sites and origin certificates come next.</p>'
-    + stField('API token', '<input type="password" id="cfToken" placeholder="' + (cf.configured ? esc(cf.token) + ' (leave empty to keep, type REMOVE to delete)' : 'paste token') + '">')
-    + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'cloudflare\')">Verify token</button><button class="btn pri" onclick="saveCloudflareSettings()">Save</button></div></div>';
   // Cloudflare accounts (filled by loadCfAccounts)
   html += '<div class="upd-card" id="cf-accounts" style="grid-column:1/-1"><div class="site-card-hd"><h3>Cloudflare accounts</h3><span><button class="btn small" onclick="cfaAll()">Re-check all</button> <button class="btn small pri" onclick="cfaConnect()">＋ Connect account</button></span></div><div id="cfaBody">' + cfaBodyHtml() + '</div></div>';
   // Wasabi (backup target)
@@ -95,7 +90,7 @@ function renderSettings(){
   html += '</div>';
   // Domains (Cloudflare zones × our sites)
   html += '<div class="upd-card" style="margin-top:14px"><div class="site-card-hd"><h3>Domains</h3>' + (cf.configured ? '<button class="btn small" onclick="cfDomains=null; loadCfDomains()">↻</button>' : '') + '</div>';
-  if (!cf.configured) html += '<p class="dim">Add a Cloudflare API token to see zones and how each site domain resolves.</p>';
+  if (!cf.configured) html += '<p class="dim">Connect a Cloudflare account above to see zones and how each site domain resolves.</p>';
   else if (!cfDomains) { html += '<p class="dim">Loading zones…</p>'; if (!cfDomainsLoading) loadCfDomains(); }
   else if (cfDomains.error) html += '<p style="color:var(--md-error-bright)">⚠ ' + esc(cfDomains.error) + '</p>';
   else {
@@ -114,7 +109,7 @@ function renderSettings(){
         + '<td>' + (s.records ? (s.points_here ? '✅' : s.proxied ? '<span class="dim">via Cloudflare</span>' : '<span style="color:var(--md-warning)">✗</span>') : '') + '</td>'
         + '<td class="mono dim">' + (s.www ? (s.www.length ? s.www.map(r => esc(r.type + ' ' + r.content)).join('<br>') : '–') : '') + '</td></tr>';
     }
-    html += '</table><div class="dim" style="font-size:14px;margin-top:8px">Zones this token can see: ' + cfDomains.zones.map(z => esc(z.name) + (z.status !== 'active' ? ' (' + esc(z.status) + ')' : '')).join(', ') + '</div>';
+    html += '</table><div class="dim" style="font-size:14px;margin-top:8px">Zones the connected accounts can see: ' + cfDomains.zones.map(z => esc(z.name) + (z.status !== 'active' ? ' (' + esc(z.status) + ')' : '')).join(', ') + '</div>';
   }
   html += '</div>';
   // Central certificate store
@@ -319,7 +314,7 @@ function cfaBodyHtml(){
     h += '<tr><td><b>' + esc(a.name) + '</b><br><span class="mono dim" style="font-size:12px">' + esc(a.token) + '</span></td>'
       + '<td style="font-size:13.5px">' + (a.zones.length ? esc(a.zones.slice(0, 6).join(', ')) + (a.zones.length > 6 ? ' +' + (a.zones.length - 6) : '') : '<span class="dim">' + (c ? 'none visible' : 'not checked yet') + '</span>') + '</td>'
       + '<td style="font-size:13px">' + (c ? '<span style="margin-right:8px">' + (c.dnsRead === c.zones && c.zones ? '✅' : c.dnsRead ? '⚠' : '❌') + ' DNS read ' + c.dnsRead + '/' + c.zones + '</span>' + CFA_CAPS.map(([k, l]) => cap(k, l)).join('') : '<span class="dim">press Check</span>') + '</td>'
-      + '<td style="text-align:right;white-space:nowrap"><button class="btn small" onclick="cfaCheck(\'' + a.id + '\', this)">Check</button>' + (a.main ? '' : ' <button class="btn small" onclick="armConfirm(this, \'Disconnect?\', () => cfaDisconnect(\'' + a.id + '\'))">Disconnect</button>') + '</td></tr>';
+      + '<td style="text-align:right;white-space:nowrap"><button class="btn small" onclick="cfaCheck(\'' + a.id + '\', this)">Check</button>' + (' <button class="btn small" onclick="armConfirm(this, \'Disconnect?\', () => cfaDisconnect(\'' + a.id + '\'))">Disconnect</button>') + '</td></tr>';
   }
   return h + '</table>';
 }
@@ -413,12 +408,6 @@ function brevoBody(){
 async function saveBrevoSettings(){
   try { await stApi('PUT', 'api/settings/brevo', brevoBody()); toast('Brevo settings saved', 'success'); lastSettings = null; renderSettings(); }
   catch(e){ stErr(e, 'Brevo'); }
-}
-async function saveCloudflareSettings(){
-  const v = document.getElementById('cfToken').value.trim();
-  if (!v) return toast('Nothing to save — paste a token, or type REMOVE to delete the stored one', 'warn');
-  try { const r = await stApi('PUT', 'api/settings/cloudflare', { token: v === 'REMOVE' ? '' : v }); toast(r.configured ? 'Cloudflare token verified and saved' : 'Cloudflare token removed', 'success'); cfDomains = null; lastSettings = null; renderSettings(); }
-  catch(e){ stErr(e, 'Cloudflare'); }
 }
 async function saveWasabiSettings(){
   const g = (id) => document.getElementById(id).value.trim();

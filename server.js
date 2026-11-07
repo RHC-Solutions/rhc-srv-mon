@@ -534,6 +534,8 @@ if (NO_JOBS) {
   setInterval(() => require('./lib/security').reportNewBans().catch((e) => console.error('abuse report failed:', e.message)), 5 * 60_000);
   // GitHub: commit & push every connected site with auto-sync on, every 15 min
   setInterval(() => require('./lib/sites/github').tick().catch((e) => console.error('github sync failed:', e.message)), 15 * 60_000);
+  // Cloudflare: the old single main token becomes a connected account (or is dropped if its account is connected)
+  require('./lib/cloudflare').migrateMain().then((r) => { if (r) console.log('cloudflare: main token folded into accounts — added: ' + (r.added.join(', ') || 'none') + '; already connected: ' + (r.kept.join(', ') || 'none')); }).catch((e) => console.error('cloudflare main-token migration postponed:', e.message));
   // self-repair: the OODA loop (observe → orient → decide → act) once a minute
   require('./lib/ooda').start();
   // backups: tick every minute for the daily scheduled run
