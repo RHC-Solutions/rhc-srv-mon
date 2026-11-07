@@ -25,7 +25,8 @@ function renderTransfer(fromLoad){
     + '<ol style="margin:0 0 8px 18px;padding:0;font-size:14.5px"><li>Create a transfer code (valid 1 hour, one use).</li><li>Copy it and paste it on the <b>source</b> server\'s Transfer page.</li></ol>'
     + (trCode ? '<textarea class="mono" readonly rows="4" style="width:100%;font-size:12px" onclick="this.select()">' + esc(trCode.code) + '</textarea><div class="dim" style="font-size:13px">valid until ' + when(trCode.expires) + ' · <a href="#" onclick="vaultCopyText(trCode.code, \'Transfer code\');return false">copy</a></div>' : '')
     + '<div class="site-actions"><button class="btn pri" onclick="trMakeCode(this)">Create transfer code</button></div>'
-    + (!s.accessClientId ? '<p class="dim" style="font-size:13px;margin:6px 0 0">If this panel is behind Cloudflare Access, add a service token under <b>Advanced</b> first — otherwise the source cannot reach it.</p>' : '')
+    + (/^https:\/\/xfer-/.test(s.url || '') ? '<p class="dim" style="font-size:13px;margin:6px 0 0">Codes point to <span class="mono">' + esc(s.url) + '</span> — the transfer address outside Cloudflare Access.</p>'
+      : !s.accessClientId ? '<div class="site-why" style="font-size:13.5px;margin-top:8px">This panel is behind Cloudflare Access, which the source server cannot pass. Create a <b>transfer address</b> first — a hostname that answers only the signed transfer API (the panel stays protected):<div class="site-actions"><button class="btn small pri" onclick="trMakeEndpoint(this)">Create transfer address</button></div></div>' : '')
     + '</div>';
   // SOURCE
   h += '<div class="upd-card" style="border-top:3px solid var(--md-warning)"><h3>📦 Source · send sites from here</h3>';
@@ -68,6 +69,11 @@ async function trEnsureUrl(){
   const url = location.origin + location.pathname.replace(/[^/]*$/, '');
   await stApi('PUT', 'api/cluster/self', { url });
   if (trData && trData.self) trData.self.url = url;
+}
+async function trMakeEndpoint(btn){
+  if (btn) btn.disabled = true; toast('Creating the transfer address…');
+  try { const r = await stApi('POST', 'api/cluster/endpoint'); toast('Transfer address ready: ' + r.url, 'success', { detail: r.steps.join('\n'), duration: 12000 }); trData = null; loadTransfer(); }
+  catch(e){ stErr(e, 'Transfer address'); if (btn) btn.disabled = false; }
 }
 async function trMakeCode(btn){
   if (btn) btn.disabled = true;
