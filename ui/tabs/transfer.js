@@ -6,8 +6,8 @@ async function loadTransfer(){
   try { trData = await stApi('GET', 'api/cluster'); } catch(e){ trData = { error: e.message }; }
   trLoading = false;
   if (state.tab === 'transfer') renderTransfer(true);
-  const busy = trData && (trData.moves || []).some(m => m.state === 'running' || m.state === 'queued');
-  clearTimeout(trPoll); if (busy) trPoll = setTimeout(loadTransfer, 4000);
+  const busy = trData && (trData.moves || []).some(m => m.state === 'running' || m.state === 'queued' || m.state === 'imported');
+  clearTimeout(trPoll); if (busy) trPoll = setTimeout(loadTransfer, 2000);
 }
 function renderTransfer(fromLoad){
   plainTabHeader('Move sites to another server — a one-time connection, not a cluster');
@@ -43,8 +43,7 @@ function renderTransfer(fromLoad){
   // history
   if ((trData.moves || []).length) {
     h += '<div class="upd-card" style="margin-top:14px"><h3>Transfers</h3>';
-    for (const m of trData.moves) h += '<details' + (m.state === 'running' ? ' open' : '') + ' style="margin-top:6px"><summary><b>' + esc(m.domain || '?') + '</b> ' + (m.role === 'source' ? '→ ' + esc((m.peer || {}).name || '') : '← ' + esc(m.from || '')) + ' · ' + esc(m.state) + (m.progress != null && m.state === 'running' ? ' ' + m.progress + '%' : '') + ' · ' + when(m.started) + '</summary>'
-      + '<div class="mono" style="font-size:12.5px;white-space:pre-wrap;margin-top:6px">' + esc((m.steps || []).map(x => x.at.slice(11, 19) + '  ' + x.text).join('\n')) + '</div></details>';
+    for (const m of trData.moves) h += trProgressHtml(m);
     h += '</div>';
   }
   // this server (needed on both ends)
@@ -56,6 +55,27 @@ function renderTransfer(fromLoad){
     + stField('Access client secret', '<input id="trAsec" type="password" autocomplete="new-password" placeholder="' + (s.hasAccessSecret ? '•••••••• (stored — leave empty to keep)' : 'secret') + '">') + '</div>'
     + '<div class="site-actions"><button class="btn" onclick="trSaveSelf()">Save</button></div></details>';
   view.innerHTML = h;
+}
+// One transfer: bar, phase chips, elapsed time, the step log (open while it runs).
+const TR_PHASES_SRC = [['preflight', 'Preflight'], ['pack', 'Pack'], ['upload', 'Upload'], ['import', 'Import on target'], ['cutover', 'Switch tunnel'], ['done', 'Done']];
+const TR_PHASES_DST = [['receive', 'Receive'], ['decrypt', 'Decrypt'], ['restore', 'Restore & start'], ['wait-cutover', 'Take over tunnel'], ['done', 'Done']];
+function trProgressHtml(m){
+  const live = m.state === 'running' || m.state === 'queued' || m.state === 'imported';
+  const failed = m.state === 'failed', done = m.state === 'done' || m.state === 'live';
+  const pct = done ? 100 : (m.progress || 0);
+  const secs = Math.round(((m.finished ? new Date(m.finished) : new Date()) - new Date(m.started)) / 1000);
+  const el = Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0');
+  const phases = m.role === 'source' ? TR_PHASES_SRC : TR_PHASES_DST;
+  const cur = phases.findIndex(([k]) => k === (done ? 'done' : m.phase));
+  const chips = phases.map(([k, l], i) => '<span style="margin-right:10px;white-space:nowrap">' + (done || i < cur ? '✅' : i === cur ? (failed ? '❌' : '⏳') : '·') + ' ' + esc(l) + '</span>').join('');
+  const color = failed ? 'var(--md-error-bright)' : done ? 'var(--md-success, #2e7d32)' : 'var(--md-primary)';
+  return '<div style="border:1px solid var(--clp-border);border-radius:8px;padding:10px 12px;margin-top:10px">'
+    + '<div style="display:flex;justify-content:space-between;gap:8px"><b>' + esc(m.domain || '…') + ' ' + (m.role === 'source' ? '→ ' + esc((m.peer || {}).name || '') : '← ' + esc(m.from || 'source')) + '</b><span class="dim mono">' + el + '</span></div>'
+    + '<div style="height:10px;background:var(--clp-border);border-radius:5px;overflow:hidden;margin:8px 0 6px"><div style="height:100%;width:' + pct + '%;background:' + color + ';transition:width .6s"></div></div>'
+    + '<div style="font-size:13.5px;margin-bottom:4px"><b>' + pct + '%</b> · ' + esc(failed ? 'FAILED — ' + (m.error || '') : done ? (m.role === 'source' ? 'done — the site runs on ' + ((m.peer || {}).name || 'the target') : 'done — the site runs here') : m.state === 'queued' ? 'waiting for the move before it' : (m.detail || m.phase || 'working')) + '</div>'
+    + '<div style="font-size:13px">' + chips + '</div>'
+    + '<details' + (live || failed ? ' open' : '') + ' style="margin-top:6px"><summary class="dim" style="cursor:pointer;font-size:13px">Log (' + (m.steps || []).length + ' steps)</summary><div class="mono" style="font-size:12px;white-space:pre-wrap;margin-top:4px;max-height:220px;overflow:auto">'
+    + esc((m.steps || []).map(x => x.at.slice(11, 19) + '  ' + x.text).concat(m.remote && live ? (m.remote.steps || []).map(x => '        ' + x.text) : []).join('\n')) + '</div></details></div>';
 }
 async function trSaveSelf(){
   const g = (id) => document.getElementById(id).value;
