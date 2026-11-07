@@ -6,7 +6,7 @@ async function loadTransfer(){
   try { trData = await stApi('GET', 'api/cluster'); } catch(e){ trData = { error: e.message }; }
   trLoading = false;
   if (state.tab === 'transfer') renderTransfer(true);
-  const busy = trData && (trData.moves || []).some(m => m.state === 'running' || m.state === 'queued' || m.state === 'imported');
+  const busy = trData && ((trData.moves || []).some(m => m.state === 'running' || m.state === 'queued' || m.state === 'imported') || (trData.incoming || []).some(r => r.state === 'pending' || r.state === 'accepted'));
   clearTimeout(trPoll); if (busy) trPoll = setTimeout(loadTransfer, 2000);
 }
 function renderTransfer(fromLoad){
@@ -20,6 +20,15 @@ function renderTransfer(fromLoad){
   const sites = trData.localSites || [];
   let h = '<p class="dim" style="margin:0 0 12px;font-size:14.5px">Two servers, two roles: on the <b>target</b> (the server that gets the sites) create a transfer code; on the <b>source</b> (the server the sites are on now) paste it and pick the sites. The connection is temporary and closes by itself when the transfer is done.</p>';
   h += '<div class="upd-grid">';
+  // incoming requests (this server as target) — need a decision
+  const inc = trData.incoming || [];
+  const pend = inc.filter(r => r.state === 'pending');
+  if (inc.length) {
+    h = '<div class="upd-card" style="margin-bottom:14px;border-top:3px solid ' + (pend.length ? 'var(--md-warning)' : 'var(--clp-border)') + '"><h3>📥 Incoming transfers' + (pend.length ? ' — ' + pend.length + ' waiting for you' : '') + '</h3><table class="upd-table"><tr><th>Site</th><th>From</th><th>Details</th><th></th></tr>'
+      + inc.map(r => '<tr><td><b>' + esc(r.domain) + '</b></td><td>' + esc(r.from) + '</td><td class="dim" style="font-size:13.5px">' + esc(r.type) + (r.php ? ' · PHP ' + esc(r.php) : '') + (r.viaDns ? ' · DNS will be switched to this server' : ' · its tunnel moves here') + '<br>' + esc(new Date(r.at).toLocaleString()) + '</td>'
+        + '<td style="text-align:right;white-space:nowrap">' + (r.state === 'pending' ? '<button class="btn small" onclick="armConfirm(this, \'Reject?\', () => trDecide(\'' + r.id + '\', \'reject\'))">Reject</button> <button class="btn small pri" onclick="trDecide(\'' + r.id + '\', \'accept\', this)">Accept</button>' : '<span class="upd-badge ' + (r.state === 'accepted' ? 'ok' : 'na') + '">' + esc(r.state) + (r.decidedBy ? ' by ' + esc(r.decidedBy) : '') + '</span>') + '</td></tr>').join('')
+      + '</table></div>' + h;
+  }
   // TARGET
   h += '<div class="upd-card" style="border-top:3px solid var(--md-primary)"><h3>🎯 Target · receive sites here</h3>'
     + '<ol style="margin:0 0 8px 18px;padding:0;font-size:14.5px"><li>Create a transfer code (valid 1 hour, one use).</li><li>Copy it and paste it on the <b>source</b> server\'s Transfer page.</li></ol>'
@@ -57,7 +66,7 @@ function renderTransfer(fromLoad){
   view.innerHTML = h;
 }
 // One transfer: bar, phase chips, elapsed time, the step log (open while it runs).
-const TR_PHASES_SRC = [['preflight', 'Preflight'], ['pack', 'Pack'], ['upload', 'Upload'], ['import', 'Import on target'], ['cutover', 'Switch tunnel'], ['done', 'Done']];
+const TR_PHASES_SRC = [['approval', 'Target accepts'], ['preflight', 'Preflight'], ['pack', 'Pack'], ['upload', 'Upload'], ['import', 'Import on target'], ['cutover', 'Switch tunnel'], ['done', 'Done']];
 const TR_PHASES_DST = [['receive', 'Receive'], ['decrypt', 'Decrypt'], ['restore', 'Restore & start'], ['wait-cutover', 'Take over tunnel'], ['done', 'Done']];
 function trProgressHtml(m){
   const live = m.state === 'running' || m.state === 'queued' || m.state === 'imported';
@@ -76,6 +85,11 @@ function trProgressHtml(m){
     + '<div style="font-size:13px">' + chips + '</div>'
     + '<details' + (live || failed ? ' open' : '') + ' style="margin-top:6px"><summary class="dim" style="cursor:pointer;font-size:13px">Log (' + (m.steps || []).length + ' steps)</summary><div class="mono" style="font-size:12px;white-space:pre-wrap;margin-top:4px;max-height:220px;overflow:auto">'
     + esc((m.steps || []).map(x => x.at.slice(11, 19) + '  ' + x.text).concat(m.remote && live ? (m.remote.steps || []).map(x => '        ' + x.text) : []).join('\n')) + '</div></details></div>';
+}
+async function trDecide(id, decision, btn){
+  if (btn) btn.disabled = true;
+  try { const r = await stApi('POST', 'api/cluster/requests/' + id + '/' + decision); toast((decision === 'accept' ? 'Accepted ' : 'Rejected ') + r.domain + (decision === 'accept' ? ' — the source starts sending it now' : ''), decision === 'accept' ? 'success' : 'warn'); loadTransfer(); }
+  catch(e){ stErr(e, 'Transfer'); if (btn) btn.disabled = false; }
 }
 async function trSaveSelf(){
   const g = (id) => document.getElementById(id).value;
