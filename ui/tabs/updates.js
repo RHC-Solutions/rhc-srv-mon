@@ -355,13 +355,25 @@ async function triggerPanelUpdate(){
   }
   if (!back) { set(2, '❌', 'the panel has not answered for ' + Math.round((Date.now() - t0) / 1000) + ' s', 'var(--md-error-bright)'); set(3, '?', 'unknown'); return finish(false, 'Check the server: <span class="mono">pm2 logs sb-srv-mon</span>. If the new code fails to start, it is rolled back to ' + esc(fromVer) + ' automatically within a minute.'); }
   set(2, '✅', 'back after ' + Math.round((Date.now() - t0) / 1000) + ' s');
-  // 3: which version came back, and did the restart report a rollback?
-  lastUpdates = back;
-  const now = (back.components || []).find(x => x.key === 'panel') || {};
-  const report = (back.log || []).slice().reverse().find(e => e.component === 'panel' && e.action === 'restart' && new Date(e.timestamp).getTime() >= t0 - 5000);
+  // 3: ask the restarted panel itself (a fresh check, not a cached answer) which version runs now —
+  // retried for up to 30 s while the new process settles; a rollback report wins.
+  let now = {}, report = null;
+  for (let i = 0; i < 10; i++) {
+    set(3, '⏳', 'checking which version runs now…');
+    try { const r = await fetch('api/updates/check', { method: 'POST', cache: 'no-store' }); if (r.ok) back = await r.json(); } catch(_){}
+    lastUpdates = back;
+    now = (back.components || []).find(x => x.key === 'panel') || {};
+    report = (back.log || []).slice().reverse().find(e => e.component === 'panel' && e.action === 'restart' && new Date(e.timestamp).getTime() >= t0 - 5000);
+    if ((report && !report.success) || (now.currentHash && now.currentHash !== fromHash)) break;
+    await new Promise(r => setTimeout(r, 3000));
+  }
   if (report && !report.success) { set(3, '❌', report.output, 'var(--md-error-bright)'); finish(false, 'The new code did not start — the panel rolled back and runs ' + esc(now.currentVersion || '?') + ' again. Nothing is broken; the failed update is in the log below.'); }
-  else if (now.currentHash && now.currentHash === fromHash) { set(3, '⚠', 'still on ' + (now.currentVersion || '?') + ' — the restart may still be in progress', 'var(--md-warning)'); finish(false, 'Reload in a minute to check again.'); }
-  else { set(3, '✅', 'now running ' + (now.currentVersion || '?') + (now.currentHash ? ' (' + now.currentHash + ')' : '')); finish(true, 'Updated from ' + esc(fromVer) + ' to ' + esc(now.currentVersion || '?') + '.'); }
+  else if (now.currentHash && now.currentHash === fromHash) { set(3, '❌', 'still running ' + (now.currentVersion || '?') + ' after the restart', 'var(--md-error-bright)'); finish(false, 'The pull did not reach the running panel — see the update log below and <span class="mono">pm2 logs</span>.'); }
+  else {
+    set(3, '✅', 'now running ' + (now.currentVersion || '?') + (now.currentHash ? ' (' + now.currentHash + ')' : ''));
+    finish(true, 'Updated from ' + esc(fromVer) + ' to ' + esc(now.currentVersion || '?') + ' — reloading the page in 3 s for the new interface…');
+    setTimeout(() => location.reload(), 3000);
+  }
   if (state.tab === 'updates') renderUpdates();
 }
 
