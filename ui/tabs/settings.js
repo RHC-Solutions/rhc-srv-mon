@@ -70,6 +70,8 @@ function renderSettings(){
     + '<p class="dim" style="margin:0 0 8px;font-size:14.5px">API token with <b>Zone:Read</b> and <b>DNS:Edit</b> (Cloudflare dashboard → My Profile → API Tokens). Stored encrypted. Powers the domains overview below; DNS records for new sites and origin certificates come next.</p>'
     + stField('API token', '<input type="password" id="cfToken" placeholder="' + (cf.configured ? esc(cf.token) + ' (leave empty to keep, type REMOVE to delete)' : 'paste token') + '">')
     + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'cloudflare\')">Verify token</button><button class="btn pri" onclick="saveCloudflareSettings()">Save</button></div></div>';
+  // Cloudflare accounts (filled by loadCfAccounts)
+  html += '<div class="upd-card" id="cf-accounts" style="grid-column:1/-1"><div class="site-card-hd"><h3>Cloudflare accounts</h3><span><button class="btn small" onclick="cfaAll()">Re-check all</button> <button class="btn small pri" onclick="cfaConnect()">＋ Connect account</button></span></div><div id="cfaBody">' + cfaBodyHtml() + '</div></div>';
   // Wasabi (backup target)
   const wb = lastSettings.wasabi || {};
   html += '<div class="upd-card" id="wasabi"><h3>Wasabi (backups)</h3>'
@@ -303,6 +305,44 @@ async function saveSlackSettings(){
   try { await stApi('PUT', 'api/settings/slack', body); toast('Slack settings saved', 'success'); lastSettings = null; renderSettings(); }
   catch(e){ stErr(e, 'Slack'); }
 }
+let cfaData = null, cfaLoading = false;
+const CFA_CAPS = [['dnsEdit', 'DNS edit'], ['tunnels', 'Tunnels'], ['access', 'Access (read)'], ['firewall', 'Firewall rules'], ['ssl', 'Certificates']];
+function cfaBodyHtml(){
+  if (!cfaData) { if (!cfaLoading) loadCfAccounts(); return '<p class="dim">Loading…</p>'; }
+  if (cfaData.error) return '<p style="color:var(--md-error-bright)">⚠ ' + esc(cfaData.error) + '</p>';
+  let h = '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Every Cloudflare account that holds your domains, one token each. The panel picks the right one by itself for every action — sites, tunnels, DNS switches in transfers, blocking. A domain added to any connected account is recognised at once.</p>';
+  if (!cfaData.accounts.length) return h + '<p class="dim">No account connected yet.</p>';
+  h += '<table class="upd-table"><tr><th>Account</th><th>Domains</th><th>Can do</th><th></th></tr>';
+  for (const a of cfaData.accounts) {
+    const c = a.caps;
+    const cap = (k, l) => !c ? '' : '<span style="margin-right:8px;white-space:nowrap">' + (c[k] === true ? '✅' : c[k] === false ? '❌' : '·') + ' ' + l + '</span>';
+    h += '<tr><td><b>' + esc(a.name) + '</b><br><span class="mono dim" style="font-size:12px">' + esc(a.token) + '</span></td>'
+      + '<td style="font-size:13.5px">' + (a.zones.length ? esc(a.zones.slice(0, 6).join(', ')) + (a.zones.length > 6 ? ' +' + (a.zones.length - 6) : '') : '<span class="dim">' + (c ? 'none visible' : 'not checked yet') + '</span>') + '</td>'
+      + '<td style="font-size:13px">' + (c ? '<span style="margin-right:8px">' + (c.dnsRead === c.zones && c.zones ? '✅' : c.dnsRead ? '⚠' : '❌') + ' DNS read ' + c.dnsRead + '/' + c.zones + '</span>' + CFA_CAPS.map(([k, l]) => cap(k, l)).join('') : '<span class="dim">press Check</span>') + '</td>'
+      + '<td style="text-align:right;white-space:nowrap"><button class="btn small" onclick="cfaCheck(\'' + a.id + '\', this)">Check</button>' + (a.main ? '' : ' <button class="btn small" onclick="armConfirm(this, \'Disconnect?\', () => cfaDisconnect(\'' + a.id + '\'))">Disconnect</button>') + '</td></tr>';
+  }
+  return h + '</table>';
+}
+function cfaRender(){ const el = document.getElementById('cfaBody'); if (el) el.innerHTML = cfaBodyHtml(); }
+async function loadCfAccounts(){ cfaLoading = true; try { cfaData = await stApi('GET', 'api/settings/cloudflare/accounts'); } catch(e){ cfaData = { error: e.message }; } cfaLoading = false; cfaRender(); }
+function cfaConnect(){
+  sshModal('<h3>Connect a Cloudflare account</h3>'
+    + '<ol style="margin:0 0 10px 18px;padding:0;font-size:14.5px;line-height:1.6">'
+    + '<li><a class="btn small pri" href="' + esc(cfaData.connectLink) + '" target="_blank" rel="noopener">Open Cloudflare ↗</a> — pick the account; the token form opens with <b>DNS → Edit</b> already set.</li>'
+    + '<li>On that page also add: <b>Zone → Zone → Read</b>, <b>Account → Cloudflare Tunnel → Edit</b>, <b>Account → Access: Apps and Policies → Edit</b>, <b>Account → Access: Service Tokens → Edit</b>, <b>Account → Account Firewall Access Rules → Edit</b>, <b>Zone → SSL and Certificates → Edit</b>; Zone Resources: <b>All zones</b>.</li>'
+    + '<li>Create the token and paste it here:</li></ol>'
+    + stField('API token', '<input id="cfaTok" class="mono" autocomplete="off" placeholder="paste the new token">')
+    + '<p class="dim" style="font-size:13px">The panel then shows which domains the account holds and what the token can do (it writes and deletes one test TXT record to prove DNS edit).</p>'
+    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="cfaSave(this)">Connect</button></div>');
+}
+async function cfaSave(btn){
+  btn.disabled = true; btn.textContent = '⏳ Checking the token…';
+  try { const a = await stApi('POST', 'api/settings/cloudflare/accounts', { token: document.getElementById('cfaTok').value.trim() }); sshModalClose(); toast('Connected ' + a.name + ' — ' + a.zones.length + ' domains', 'success'); cfaData = null; loadCfAccounts(); }
+  catch(e){ stErr(e, 'Cloudflare'); btn.disabled = false; btn.textContent = 'Connect'; }
+}
+async function cfaCheck(id, btn){ if (btn) { btn.disabled = true; btn.textContent = '⏳'; } try { await stApi('POST', 'api/settings/cloudflare/accounts/' + id + '/check'); } catch(e){ stErr(e, 'Check'); } cfaData = null; loadCfAccounts(); }
+async function cfaAll(){ for (const a of (cfaData && cfaData.accounts) || []) { try { await stApi('POST', 'api/settings/cloudflare/accounts/' + a.id + '/check'); } catch(_){} } cfaData = null; loadCfAccounts(); toast('All accounts checked', 'success'); }
+async function cfaDisconnect(id){ try { await stApi('DELETE', 'api/settings/cloudflare/accounts/' + id); toast('Disconnected', 'success'); cfaData = null; loadCfAccounts(); } catch(e){ stErr(e, 'Disconnect'); } }
 let wlData = null, wlLoading = false, wlRows = null;
 function wlBodyHtml(){
   if (!wlData) { if (!wlLoading) loadWhitelist(); return '<p class="dim">Loading…</p>'; }
