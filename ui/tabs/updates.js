@@ -310,36 +310,59 @@ async function triggerUpdate(key){
 
 // The panel pulls its new code and restarts itself, so this page goes away for a few seconds: wait for
 // it to answer again, then reload so the browser runs the new UI too.
+// Panel self-update with a progress window: 1 download & check (POST run/panel), 2 restart (the panel
+// goes away and comes back — polled), 3 confirm (the version that came back + the restart report the
+// new code wrote to the update log: success, or rolled back). The window stays until closed.
 async function triggerPanelUpdate(){
-  if (lastUpdates) {
-    const c = lastUpdates.components.find(x => x.key === 'panel');
-    if (c) c.updating = true;
-    renderUpdates();
-  }
+  const pc = lastUpdates && lastUpdates.components.find(x => x.key === 'panel');
+  const fromVer = pc ? pc.currentVersion : '?', fromHash = pc ? pc.currentHash : null;
+  const t0 = Date.now();
+  const step = (n, title) => '<div id="pu' + n + '" style="display:flex;gap:10px;align-items:flex-start;padding:6px 0"><span id="pu' + n + 'i" style="width:22px">·</span><div style="flex:1"><b>' + n + ' · ' + title + '</b><div id="pu' + n + 'd" class="dim" style="font-size:13.5px;white-space:pre-wrap"></div></div></div>';
+  sshModal('<h3>Updating the panel from GitHub</h3><div class="dim" style="font-size:13.5px;margin-bottom:6px">Running version ' + esc(fromVer) + (fromHash ? ' (' + esc(fromHash) + ')' : '') + '</div>'
+    + step(1, 'Download & check the new code') + step(2, 'Restart the panel') + step(3, 'Confirm the new version')
+    + '<div id="puFoot" class="foot"><span class="dim" id="puNote" style="margin-right:auto;font-size:13px">You can close this window — the update continues on the server.</span><button class="btn" onclick="sshModalClose()">Close</button></div>');
+  const set = (n, icon, text, color) => { const i = document.getElementById('pu' + n + 'i'), d = document.getElementById('pu' + n + 'd'); if (i) i.textContent = icon; if (d) { d.textContent = text || ''; d.style.color = color || ''; } };
+  const finish = (ok, msg) => { const n = document.getElementById('puNote'); if (n) { n.innerHTML = msg; n.style.color = ok ? '' : 'var(--md-error-bright)'; }
+    const f = document.getElementById('puFoot'); if (f && ok) f.insertAdjacentHTML('beforeend', '<button class="btn pri" onclick="location.reload()">Reload page</button>'); };
+  if (pc) { pc.updating = true; renderUpdates(); }
+  // 1
+  set(1, '⏳', 'fetching from GitHub, fast-forwarding, syntax-checking…');
   let result;
-  try {
-    const res = await fetch('api/updates/run/panel', { method: 'POST' });
-    result = await res.json();
-  } catch(e){ return toast('Panel update failed: ' + e.message, 'error'); }
+  try { const res = await fetch('api/updates/run/panel', { method: 'POST' }); result = await res.json(); }
+  catch(e){ set(1, '❌', e.message, 'var(--md-error-bright)'); return finish(false, 'The request failed — nothing was changed.'); }
   if (result.error || result.success === false) {
-    toast('Panel update failed', 'error', { detail: result.error || result.output, duration: 20000 });
+    set(1, '❌', (result.error || result.output || 'failed').trim(), 'var(--md-error-bright)'); set(2, '–', 'skipped'); set(3, '–', 'skipped');
     try { const r2 = await fetch('api/updates'); lastUpdates = await r2.json(); } catch(_){}
     if (state.tab === 'updates') renderUpdates();
-    return;
+    return finish(false, 'Nothing was changed — the panel keeps running ' + esc(fromVer) + '.');
   }
   if (/^already up to date/.test(result.output || '')) {
-    toast('Panel ' + result.output, 'success');
+    set(1, '✅', 'GitHub has nothing newer'); set(2, '–', 'not needed'); set(3, '✅', 'running ' + fromVer);
     try { const r2 = await fetch('api/updates'); lastUpdates = await r2.json(); } catch(_){}
     if (state.tab === 'updates') renderUpdates();
-    return;
+    return finish(true, 'Already up to date.');
   }
-  toast('Updated from GitHub — restarting the panel…', 'info', { detail: result.output, duration: 15000 });
-  await new Promise(r => setTimeout(r, 6000));
-  for (let i = 0; i < 40; i++) {
-    try { const r = await fetch('api/updates', { cache: 'no-store' }); if (r.ok) return location.reload(); } catch(_){}
-    await new Promise(r => setTimeout(r, 3000));
+  const lines = String(result.output || '').split('\n');
+  set(1, '✅', lines.slice(1).filter(Boolean).slice(0, 8).join('\n') || lines[0]);
+  // 2: the panel restarts — wait until it answers again
+  set(2, '⏳', 'restarting…');
+  await new Promise(r => setTimeout(r, 4000));
+  let back = null;
+  for (let i = 0; i < 60 && !back; i++) {
+    set(2, '⏳', 'waiting for the panel to come back… ' + Math.round((Date.now() - t0) / 1000) + ' s');
+    try { const r = await fetch('api/updates', { cache: 'no-store' }); if (r.ok) back = await r.json(); } catch(_){}
+    if (!back) await new Promise(r => setTimeout(r, 2500));
   }
-  toast('The panel has not come back yet — reload the page in a minute', 'warn', { duration: 30000 });
+  if (!back) { set(2, '❌', 'the panel has not answered for ' + Math.round((Date.now() - t0) / 1000) + ' s', 'var(--md-error-bright)'); set(3, '?', 'unknown'); return finish(false, 'Check the server: <span class="mono">pm2 logs sb-srv-mon</span>. If the new code fails to start, it is rolled back to ' + esc(fromVer) + ' automatically within a minute.'); }
+  set(2, '✅', 'back after ' + Math.round((Date.now() - t0) / 1000) + ' s');
+  // 3: which version came back, and did the restart report a rollback?
+  lastUpdates = back;
+  const now = (back.components || []).find(x => x.key === 'panel') || {};
+  const report = (back.log || []).slice().reverse().find(e => e.component === 'panel' && e.action === 'restart' && new Date(e.timestamp).getTime() >= t0 - 5000);
+  if (report && !report.success) { set(3, '❌', report.output, 'var(--md-error-bright)'); finish(false, 'The new code did not start — the panel rolled back and runs ' + esc(now.currentVersion || '?') + ' again. Nothing is broken; the failed update is in the log below.'); }
+  else if (now.currentHash && now.currentHash === fromHash) { set(3, '⚠', 'still on ' + (now.currentVersion || '?') + ' — the restart may still be in progress', 'var(--md-warning)'); finish(false, 'Reload in a minute to check again.'); }
+  else { set(3, '✅', 'now running ' + (now.currentVersion || '?') + (now.currentHash ? ' (' + now.currentHash + ')' : '')); finish(true, 'Updated from ' + esc(fromVer) + ' to ' + esc(now.currentVersion || '?') + '.'); }
+  if (state.tab === 'updates') renderUpdates();
 }
 
 async function triggerUserUpdate(user, key){
