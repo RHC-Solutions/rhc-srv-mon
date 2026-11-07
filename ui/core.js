@@ -124,6 +124,7 @@ const TABS = {
   backup:  { slug:'backups',  label:'Backups',    view:'backupview',  render: () => renderBackup(),  onRefresh: () => renderBackup() },
   ssh:     { slug:'ssh',      label:'SSH',        view:'sshview',     render: () => renderSsh() },
   certs:   { slug:'certificates', label:'Certificates', view:'certsview', render: () => renderCertsTab() },
+  transfer:{ slug:'transfer', label:'Transfer',   view:'transferview', render: () => renderTransfer(), onRefresh: () => renderTransfer() },
   ooda:    { slug:'self-repair', label:'Self-repair', view:'oodaview', render: () => renderOoda(), onRefresh: () => renderOoda() },
   vault:   { slug:'vault',    label:'Vault',      view:'vaultview',   render: () => renderVault() },
   tunnels: { slug:'tunnels',  label:'Tunnels',    view:'tunnelsview', render: () => renderTunnelsTab() },
