@@ -19,9 +19,12 @@ function renderUpdates(){
   const updCount = d.components.filter(c => c.updateAvailable && !c.git).length;
   html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
   html += '<h3 style="margin:0">Components</h3>';
+  html += '<span>';
+  html += '<button class="btn" onclick="checkUpdatesNow(this)" style="font-size:14px;padding:4px 14px" title="Check npm and GitHub for new versions now">⟳ Check now</button>';
   if (updCount) {
-    html += '<button class="btn update" onclick="triggerUpdateAll()" style="font-size:14px;padding:4px 14px">⬆ Update All (' + updCount + ')</button>';
+    html += ' <button class="btn update" onclick="triggerUpdateAll()" style="font-size:14px;padding:4px 14px">⬆ Update All (' + updCount + ')</button>';
   }
+  html += '</span>';
   html += '</div>';
   html += '<table class="upd-table"><tr><th>Component</th><th>Current</th><th>Latest</th><th>Status</th><th></th></tr>';
   for (const c of d.components) {
@@ -34,7 +37,8 @@ function renderUpdates(){
       : '<span class="upd-badge ok">up to date</span>';
     const btnHtml = !c.currentVersion ? ''
       : isRunning ? '<button class="btn running" disabled>⏳ updating</button>'
-      : hasUpdate && c.git ? '<button class="btn update" onclick="armConfirm(this, \'⬆ Pull and restart the panel?\', () => triggerPanelUpdate())" title="git pull from GitHub, check the code, restart the panel (rolls back if it does not come up)">⬆ Update from GitHub</button>'
+      // The panel's own button is always there: it fetches first, so it also catches commits the hourly check has not seen yet.
+      : c.git ? '<button class="btn update" onclick="armConfirm(this, \'⬆ Pull from GitHub and restart?\', () => triggerPanelUpdate())" title="git pull from GitHub, check the code, restart the panel (rolls back if it does not come up); does nothing if already up to date">⬆ Update' + (hasUpdate ? ' from GitHub' : '') + '</button>'
       : hasUpdate ? '<button class="btn update" onclick="triggerUpdate(\'' + c.key + '\')">⬆ Update</button>'
       : '<button class="btn" disabled>✓ latest</button>';
     // Node.js is the runtime everything else here needs, and the panel is this app: neither is removable.
@@ -184,9 +188,22 @@ function renderUpdates(){
 async function checkUpdates(){
   try {
     const res = await fetch('api/updates/check', { method: 'POST' });
-    lastUpdates = await res.json();
+    const data = await res.json();
+    if (!res.ok || data.error) return false;
+    lastUpdates = data;
     if (state.tab === 'updates') renderUpdates();
-  } catch(_){}
+    return true;
+  } catch(_){ return false; }
+}
+
+async function checkUpdatesNow(btn){
+  btn.disabled = true; btn.textContent = '⏳ Checking…';
+  if (!await checkUpdates()) {
+    btn.disabled = false; btn.textContent = '⟳ Check now';
+    return toast('Update check failed', 'error');
+  }
+  const avail = lastUpdates ? (lastUpdates.components || []).filter(c => c.updateAvailable).length : 0;
+  toast(avail ? avail + ' update' + (avail > 1 ? 's' : '') + ' available' : 'Everything is up to date', avail ? 'info' : 'success');
 }
 
 async function triggerUpdate(key){
