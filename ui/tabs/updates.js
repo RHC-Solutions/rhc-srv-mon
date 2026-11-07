@@ -18,10 +18,13 @@ function renderUpdates(){
   html += '<div class="upd-card" style="grid-column:1/-1">';
   const updCount = d.components.filter(c => c.updateAvailable && !c.git).length;
   html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
-  html += '<h3 style="margin:0">Components</h3>';
+  html += '<h3 style="margin:0">Components</h3><span style="display:flex;gap:8px;align-items:center">';
+  html += '<span class="dim" style="font-size:13px">checked ' + (d.lastChecked ? esc(new Date(d.lastChecked).toLocaleString()) : 'never') + '</span>';
+  html += '<button class="btn" onclick="checkUpdatesNow(this)" style="font-size:14px;padding:4px 14px" title="check every component now — OS packages, Node.js, tools and the panel against GitHub">' + (updChecking ? '⏳ Checking…' : '⟳ Check now') + '</button>';
   if (updCount) {
     html += '<button class="btn update" onclick="triggerUpdateAll()" style="font-size:14px;padding:4px 14px">⬆ Update All (' + updCount + ')</button>';
   }
+  html += '</span>';
   html += '</div>';
   html += '<table class="upd-table"><tr><th>Component</th><th>Current</th><th>Latest</th><th>Status</th><th></th></tr>';
   for (const c of d.components) {
@@ -36,6 +39,7 @@ function renderUpdates(){
       : isRunning ? '<button class="btn running" disabled>⏳ updating</button>'
       : hasUpdate && c.git ? '<button class="btn update" onclick="armConfirm(this, \'⬆ Pull and restart the panel?\', () => triggerPanelUpdate())" title="git pull from GitHub, check the code, restart the panel (rolls back if it does not come up)">⬆ Update from GitHub</button>'
       : hasUpdate ? '<button class="btn update" onclick="triggerUpdate(\'' + c.key + '\')">⬆ Update</button>'
+      : c.git ? '<button class="btn" onclick="checkUpdatesNow(this)" title="fetch from GitHub now; ⬆ Update from GitHub appears when there are new commits">⟳ Check GitHub</button>'
       : '<button class="btn" disabled>✓ latest</button>';
     // Node.js is the runtime everything else here needs, and the panel is this app: neither is removable.
     const rmHtml = (!c.currentVersion || isRunning || c.key === 'node' || c.git) ? ''
@@ -181,6 +185,22 @@ function renderUpdates(){
   }));
 }
 
+let updChecking = false;
+async function checkUpdatesNow(btn){
+  if (updChecking) return;
+  updChecking = true; if (btn) { btn.disabled = true; btn.textContent = '⏳ Checking…'; }
+  toast('Checking for updates…');
+  try {
+    const res = await fetch('api/updates/check', { method: 'POST' });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
+    lastUpdates = d;
+    const avail = (d.components || []).filter(c => c.updateAvailable);
+    toast(avail.length ? avail.length + ' update' + (avail.length > 1 ? 's' : '') + ' available: ' + avail.map(c => c.label).join(', ') : 'Everything is up to date', avail.length ? 'warn' : 'success', { duration: 8000 });
+  } catch(e){ toast('Check failed: ' + e.message, 'error'); }
+  updChecking = false;
+  if (state.tab === 'updates') renderUpdates();
+}
 async function checkUpdates(){
   try {
     const res = await fetch('api/updates/check', { method: 'POST' });
