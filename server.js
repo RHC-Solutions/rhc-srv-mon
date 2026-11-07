@@ -26,6 +26,7 @@ require('./lib/api/ssh');
 require('./lib/api/vault');
 require('./lib/api/cluster');
 require('./lib/api/agents');
+require('./lib/api/appstore');
 const notifyEvents = require('./lib/notify-events');
 const clpImport = require('./lib/clp-import');
 const cloudpanel = require('./lib/cloudpanel');
