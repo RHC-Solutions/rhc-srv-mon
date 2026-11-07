@@ -2,7 +2,7 @@
 // List (cards with health) → detail with CloudPanel-style sub-tabs. Sub-navigation lives in the
 // query string (sites?d=<domain>&t=<tab>) so every relative api/ URL keeps working behind nginx.
 let lastSites = null;
-const SITE_TABS = [['settings', 'Settings'], ['overrides', 'Overrides'], ['procs', 'Processes'], ['vhost', 'Vhost'], ['databases', 'Databases'], ['ssl', 'SSL/TLS'], ['cloudflare', 'Cloudflare'], ['rules', 'Domains & Rules'], ['security', 'Security'], ['ssh', 'SSH/FTP'], ['files', 'File Manager'], ['cron', 'Cron Jobs'], ['logs', 'Logs']];
+const SITE_TABS = [['settings', 'Settings'], ['overrides', 'Overrides'], ['github', 'GitHub'], ['procs', 'Processes'], ['vhost', 'Vhost'], ['databases', 'Databases'], ['ssl', 'SSL/TLS'], ['cloudflare', 'Cloudflare'], ['rules', 'Domains & Rules'], ['security', 'Security'], ['ssh', 'SSH/FTP'], ['files', 'File Manager'], ['cron', 'Cron Jobs'], ['logs', 'Logs']];
 let siteView = { domain: null, tab: 'settings', data: null, loading: false, sub: {} };   // sub: per-tab fetched data
 // Not kept across visits: Chrome autofills the saved sign-in name into this box, and keeping it
 // turned that into a filter that hid every site ("No sites match.") on every visit.
@@ -399,7 +399,7 @@ function renderSiteDetail(){
   // do not clobber a form the user is typing in (10 s refresh)
   if (view.contains(document.activeElement) && ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;
   const s = siteView.data;
-  const body = ({ settings: siteTabSettings, overrides: siteTabOverrides, procs: siteTabProcs, vhost: siteTabVhost, databases: siteTabDatabases, ssl: siteTabSsl, cloudflare: siteTabCf, rules: siteTabRules, security: siteTabSecurity, ssh: siteTabSsh, files: siteTabFiles, cron: siteTabCron, logs: siteTabLogs }[siteView.tab] || siteTabSettings)(s);
+  const body = ({ settings: siteTabSettings, overrides: siteTabOverrides, github: siteTabGithub, procs: siteTabProcs, vhost: siteTabVhost, databases: siteTabDatabases, ssl: siteTabSsl, cloudflare: siteTabCf, rules: siteTabRules, security: siteTabSecurity, ssh: siteTabSsh, files: siteTabFiles, cron: siteTabCron, logs: siteTabLogs }[siteView.tab] || siteTabSettings)(s);
   view.innerHTML = siteHeader(s) + '<div class="site-body">' + body + '</div>';
   if (typeof siteView.afterRender === 'function') { const f = siteView.afterRender; siteView.afterRender = null; f(); }
 }
@@ -1403,4 +1403,37 @@ async function siteOvSave(group){
     toast('Saved' + (r.steps && r.steps.length ? ' — ' + r.steps.length + ' tunnel steps done' : ''), 'success', r.steps && r.steps.length ? { detail: r.steps.join('\n'), duration: 10000 } : {});
     siteSubReload('overrides');
   } catch(e){ siteErr(e, 'Overrides'); }
+}
+
+/* ---- GitHub: own private repo, auto commit & push to main, Update = pull + restart ---- */
+function siteTabGithub(s){
+  return siteSub('github', siteUrl('/github'), (g) => {
+    if (!g.connected) return siteCard('GitHub', '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Not connected. Connecting creates a private repo <b>RHC-Solutions/' + esc(s.domain) + '</b> (or uses the org repo this code was cloned from), gives the site a deploy key that can only reach that repo, and pushes the code to <b>main</b>. Data folders, databases, keys and .env files are never committed.</p>'
+      + '<div class="site-actions"><button class="btn pri" onclick="siteGhAct(\'connect\', this)">Connect to GitHub</button></div>');
+    const l = g.last;
+    const when = (t) => t ? esc(new Date(t).toLocaleString()) : '–';
+    let h = '<p style="margin:0 0 6px"><a href="' + esc(g.url) + '" target="_blank" rel="noopener"><b>' + esc(g.repo) + '</b> ↗</a> · branch <span class="mono">' + esc(g.branch) + '</span>'
+      + (g.upstream ? ' · upstream <span class="mono dim">' + esc(g.upstream) + '</span>' : '') + '</p>'
+      + '<div class="upd-toggle"><label class="switch"><input type="checkbox"' + (g.autoSync ? ' checked' : '') + ' onchange="siteGhAuto(this.checked)"><span class="slider"></span></label><label>Auto-sync: commit &amp; push changes made on the server every 15 min</label></div>'
+      + '<div class="' + (l && !l.ok ? 'site-why' : 'dim') + '" style="font-size:14px;margin:6px 0">Last sync ' + (l ? when(l.at) + ': ' + esc(l.summary) : 'not yet') + (g.dirty ? ' · <b>' + g.dirty + ' uncommitted change(s)</b> on the server' : '') + '</div>';
+    if (g.commits && g.commits.length) h += '<table class="upd-table"><tr><th>Commit</th><th>Message</th><th>By</th><th>When</th></tr>' + g.commits.map(c => '<tr><td class="mono"><a href="' + esc(g.url) + '/commit/' + esc(c.hash) + '" target="_blank" rel="noopener">' + esc(c.hash) + '</a></td><td>' + esc(c.subject) + '</td><td class="dim">' + esc(c.author) + '</td><td class="dim" style="white-space:nowrap">' + when(c.date) + '</td></tr>').join('') + '</table>';
+    h += '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="siteGhAct(\'sync\', this)">Commit &amp; push now</button>'
+      + '<button class="btn pri" onclick="armConfirm(this, \'Pull main and restart?\', () => siteGhAct(\'update\', this))">Update from GitHub</button></div>'
+      + '<p class="dim" style="font-size:13.5px;margin:8px 0 0">Update commits local changes first, pulls <b>main</b> (rebase), installs requirements.txt / package.json dependencies if they changed, and restarts the site\'s apps. Commits made on GitHub are never pulled automatically.</p>';
+    return siteCard('GitHub', h);
+  });
+}
+async function siteGhAct(what, btn){
+  if (btn) btn.disabled = true;
+  toast(what === 'connect' ? 'Connecting to GitHub…' : what === 'update' ? 'Updating from GitHub…' : 'Syncing…');
+  try {
+    const r = await siteApi('POST', siteUrl('/github/' + what), {});
+    const lines = r.steps || (r.result ? [r.result.summary] : []);
+    toast(what === 'connect' ? 'Connected to ' + r.repo : what === 'update' ? 'Updated' : (r.result && r.result.summary) || 'Synced', r.result && !r.result.ok ? 'warn' : 'success', lines.length ? { detail: lines.join('\n'), duration: 12000 } : {});
+  } catch(e){ siteErr(e, 'GitHub'); }
+  siteSubReload('github');
+}
+async function siteGhAuto(on){
+  try { await siteApi('PUT', siteUrl('/github'), { autoSync: on }); toast('Auto-sync ' + (on ? 'on' : 'off'), 'success'); } catch(e){ siteErr(e, 'GitHub'); }
+  siteSubReload('github');
 }
