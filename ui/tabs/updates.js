@@ -193,7 +193,7 @@ function renderUpdates(){
 // ---- AI agents: catalog of the major coding CLIs + custom ones; track (= component above), deploy per user
 let agData = null, agLoading = false, agPoll = null;
 function agentsCardHtml(){
-  let h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><h3 style="margin:0">AI agents</h3><button class="btn" style="font-size:14px;padding:4px 14px" onclick="agentAddCustom()">＋ Custom agent</button></div>';
+  let h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><h3 style="margin:0">AI agents</h3><span style="display:flex;gap:8px"><button class="btn pri" style="font-size:14px;padding:4px 14px" onclick="agentDeployMany()">Deploy agents…</button><button class="btn" style="font-size:14px;padding:4px 14px" onclick="agentAddCustom()">＋ Custom agent</button></span></div>';
   if (!agData) { if (!agLoading) loadAgents(); return h + '<p class="dim">Loading…</p>'; }
   if (agData.error) return h + '<p style="color:var(--md-error-bright)">⚠ ' + esc(agData.error) + '</p>';
   h += '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Tracked agents appear above as components (versions per user, update, remove). <b>Deploy</b> installs an agent for root or any site/SSH user — npm agents into the user\'s own ~/.npm-global, script agents with their vendor installer.</p>';
@@ -205,7 +205,7 @@ function agentsCardHtml(){
       + '<td style="text-align:right;white-space:nowrap"><button class="btn small" onclick="agentDeployDialog(\'' + a.key + '\')">Deploy…</button>' + (a.custom ? ' <button class="btn small" onclick="armConfirm(this, \'Remove?\', () => agentRemoveCustom(\'' + a.key + '\'))">Remove</button>' : '') + '</td></tr>';
   }
   h += '</table>';
-  for (const j of agData.jobs || []) h += '<div class="dim" style="font-size:13.5px;margin-top:6px">' + (j.state === 'running' ? '⏳ ' : '') + esc(j.label) + ' → ' + esc(j.users.join(', ')) + ': ' + (j.state === 'running' ? 'installing' + (j.current ? ' for ' + esc(j.current) : '') + '…' : j.results.map(r => esc(r.user) + ' ' + (r.ok ? '✅ ' + esc(r.version || '') : '❌')).join(' · ')) + '</div>';
+  for (const j of agData.jobs || []) h += '<div class="dim" style="font-size:13.5px;margin-top:6px">' + (j.state === 'running' ? '⏳ ' : j.state === 'queued' ? '🕒 ' : '') + esc(j.label) + ' → ' + esc(j.users.join(', ')) + ': ' + (j.state === 'queued' ? 'waiting…' : j.state === 'running' ? 'installing' + (j.current ? ' for ' + esc(j.current) : '') + '…' : j.results.map(r => esc(r.user) + ' ' + (r.ok ? '✅ ' + esc(r.version || '') : '❌')).join(' · ')) + '</div>';
   return h;
 }
 function agRender(){ const el = document.getElementById('agentsCard'); if (el) el.innerHTML = agentsCardHtml(); }
@@ -214,15 +214,34 @@ async function loadAgents(){
   try { agData = await stApi('GET', 'api/agents'); } catch(e){ agData = { error: e.message }; }
   agLoading = false; agRender();
   clearTimeout(agPoll);
-  if (agData && (agData.jobs || []).some(j => j.state === 'running')) agPoll = setTimeout(async () => { await loadAgents(); if (!(agData.jobs || []).some(j => j.state === 'running')) checkUpdates(); }, 4000);
+  if (agData && (agData.jobs || []).some(j => j.state === 'running' || j.state === 'queued')) agPoll = setTimeout(async () => { await loadAgents(); if (!(agData.jobs || []).some(j => j.state === 'running')) checkUpdates(); }, 4000);
 }
 async function agentTrack(key, on){
   const keys = agData.agents.filter(a => !a.always && !a.custom && (a.key === key ? on : a.tracked)).map(a => a.key);
   try { await stApi('PUT', 'api/agents/tracked', { keys }); toast(on ? 'Tracking — versions appear after the next check' : 'No longer tracked', 'success'); await loadAgents(); setTimeout(checkUpdates, 1500); } catch(e){ stErr(e, 'Agents'); }
 }
+const agSelectAll = (cls) => '<label style="display:block;font-weight:600;border-bottom:1px solid var(--clp-border);padding-bottom:4px;margin-bottom:4px"><input type="checkbox" onchange="document.querySelectorAll(\'.' + cls + '\').forEach(x => x.checked = this.checked)"> Select all</label>';
+// Several agents × several users in one go (each agent becomes one queued job).
+function agentDeployMany(){
+  sshModal('<h3>Deploy AI agents</h3><div class="row2"><div><p class="dim" style="font-size:14px;margin:0 0 4px">Agents</p>' + agSelectAll('agA')
+    + agData.agents.map(a => '<label style="display:block"><input type="checkbox" class="agA" value="' + esc(a.key) + '"> ' + esc(a.label) + ' <span class="dim">· ' + esc(a.vendor || 'custom') + '</span></label>').join('')
+    + '</div><div><p class="dim" style="font-size:14px;margin:0 0 4px">Users</p>' + agSelectAll('agU')
+    + agData.users.map(u => '<label style="display:block"><input type="checkbox" class="agU" value="' + esc(u) + '"> ' + esc(u) + (u === 'root' ? ' <span class="dim">(system-wide)</span>' : '') + '</label>').join('')
+    + '</div></div><p class="dim" style="font-size:13.5px">Installs run one after another; each agent is installed (or brought to the latest version) for every ticked user.</p>'
+    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="agentDeployManyGo(this)">Deploy</button></div>');
+}
+async function agentDeployManyGo(btn){
+  const keys = [...document.querySelectorAll('.agA:checked')].map(x => x.value), users = [...document.querySelectorAll('.agU:checked')].map(x => x.value);
+  if (!keys.length || !users.length) return toast('Tick at least one agent and one user', 'warn');
+  btn.disabled = true;
+  let ok = 0;
+  for (const k of keys) { try { await stApi('POST', 'api/agents/' + k + '/deploy', { users }); ok++; } catch(e){ stErr(e, k); } }
+  sshModalClose(); toast('Queued ' + ok + ' agent(s) for ' + users.length + ' user(s) — they install one after another', 'success'); loadAgents();
+}
 function agentDeployDialog(key){
   const a = agData.agents.find(x => x.key === key);
   sshModal('<h3>Deploy ' + esc(a.label) + '</h3><p class="dim" style="font-size:14px">Install (or bring to the latest version) for:</p>'
+    + agSelectAll('agU')
     + agData.users.map(u => '<label style="display:block"><input type="checkbox" class="agU" value="' + esc(u) + '"' + (u === 'root' ? '' : '') + '> ' + esc(u) + (u === 'root' ? ' <span class="dim">(system-wide)</span>' : '') + '</label>').join('')
     + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="agentDeploy(\'' + key + '\', [...document.querySelectorAll(\'.agU:checked\')].map(x => x.value), this)">Deploy</button></div>');
 }
