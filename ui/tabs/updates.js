@@ -16,7 +16,7 @@ function renderUpdates(){
 
   // Left column: components table
   html += '<div class="upd-card" style="grid-column:1/-1">';
-  const updCount = d.components.filter(c => c.updateAvailable).length;
+  const updCount = d.components.filter(c => c.updateAvailable && !c.git).length;
   html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
   html += '<h3 style="margin:0">Components</h3>';
   if (updCount) {
@@ -29,14 +29,16 @@ function renderUpdates(){
     const isRunning = c.updating;
     const statusBadge = !c.currentVersion ? '<span class="upd-badge na">not installed</span>'
       : isRunning ? '<span class="upd-badge" style="background:var(--md-warn-container);color:var(--md-warning)">updating…</span>'
-      : hasUpdate ? '<span class="upd-badge new">update available</span>'
+      : c.git && c.error ? '<span class="upd-badge na" title="' + esc(c.error) + '">cannot check</span>'
+      : hasUpdate ? '<span class="upd-badge new">' + (c.git ? c.behind + ' new commit' + (c.behind > 1 ? 's' : '') + ' on GitHub' : 'update available') + '</span>'
       : '<span class="upd-badge ok">up to date</span>';
     const btnHtml = !c.currentVersion ? ''
       : isRunning ? '<button class="btn running" disabled>⏳ updating</button>'
+      : hasUpdate && c.git ? '<button class="btn update" onclick="armConfirm(this, \'⬆ Pull and restart the panel?\', () => triggerPanelUpdate())" title="git pull from GitHub, check the code, restart the panel (rolls back if it does not come up)">⬆ Update from GitHub</button>'
       : hasUpdate ? '<button class="btn update" onclick="triggerUpdate(\'' + c.key + '\')">⬆ Update</button>'
       : '<button class="btn" disabled>✓ latest</button>';
-    // Node.js is the runtime everything else here needs, so it is never removable.
-    const rmHtml = (!c.currentVersion || isRunning || c.key === 'node') ? ''
+    // Node.js is the runtime everything else here needs, and the panel is this app: neither is removable.
+    const rmHtml = (!c.currentVersion || isRunning || c.key === 'node' || c.git) ? ''
       : ' <button class="btn danger small upd-remove" data-comp="' + c.key + '" data-label="' + esc(c.label) + '" title="npm rm -g — uninstall ' + esc(c.label) + ' system-wide">🗑 Remove</button>';
     html += '<tr>'
       + '<td><strong>' + esc(c.label) + '</strong></td>'
@@ -50,12 +52,13 @@ function renderUpdates(){
 
   // Per-user versions table
   const userKeys = Object.keys(d.users || {});
+  const userComps = d.components.filter(c => !c.git);
   if (userKeys.length) {
-    const allCompKeys = d.components.map(c => c.key);
+    const allCompKeys = userComps.map(c => c.key);
     let userOutdatedCount = 0;
     for (const u of userKeys) {
       const uv = d.users[u] || {};
-      for (const c of d.components) {
+      for (const c of userComps) {
         if (c.key === 'node') continue;
         const userV = uv[c.key] || null;
         if (userV && c.latestVersion && userV !== c.latestVersion) userOutdatedCount++;
@@ -73,7 +76,7 @@ function renderUpdates(){
     html += '</div>';
     html += '<div style="overflow-x:auto"><table class="upd-table">';
     html += '<tr><th>User</th>';
-    for (const c of d.components) {
+    for (const c of userComps) {
       if (c.key === 'node') { html += '<th>' + esc(c.label) + '</th>'; continue; }
       html += '<th>' + esc(c.label) + '</th>';
     }
@@ -84,14 +87,14 @@ function renderUpdates(){
       let hasOutdated = false;
       let innerCols = '';
       html += '<tr><td><strong>' + esc(u) + '</strong></td>';
-      for (const c of d.components) {
+      for (const c of userComps) {
         if (c.key === 'node') {
           const userV = uv[c.key] || null;
           html += '<td>' + esc(userV || '—') + '</td>';
           continue;
         }
         const userV = uv[c.key] || null;
-        const latestC = d.components.find(x => x.key === c.key);
+        const latestC = userComps.find(x => x.key === c.key);
         const isUpd = userV && latestC && latestC.latestVersion && userV !== latestC.latestVersion;
         if (isUpd) hasOutdated = true;
         if (userV) {
@@ -102,10 +105,10 @@ function renderUpdates(){
       }
       html += '<td>';
       if (hasOutdated) {
-        for (const c of d.components) {
+        for (const c of userComps) {
           if (c.key === 'node') continue;
           const userV = uv[c.key] || null;
-          const latestC = d.components.find(x => x.key === c.key);
+          const latestC = userComps.find(x => x.key === c.key);
           const isUpd = userV && latestC && latestC.latestVersion && userV !== latestC.latestVersion;
           if (isUpd) {
             html += '<button class="btn update small" style="margin:1px;font-size:12.5px" onclick="triggerUserUpdate(\'' + esc(u) + '\',\'' + c.key + '\')">⬆ ' + c.key + '</button> ';
@@ -116,7 +119,7 @@ function renderUpdates(){
       }
       // one remove control per component this user actually has (refused server-side
       // when the user sits on the shared system npm prefix — that is a system-wide removal)
-      for (const c of d.components) {
+      for (const c of userComps) {
         if (c.key === 'node' || !uv[c.key]) continue;
         html += ' <button class="btn danger small upd-remove" data-user="' + esc(u) + '" data-comp="' + c.key + '" data-label="' + esc(c.label) + '" style="margin:1px" title="npm rm -g ' + esc(c.label) + ' for ' + esc(u) + '">🗑 ' + c.key + '</button>';
       }
@@ -201,6 +204,40 @@ async function triggerUpdate(key){
     lastUpdates = await res2.json();
     if (state.tab === 'updates') renderUpdates();
   } catch(_){}
+}
+
+// The panel pulls its new code and restarts itself, so this page goes away for a few seconds: wait for
+// it to answer again, then reload so the browser runs the new UI too.
+async function triggerPanelUpdate(){
+  if (lastUpdates) {
+    const c = lastUpdates.components.find(x => x.key === 'panel');
+    if (c) c.updating = true;
+    renderUpdates();
+  }
+  let result;
+  try {
+    const res = await fetch('api/updates/run/panel', { method: 'POST' });
+    result = await res.json();
+  } catch(e){ return toast('Panel update failed: ' + e.message, 'error'); }
+  if (result.error || result.success === false) {
+    toast('Panel update failed', 'error', { detail: result.error || result.output, duration: 20000 });
+    try { const r2 = await fetch('api/updates'); lastUpdates = await r2.json(); } catch(_){}
+    if (state.tab === 'updates') renderUpdates();
+    return;
+  }
+  if (/^already up to date/.test(result.output || '')) {
+    toast('Panel ' + result.output, 'success');
+    try { const r2 = await fetch('api/updates'); lastUpdates = await r2.json(); } catch(_){}
+    if (state.tab === 'updates') renderUpdates();
+    return;
+  }
+  toast('Updated from GitHub — restarting the panel…', 'info', { detail: result.output, duration: 15000 });
+  await new Promise(r => setTimeout(r, 6000));
+  for (let i = 0; i < 40; i++) {
+    try { const r = await fetch('api/updates', { cache: 'no-store' }); if (r.ok) return location.reload(); } catch(_){}
+    await new Promise(r => setTimeout(r, 3000));
+  }
+  toast('The panel has not come back yet — reload the page in a minute', 'warn', { duration: 30000 });
 }
 
 async function triggerUserUpdate(user, key){
