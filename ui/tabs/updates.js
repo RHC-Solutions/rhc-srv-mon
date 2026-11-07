@@ -33,6 +33,7 @@ function renderUpdates(){
     const statusBadge = !c.currentVersion ? '<span class="upd-badge na">not installed</span>'
       : isRunning ? '<span class="upd-badge" style="background:var(--md-warn-container);color:var(--md-warning)">updating…</span>'
       : c.git && c.error ? '<span class="upd-badge na" title="' + esc(c.error) + '">cannot check</span>'
+      : c.git && c.ahead && !c.behind ? '<span class="upd-badge ok" title="this server has ' + c.ahead + ' commit(s) GitHub gets with the next sync">up to date · ' + c.ahead + ' to push</span>'
       : hasUpdate ? '<span class="upd-badge new">' + (c.git ? c.behind + ' new commit' + (c.behind > 1 ? 's' : '') + ' on GitHub' : 'update available') + '</span>'
       : '<span class="upd-badge ok">up to date</span>';
     const btnHtml = !c.currentVersion ? ''
@@ -46,8 +47,8 @@ function renderUpdates(){
       : ' <button class="btn danger small upd-remove" data-comp="' + c.key + '" data-label="' + esc(c.label) + '" title="npm rm -g — uninstall ' + esc(c.label) + ' system-wide">🗑 Remove</button>';
     html += '<tr>'
       + '<td><strong>' + esc(c.label) + '</strong></td>'
-      + '<td>' + esc(c.currentVersion || '—') + '</td>'
-      + '<td>' + esc(c.latestVersion || '—') + '</td>'
+      + '<td>' + esc(c.currentVersion || '—') + (c.currentHash ? ' <span class="mono dim" style="font-size:12px" title="commit">' + esc(c.currentHash) + '</span>' : '') + '</td>'
+      + '<td>' + esc(c.latestVersion || '—') + (c.latestHash ? ' <span class="mono dim" style="font-size:12px" title="commit">' + esc(c.latestHash) + '</span>' : '') + '</td>'
       + '<td>' + statusBadge + '</td>'
       + '<td style="text-align:right;white-space:nowrap">' + btnHtml + rmHtml + '</td>'
       + '</tr>';
