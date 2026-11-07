@@ -69,7 +69,7 @@ function renderTransfer(fromLoad){
   view.innerHTML = h;
 }
 // One transfer: bar, phase chips, elapsed time, the step log (open while it runs).
-const TR_PHASES_SRC = [['approval', 'Target accepts'], ['preflight', 'Preflight'], ['pack', 'Pack'], ['upload', 'Upload'], ['import', 'Import on target'], ['cutover', 'Switch tunnel'], ['done', 'Done']];
+const TR_PHASES_SRC = [['approval', 'Target accepts'], ['preflight', 'Preflight'], ['pack', 'Pack'], ['upload', 'Upload'], ['import', 'Import on target'], ['cutover', 'Switch tunnel'], ['verify', 'Confirm live'], ['done', 'Done']];
 const TR_PHASES_DST = [['receive', 'Receive'], ['decrypt', 'Decrypt'], ['restore', 'Restore & start'], ['wait-cutover', 'Take over tunnel'], ['done', 'Done']];
 function trProgressHtml(m){
   const live = m.state === 'running' || m.state === 'queued' || m.state === 'imported';
@@ -86,6 +86,7 @@ function trProgressHtml(m){
     + '<div style="height:10px;background:var(--clp-border);border-radius:5px;overflow:hidden;margin:8px 0 6px"><div style="height:100%;width:' + pct + '%;background:' + color + ';transition:width .6s"></div></div>'
     + '<div style="font-size:13.5px;margin-bottom:4px"><b>' + pct + '%</b> · ' + esc(failed ? 'FAILED — ' + (m.error || '') : done ? (m.role === 'source' ? 'done — the site runs on ' + ((m.peer || {}).name || 'the target') : 'done — the site runs here') : m.state === 'queued' ? 'starting' : (m.detail || m.phase || 'working')) + '</div>'
     + '<div style="font-size:13px">' + chips + '</div>'
+    + (m.verify ? '<div style="font-size:13.5px;margin-top:4px;color:' + (m.verify.confirmed ? 'var(--md-success, #2e7d32)' : 'var(--md-warning)') + '">' + (m.verify.confirmed ? '✅ Confirmed: ' : '⚠ Not confirmed: ') + esc(m.verify.detail || '') + '</div>' : '')
     + '<details' + (live || failed ? ' open' : '') + ' style="margin-top:6px"><summary class="dim" style="cursor:pointer;font-size:13px">Log (' + (m.steps || []).length + ' steps)</summary><div class="mono" style="font-size:12px;white-space:pre-wrap;margin-top:4px;max-height:220px;overflow:auto">'
     + esc((m.steps || []).map(x => x.at.slice(11, 19) + '  ' + x.text).concat(m.remote && live ? (m.remote.steps || []).map(x => '        ' + x.text) : []).join('\n')) + '</div></details></div>';
 }
