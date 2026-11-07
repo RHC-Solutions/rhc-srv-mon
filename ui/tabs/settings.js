@@ -24,7 +24,9 @@ function renderSettings(){
   // General
   html += '<div class="upd-card"><h3>General</h3><div class="row2">'
     + stField('Panel name', '<input id="stName" value="' + esc(g.panelName || '') + '" maxlength="60" placeholder="' + esc(g.panelNameDefault || '') + '">', 'shown in the logo, page title, sign-in page and notifications on this server')
-    + stField('Logo', '<div style="display:flex;gap:8px;align-items:center">' + (g.logo ? '<img src="brand-logo?v=' + g.logo.v + '" alt="" style="height:32px;width:auto">' : '') + '<input id="stLogo" type="url" value="' + esc(g.logo ? g.logo.source || '' : '') + '" placeholder="https://…/logo.png (empty = built-in mark)" style="flex:1"></div>', 'downloaded once and served by this panel: top bar, sign-in page, favicon') + '</div><div class="row2">'
+    + stField('Logo', '<div style="display:flex;gap:8px;align-items:center">' + (g.logo ? '<img src="brand-logo?v=' + g.logo.v + '" alt="" style="height:32px;width:auto">' : '') + '<input id="stLogo" type="url" value="' + esc(logoUrlOf(g.logo)) + '" placeholder="' + (g.logo && !logoUrlOf(g.logo) ? esc(g.logo.source) + ' — paste a URL to replace' : 'https://…/logo.png') + '" style="flex:1">'
+      + '<input type="file" id="stLogoFile" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" style="display:none" onchange="uploadLogo(this)"><button class="btn small" type="button" onclick="document.getElementById(\'stLogoFile\').click()">Upload…</button>'
+      + (g.logo ? '<button class="btn small" type="button" onclick="removeLogo()">Remove</button>' : '') + '</div>', 'a URL is downloaded once and stored on this server, or upload a file (PNG, JPEG, GIF, WebP, SVG, max 2 MB): top bar, sign-in page, favicon') + '</div><div class="row2">'
     + stField('Panel domain', '<input value="' + esc(g.panelDomain) + '" disabled>', 'from ' + esc(g.panelDomainSource || 'nginx custom-domain.conf'))
     + stField('Server IP', '<input value="' + esc(g.ip || '') + '" disabled>', [g.ipSource, (g.lanIps || []).length ? 'LAN ' + g.lanIps.join(', ') : ''].filter(Boolean).map(esc).join(' · ')) + '</div><div class="row2">'
     + stField('Timezone', '<input value="' + esc(g.timezone) + '" disabled>')
@@ -129,9 +131,49 @@ function renderCertsTab(){
 }
 function renderTunnelsTab(){
   plainTabHeader('Cloudflare Tunnels running on this server');
-  document.getElementById('tunnelsview').innerHTML = '<div class="upd-card" id="tunnels"><div class="site-card-hd"><h3>Cloudflare Tunnels</h3><button class="btn small" onclick="loadTunnels(true)">↻</button></div>' + tunnelsCardHtml() + '</div>';
+  document.getElementById('tunnelsview').innerHTML = '<div class="upd-card" id="cfdCard" style="margin-bottom:14px">' + cfdCardHtml() + '</div><div class="upd-card" id="tunnels"><div class="site-card-hd"><h3>Cloudflare Tunnels</h3><button class="btn small" onclick="loadTunnels(true)">↻</button></div>' + tunnelsCardHtml() + '</div>';
 }
 let stTunnels = null, stTunnelsLoading = false;
+// cloudflared binary: version / update / auto-update
+let cfd = null, cfdLoading = false, cfdPoll = null;
+function cfdCardHtml(){
+  let h = '<div class="site-card-hd"><h3>cloudflared</h3><button class="btn small" onclick="cfdCheck()" title="Ask the apt repo for the newest version">Check for updates</button></div>';
+  if (!cfd) { if (!cfdLoading) loadCfd(); return h + '<p class="dim">Loading…</p>'; }
+  if (cfd.error) return h + '<p style="color:var(--md-error-bright)">⚠ ' + esc(cfd.error) + '</p>';
+  const when = (v) => v ? esc(String(v).replace(/^\w+ /, '')) : '–';
+  h += '<div class="row2">'
+    + stField('Installed version', '<input class="mono" value="' + esc(cfd.installed || 'not installed') + '" disabled>')
+    + stField('Latest (apt repo)', '<input class="mono" value="' + esc(cfd.latest || '?') + '" disabled>', cfd.updateAvailable ? '<span style="color:var(--md-warning)">update available</span>' : 'up to date') + '</div>'
+    + '<div class="upd-toggle"><label class="switch"><input type="checkbox" id="cfdAuto"' + (cfd.autoUpdate ? ' checked' : '') + ' onchange="cfdSetAuto(this.checked)"><span class="slider"></span></label><label>Auto-update daily — every tunnel is restarted after an upgrade</label></div>'
+    + '<div class="dim" style="font-size:13.5px">Next run: ' + (cfd.autoUpdate ? when(cfd.nextRun) : 'off') + ' · last run: ' + when(cfd.lastRun) + '</div>'
+    + (cfd.log && cfd.log.length ? '<details style="margin-top:6px"><summary class="dim" style="cursor:pointer;font-size:13.5px">Last update log</summary><pre class="mono" style="font-size:12.5px;white-space:pre-wrap;margin:6px 0 0">' + esc(cfd.log.join('\n')) + '</pre></details>' : '')
+    + '<div class="site-actions"><button class="btn pri" id="cfdUpd" onclick="cfdUpdate()"' + (cfd.running ? ' disabled' : '') + '>' + (cfd.running ? 'Updating…' : 'Update now') + '</button></div>';
+  return h;
+}
+function rerenderCfd(){ const el = document.getElementById('cfdCard'); if (el && state.tab === 'tunnels') el.innerHTML = cfdCardHtml(); }
+async function loadCfd(){
+  cfdLoading = true;
+  try { cfd = await stApi('GET', 'api/settings/tunnels/cloudflared'); } catch(e){ cfd = { error: e.message }; }
+  cfdLoading = false; rerenderCfd();
+  if (cfd && cfd.running && !cfdPoll) cfdPoll = setTimeout(() => { cfdPoll = null; loadCfd(); }, 4000);
+}
+async function cfdCheck(){
+  toast('Checking the cloudflared apt repo…');
+  try { cfd = await stApi('POST', 'api/settings/tunnels/cloudflared/check'); rerenderCfd(); toast(cfd.updateAvailable ? 'cloudflared ' + cfd.latest + ' is available' : 'cloudflared ' + cfd.installed + ' is the latest', 'success'); }
+  catch(e){ stErr(e, 'Check'); }
+}
+async function cfdUpdate(){
+  try {
+    await stApi('POST', 'api/settings/tunnels/cloudflared/update');
+    toast('Update started — tunnels restart if a new version is installed; this page may lose its connection for a few seconds', 'info', { duration: 9000 });
+    if (cfd) cfd.running = true; rerenderCfd();
+    setTimeout(loadCfd, 4000);
+  } catch(e){ stErr(e, 'Update'); }
+}
+async function cfdSetAuto(on){
+  try { cfd = await stApi('PUT', 'api/settings/tunnels/cloudflared/auto-update', { enabled: on }); rerenderCfd(); toast('Auto-update ' + (on ? 'on' : 'off'), 'success'); }
+  catch(e){ stErr(e, 'Auto-update'); loadCfd(); }
+}
 const stTunnelTokens = {};   // unit → full token, only after an explicit Show / Copy
 function tunnelsCardHtml(){
   if (!stTunnels) { if (!stTunnelsLoading) loadTunnels(false); return '<p class="dim">Loading tunnels…</p>'; }
@@ -183,8 +225,22 @@ async function loadCfDomains(){
   cfDomainsLoading = false;
   if (state.tab === 'settings') renderSettings();
 }
+const logoUrlOf = (l) => l && l.source && !/^upload: /.test(l.source) ? l.source : '';
+function uploadLogo(inp){
+  const f = inp.files && inp.files[0]; if (!f) return;
+  if (f.size > 2 * 1024 * 1024) { toast('Logo larger than 2 MB', 'error'); inp.value = ''; return; }
+  const rd = new FileReader();
+  rd.onload = async () => {
+    try { await stApi('POST', 'api/settings/logo/upload', { name: f.name, data: String(rd.result).replace(/^data:[^,]*,/, '') }); toast('Logo uploaded', 'success'); location.reload(); }
+    catch(e){ stErr(e, 'Logo'); inp.value = ''; }
+  };
+  rd.readAsDataURL(f);
+}
+async function removeLogo(){
+  try { await stApi('PUT', 'api/settings/logo', { url: '' }); toast('Logo removed', 'success'); location.reload(); } catch(e){ stErr(e, 'Logo'); }
+}
 async function saveGeneralSettings(){
-  try { await stApi('PUT', 'api/settings/general', { panelName: document.getElementById('stName').value, eventsRetentionDays: document.getElementById('stRet').value, acmeEmail: document.getElementById('stAcme').value }); const lg = document.getElementById('stLogo').value.trim(), g0 = lastSettings && lastSettings.general; if (lg !== ((g0 && g0.logo && g0.logo.source) || '')) await stApi('PUT', 'api/settings/logo', { url: lg }); toast('Saved', 'success'); const nm = document.getElementById('stName').value.trim(); if (nm !== (g0 && g0.panelName) || lg !== ((g0 && g0.logo && g0.logo.source) || '')) { location.reload(); return; } lastSettings = null; renderSettings(); }
+  try { await stApi('PUT', 'api/settings/general', { panelName: document.getElementById('stName').value, eventsRetentionDays: document.getElementById('stRet').value, acmeEmail: document.getElementById('stAcme').value }); const lg = document.getElementById('stLogo').value.trim(), g0 = lastSettings && lastSettings.general, logoChanged = !!lg && lg !== logoUrlOf(g0 && g0.logo); if (logoChanged) await stApi('PUT', 'api/settings/logo', { url: lg }); toast('Saved', 'success'); const nm = document.getElementById('stName').value.trim(); if (nm !== (g0 && g0.panelName) || logoChanged) { location.reload(); return; } lastSettings = null; renderSettings(); }
   catch(e){ stErr(e, 'Save'); }
 }
 async function saveTelegramSettings(){
