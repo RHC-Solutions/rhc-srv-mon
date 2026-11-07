@@ -103,6 +103,8 @@ function renderUpdates(){
         if (isUpd) hasOutdated = true;
         if (userV) {
           html += '<td>' + esc(userV) + (isUpd ? ' <span class="upd-badge new">⬆ ' + esc(latestC.latestVersion) + '</span>' : ' <span class="upd-badge ok">✓</span>') + '</td>';
+        } else if (c.agent) {
+          html += '<td><button class="btn small" style="font-size:12.5px" title="install ' + esc(c.label) + ' for ' + esc(u) + '" onclick="agentDeploy(\'' + c.key + '\', [\'' + esc(u) + '\'], this)">＋ Install</button></td>';
         } else {
           html += '<td><span class="upd-badge na">—</span></td>';
         }
@@ -153,6 +155,9 @@ function renderUpdates(){
 
   html += '<div class="upd-card"><h3>Notifications</h3><p class="dim" style="margin:0">Telegram and Slack settings moved to the <a href="settings" onclick="event.preventDefault(); setTab(\'settings\', { fromBar: true })">⚙️ Settings</a> tab.</p></div>';
 
+  // AI agents
+  html += '<div class="upd-card" style="grid-column:1/-1" id="agentsCard">' + agentsCardHtml() + '</div>';
+
   // Update log
   html += '<div class="upd-card" style="grid-column:1/-1">';
   html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
@@ -185,6 +190,63 @@ function renderUpdates(){
   }));
 }
 
+// ---- AI agents: catalog of the major coding CLIs + custom ones; track (= component above), deploy per user
+let agData = null, agLoading = false, agPoll = null;
+function agentsCardHtml(){
+  let h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><h3 style="margin:0">AI agents</h3><button class="btn" style="font-size:14px;padding:4px 14px" onclick="agentAddCustom()">＋ Custom agent</button></div>';
+  if (!agData) { if (!agLoading) loadAgents(); return h + '<p class="dim">Loading…</p>'; }
+  if (agData.error) return h + '<p style="color:var(--md-error-bright)">⚠ ' + esc(agData.error) + '</p>';
+  h += '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Tracked agents appear above as components (versions per user, update, remove). <b>Deploy</b> installs an agent for root or any site/SSH user — npm agents into the user\'s own ~/.npm-global, script agents with their vendor installer.</p>';
+  h += '<table class="upd-table"><tr><th>Agent</th><th>From</th><th>Tracked</th><th></th></tr>';
+  for (const a of agData.agents) {
+    h += '<tr><td><b>' + esc(a.label) + '</b> <span class="dim">· ' + esc(a.vendor || 'custom') + '</span><br><span class="mono dim" style="font-size:12.5px">' + esc(a.bin) + '</span></td>'
+      + '<td class="mono" style="font-size:12.5px">' + esc(a.pkg ? 'npm ' + a.pkg : a.installCmd || '') + '</td>'
+      + '<td>' + (a.always ? '<span class="dim">always</span>' : a.custom ? '<span class="dim">yes (custom)</span>' : '<label class="switch"><input type="checkbox"' + (a.tracked ? ' checked' : '') + ' onchange="agentTrack(\'' + a.key + '\', this.checked)"><span class="slider"></span></label>') + '</td>'
+      + '<td style="text-align:right;white-space:nowrap"><button class="btn small" onclick="agentDeployDialog(\'' + a.key + '\')">Deploy…</button>' + (a.custom ? ' <button class="btn small" onclick="armConfirm(this, \'Remove?\', () => agentRemoveCustom(\'' + a.key + '\'))">Remove</button>' : '') + '</td></tr>';
+  }
+  h += '</table>';
+  for (const j of agData.jobs || []) h += '<div class="dim" style="font-size:13.5px;margin-top:6px">' + (j.state === 'running' ? '⏳ ' : '') + esc(j.label) + ' → ' + esc(j.users.join(', ')) + ': ' + (j.state === 'running' ? 'installing' + (j.current ? ' for ' + esc(j.current) : '') + '…' : j.results.map(r => esc(r.user) + ' ' + (r.ok ? '✅ ' + esc(r.version || '') : '❌')).join(' · ')) + '</div>';
+  return h;
+}
+function agRender(){ const el = document.getElementById('agentsCard'); if (el) el.innerHTML = agentsCardHtml(); }
+async function loadAgents(){
+  agLoading = true;
+  try { agData = await stApi('GET', 'api/agents'); } catch(e){ agData = { error: e.message }; }
+  agLoading = false; agRender();
+  clearTimeout(agPoll);
+  if (agData && (agData.jobs || []).some(j => j.state === 'running')) agPoll = setTimeout(async () => { await loadAgents(); if (!(agData.jobs || []).some(j => j.state === 'running')) checkUpdates(); }, 4000);
+}
+async function agentTrack(key, on){
+  const keys = agData.agents.filter(a => !a.always && !a.custom && (a.key === key ? on : a.tracked)).map(a => a.key);
+  try { await stApi('PUT', 'api/agents/tracked', { keys }); toast(on ? 'Tracking — versions appear after the next check' : 'No longer tracked', 'success'); await loadAgents(); setTimeout(checkUpdates, 1500); } catch(e){ stErr(e, 'Agents'); }
+}
+function agentDeployDialog(key){
+  const a = agData.agents.find(x => x.key === key);
+  sshModal('<h3>Deploy ' + esc(a.label) + '</h3><p class="dim" style="font-size:14px">Install (or bring to the latest version) for:</p>'
+    + agData.users.map(u => '<label style="display:block"><input type="checkbox" class="agU" value="' + esc(u) + '"' + (u === 'root' ? '' : '') + '> ' + esc(u) + (u === 'root' ? ' <span class="dim">(system-wide)</span>' : '') + '</label>').join('')
+    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="agentDeploy(\'' + key + '\', [...document.querySelectorAll(\'.agU:checked\')].map(x => x.value), this)">Deploy</button></div>');
+}
+async function agentDeploy(key, users, btn){
+  if (!users.length) return toast('Pick at least one user', 'warn');
+  if (btn) btn.disabled = true;
+  try { const j = await stApi('POST', 'api/agents/' + key + '/deploy', { users }); sshModalClose(); toast('Deploying ' + j.label + ' for ' + users.join(', ') + '…', 'success'); loadAgents(); }
+  catch(e){ stErr(e, 'Deploy'); if (btn) btn.disabled = false; }
+}
+function agentAddCustom(){
+  sshModal('<h3>＋ Custom AI agent</h3>'
+    + '<div class="row2">' + stField('Name', '<input id="caLabel" placeholder="My agent">') + stField('Command', '<input id="caBin" placeholder="myagent" class="mono">', 'the program it installs') + '</div>'
+    + stField('npm package', '<input id="caPkg" class="mono" placeholder="@scope/my-agent (or leave empty and give an install command)">')
+    + stField('Install command', '<input id="caInst" class="mono" placeholder="curl -fsSL https://example.com/install.sh | bash">', 'runs as the user; used when there is no npm package')
+    + '<div class="row2">' + stField('Update command', '<input id="caUpd" class="mono" placeholder="myagent update (optional)">') + stField('Version flag', '<input id="caVer" class="mono" value="--version">') + '</div>'
+    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="agentSaveCustom(this)">Add</button></div>');
+}
+async function agentSaveCustom(btn){
+  const g = (id) => document.getElementById(id).value.trim();
+  btn.disabled = true;
+  try { const a = await stApi('POST', 'api/agents/custom', { label: g('caLabel'), bin: g('caBin'), pkg: g('caPkg'), installCmd: g('caInst'), updateCmd: g('caUpd'), verFlag: g('caVer') }); sshModalClose(); toast(a.label + ' added — Deploy it to users', 'success'); loadAgents(); setTimeout(checkUpdates, 1500); }
+  catch(e){ stErr(e, 'Custom agent'); btn.disabled = false; }
+}
+async function agentRemoveCustom(key){ try { await stApi('DELETE', 'api/agents/custom/' + key); toast('Removed from the list (installed copies stay)', 'success'); loadAgents(); setTimeout(checkUpdates, 1500); } catch(e){ stErr(e, 'Remove'); } }
 let updChecking = false;
 async function checkUpdatesNow(btn){
   if (updChecking) return;
