@@ -23,6 +23,7 @@ require('./lib/api/backups');
 require('./lib/api/settings');
 require('./lib/api/certstore');
 require('./lib/api/ssh');
+require('./lib/api/vault');
 const notifyEvents = require('./lib/notify-events');
 const clpImport = require('./lib/clp-import');
 const cloudpanel = require('./lib/cloudpanel');
