@@ -142,7 +142,32 @@ function renderCertsTab(){
 }
 function renderTunnelsTab(){
   plainTabHeader('Cloudflare Tunnels running on this server');
-  document.getElementById('tunnelsview').innerHTML = '<div class="upd-card" id="cfdCard" style="margin-bottom:14px">' + cfdCardHtml() + '</div><div class="upd-card" id="tunnels"><div class="site-card-hd"><h3>Cloudflare Tunnels</h3><button class="btn small" onclick="loadTunnels(true)">↻</button></div>' + tunnelsCardHtml() + '</div>';
+  document.getElementById('tunnelsview').innerHTML = '<div id="cfdInstall">' + cfdInstallHtml() + '</div><div class="upd-card" id="cfdCard" style="margin-bottom:14px">' + cfdCardHtml() + '</div><div class="upd-card" id="tunnels"><div class="site-card-hd"><h3>Cloudflare Tunnels</h3><button class="btn small" onclick="loadTunnels(true)">↻</button></div>' + tunnelsCardHtml() + '</div>';
+}
+// No cloudflared on this server: offer to install it (App Store job, log shown live here).
+let cfdJob = null;
+function cfdInstallHtml(){
+  if (cfdJob) return '<div class="upd-card" style="margin-bottom:14px;border-top:3px solid var(--md-primary)"><h3>' + ({ running: '⏳ Installing', queued: '🕒 Waiting to install', done: '✅ Installed', failed: '❌ Install failed' }[cfdJob.state] || cfdJob.state) + ' cloudflared</h3>'
+    + (cfdJob.error ? '<p style="color:var(--md-error-bright)">' + esc(cfdJob.error) + '</p>' : '')
+    + '<pre class="mono" style="font-size:12px;max-height:220px;overflow:auto;white-space:pre-wrap;margin:0">' + esc((cfdJob.log || []).slice(-25).join('\n')) + '</pre></div>';
+  if (!cfd || cfd.error || cfd.installed) return '';
+  return '<div class="upd-card" style="margin-bottom:14px;border-top:3px solid var(--md-warning)"><h3>cloudflared is not installed on this server</h3>'
+    + '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Cloudflare Tunnel publishes the panel and the sites without opening any port. Install the connector from Cloudflare\'s official apt repository — then new sites get their own tunnel automatically, and existing ones are published from their Cloudflare tab.</p>'
+    + '<div class="site-actions"><button class="btn pri" onclick="cfdInstall(this)">Install cloudflared</button></div></div>';
+}
+async function cfdInstall(btn){
+  if (btn) btn.disabled = true;
+  try { cfdJob = await stApi('POST', 'api/appstore/cloudflared/install', { version: 'latest' }); }
+  catch(e){ stErr(e, 'cloudflared'); if (btn) btn.disabled = false; return; }
+  const el = () => document.getElementById('cfdInstall');
+  while (cfdJob.state === 'running' || cfdJob.state === 'queued') {
+    if (el()) el().innerHTML = cfdInstallHtml();
+    await new Promise(r => setTimeout(r, 2500));
+    try { cfdJob = await stApi('GET', 'api/appstore/jobs/' + cfdJob.id); } catch(_){}
+  }
+  if (el()) el().innerHTML = cfdInstallHtml();
+  toast(cfdJob.state === 'done' ? 'cloudflared installed' : 'cloudflared install failed', cfdJob.state === 'done' ? 'success' : 'error');
+  cfd = null; loadCfd(); loadTunnels(true);
 }
 let stTunnels = null, stTunnelsLoading = false;
 // cloudflared binary: version / update / auto-update
@@ -161,7 +186,7 @@ function cfdCardHtml(){
     + '<div class="site-actions"><button class="btn pri" id="cfdUpd" onclick="cfdUpdate()"' + (cfd.running ? ' disabled' : '') + '>' + (cfd.running ? 'Updating…' : 'Update now') + '</button></div>';
   return h;
 }
-function rerenderCfd(){ const el = document.getElementById('cfdCard'); if (el && state.tab === 'tunnels') el.innerHTML = cfdCardHtml(); }
+function rerenderCfd(){ const el = document.getElementById('cfdCard'); if (el && state.tab === 'tunnels') el.innerHTML = cfdCardHtml(); const ins = document.getElementById('cfdInstall'); if (ins && state.tab === 'tunnels' && !cfdJob) ins.innerHTML = cfdInstallHtml(); }
 async function loadCfd(){
   cfdLoading = true;
   try { cfd = await stApi('GET', 'api/settings/tunnels/cloudflared'); } catch(e){ cfd = { error: e.message }; }
@@ -193,7 +218,7 @@ function tunnelsCardHtml(){
   let h = '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Every <span class="mono">cloudflared</span> service on this server. A tunnel token lets whoever holds it run that tunnel — '
     + 'revealing one is recorded in the event log.</p>';
   if (stTunnels.error) h += '<div class="site-why">' + esc(stTunnels.error) + '</div>';
-  if (!list.length) return h + '<p class="dim">No cloudflared tunnels found.</p>';
+  if (!list.length) return h + '<p class="dim">No tunnels on this server yet. New sites get their own tunnel automatically (Settings → Sites &amp; apps); an existing site is published from its <b>Cloudflare</b> tab' + (cfd && !cfd.installed ? ' — install cloudflared first (above)' : '') + '.</p>';
   h += '<table class="upd-table"><tr><th>Tunnel</th><th>IDs</th><th>Routes</th><th>Token</th></tr>';
   for (const t of list) {
     const u = esc(t.unit), full = stTunnelTokens[t.unit];
