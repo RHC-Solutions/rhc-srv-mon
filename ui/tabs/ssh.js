@@ -51,7 +51,7 @@ function sshRenderHosts(){
     html += '<div class="ssh-host" onclick="sshConnect(\'' + h.id + '\')" title="' + esc((h.user||'root') + '@' + h.host + ':' + (h.port||22) + (h.notes ? ' — ' + h.notes : '')) + '">'
       + '<span class="dot' + (openHosts.has(h.id) ? ' on' : '') + '"' + (h.color ? ' style="background:' + esc(h.color) + '"' : '') + '></span>'
       + '<span class="nm">' + ((h.protocol||'ssh') === 'vnc' ? '🖵 ' : (h.protocol||'ssh') === 'rdp' ? '🪟 ' : '') + esc(h.name) + '<small>' + ((h.protocol||'ssh') === 'vnc' ? 'vnc ' + esc(String(h.vncHost||'127.0.0.1')) + ':' + (h.vncPort||5901) + ' · via ' : (h.protocol||'ssh') === 'rdp' ? 'rdp ' + esc(String(h.rdpHost||h.host)) + ':' + (h.rdpPort||3389) + ' · ' : '') + esc((h.user||'root') + '@' + h.host) + (h.port && h.port != 22 ? ':' + h.port : '') + (h.auth === 'password' ? ' · pw' : '') + (h.becomeRoot && (h.user||'root') !== 'root' ? ' · sudo -i' : '') + '</small></span>'
-      + (h.monitor ? '<span class="mon" title="sb-srv-mon installed ' + esc(h.monitor.installedAt||'') + ' (port ' + h.monitor.port + ')">📊</span>' : '')
+      + (h.monitor ? '<span class="mon" title="rhc-srv-mon installed ' + esc(h.monitor.installedAt||'') + ' (port ' + h.monitor.port + ')">📊</span>' : '')
       + '<span class="acts">'
       + '<button title="Who is logged in on this host" onclick="event.stopPropagation();sshSessionsDialog(\'' + h.id + '\')">👥</button>'
       + '<button title="Edit" onclick="event.stopPropagation();sshEditHost(\'' + h.id + '\')">✎</button>'
@@ -647,7 +647,7 @@ function sshInstallsBadge(){
   const b = document.getElementById('ssh-inst-btn'); if (!b || !sshData) return;
   const jobs = sshData.installs || [], running = jobs.filter(j => j.status === 'running').length, failed = jobs.filter(j => j.status === 'failed').length;
   b.innerHTML = '📦' + (running ? '<span class="bd">⏳' + running + '</span>' : '') + (!running && failed ? '<span class="bd" style="color:var(--md-error-bright)">✖' + failed + '</span>' : '') + (!running && !failed && jobs.length ? '<span class="bd">' + jobs.length + '</span>' : '');
-  b.title = jobs.length ? jobs.length + ' install' + (jobs.length === 1 ? '' : 's') + (running ? ' · ' + running + ' running' : '') + (failed ? ' · ' + failed + ' failed' : '') + ' — click to open' : 'sb-srv-mon install history / running installs';
+  b.title = jobs.length ? jobs.length + ' install' + (jobs.length === 1 ? '' : 's') + (running ? ' · ' + running + ' running' : '') + (failed ? ' · ' + failed + ' failed' : '') + ' — click to open' : 'rhc-srv-mon install history / running installs';
 }
 async function sshRenderInstalls(){
   sshInstallsBadge();

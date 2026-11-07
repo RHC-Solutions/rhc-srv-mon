@@ -1,5 +1,5 @@
 set -u
-# Deploy a VNC server, invoked by sb-srv-mon over SSH with:
+# Deploy a VNC server, invoked by rhc-srv-mon over SSH with:
 #   DISPLAY_NUM  display number (1 => port 5901)
 #   VNC_USER     unix user the desktop runs as
 #   GEOMETRY     e.g. 1280x800
@@ -122,7 +122,7 @@ if cp -f "$HOME_DIR/.vnc/passwd" "$HOME_DIR/.config/tigervnc/passwd" 2>/dev/null
 fi
 cat > "$HOME_DIR/.vnc/rhc-xstartup" <<'XEOF'
 #!/bin/sh
-# session started inside the VNC display by sb-srv-mon
+# session started inside the VNC display by rhc-srv-mon
 unset SESSION_MANAGER DBUS_SESSION_BUS_ADDRESS
 if command -v startxfce4 >/dev/null 2>&1; then
   if command -v dbus-run-session >/dev/null 2>&1; then exec dbus-run-session -- startxfce4; fi
@@ -137,7 +137,7 @@ log "wrote the password file and $HOME_DIR/.vnc/rhc-xstartup"
 # 4. one predictable unit
 cat > /usr/local/bin/rhc-vnc-run <<'REOF'
 #!/bin/sh
-# sb-srv-mon VNC runner: Xvnc bound to loopback + the user's session script
+# rhc-srv-mon VNC runner: Xvnc bound to loopback + the user's session script
 set -u
 DISP="$1"; N="${DISP#:}"; PORT=$((5900+N))
 : "${GEOMETRY:=1280x800}"
@@ -152,7 +152,7 @@ REOF
 chmod 755 /usr/local/bin/rhc-vnc-run
 cat > /etc/systemd/system/rhc-vnc@.service <<UEOF
 [Unit]
-Description=VNC server %i (deployed by sb-srv-mon)
+Description=VNC server %i (deployed by rhc-srv-mon)
 After=network.target
 
 [Service]

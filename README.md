@@ -1,7 +1,7 @@
-# sb-srv-mon
+# rhc-srv-mon
 
 Zero-dependency Node.js (>= 22) server-management panel, on the road to replacing CloudPanel on this host.
-Runs as root under pm2 (`sb-srv-mon`, cwd `/root`), binds 127.0.0.1:8899, exposed by nginx at `/rhc-admin/`.
+Runs as root under pm2 (`rhc-srv-mon`, cwd `/root`), binds 127.0.0.1:8899, exposed by nginx at `/rhc-admin/`.
 
 ## Layout
 
@@ -56,7 +56,7 @@ credential at all — the same arrangement PostgreSQL has — while TCP clients 
 verified before being stored encrypted.
 
 New grants are made for `localhost` and `127.0.0.1`, never `%` — MariaDB on this host was listening on
-`0.0.0.0:3306`, so a `%` grant would have been reachable from outside. `/etc/mysql/mariadb.conf.d/150-sb-srv-mon.cnf`
+`0.0.0.0:3306`, so a `%` grant would have been reachable from outside. `/etc/mysql/mariadb.conf.d/150-rhc-srv-mon.cnf`
 sets `bind-address = 127.0.0.1` (numbered above CloudPanel's own file so it wins) and applies at the
 next MariaDB restart.
 
@@ -64,11 +64,11 @@ next MariaDB restart.
 
 Served at **`https://<panel host>/rhc-admin/`** by the `location ^~ /rhc-admin/` block in
 `/etc/nginx/sites-enabled/custom-domain.conf` (proxy to `127.0.0.1:8899`, WebSocket upgrade, 24 h read timeout).
-The former `/sb-srv-mon/` prefix 301-redirects to it, path preserved, so old bookmarks and deep links keep working.
+The former `/rhc-srv-mon/` prefix 301-redirects to it, path preserved, so old bookmarks and deep links keep working.
 
 Nothing in the app hardcodes the prefix — every API call is a relative `api/…` URL and tab slugs are single path
 segments — so moving the panel is an nginx-only change. `custom-domain.conf` is CloudPanel's file: if CLP ever
-regenerates it the block is lost, and a copy of the working config is kept in `/var/lib/sb-srv-mon/`.
+regenerates it the block is lost, and a copy of the working config is kept in `/var/lib/rhc-srv-mon/`.
 
 ## Sites tab (CloudPanel replacement, phase 1)
 
@@ -115,7 +115,7 @@ under one of its SSH users, discovered through the `htdocs` symlink, and when th
 visible in its `dump.pm2`, which is exactly the state a downed site is in; every pm2 command runs as the owning user with `-H`
 and a cwd inside that home, because pm2 spawns the app from its own cwd and the panel's `/root` is unreadable to it), Vhost
 (template editor — save runs `nginx -t`, reloads, restores the previous file on failure; backups in
-`/var/lib/sb-srv-mon/vhost-bak/`), SSL/TLS (stored certificates, upload PEM, self-signed, activate), Security (basic auth,
+`/var/lib/rhc-srv-mon/vhost-bak/`), SSL/TLS (stored certificates, upload PEM, self-signed, activate), Security (basic auth,
 blocked IPs/bots, Cloudflare-only → `{{settings}}`), SSH/FTP (SSH users: own uid, site group, symlinked htdocs/logs/backups),
 File Manager (`bin/fileop.js` runs **as the site user**, so the kernel enforces what can be read/written; uploads/downloads
 stream through it), Cron Jobs (`/etc/cron.d/<siteUser>`), Logs (tail with filter/follow). ## Domains & Rules (per site)
@@ -266,16 +266,16 @@ of a row, and pages backwards. Retention defaults to 90 days (`PUT /api/events/s
 Work in the `v2` worktree, never in the live checkout (an auto-commit cron pushes `main` every 15 minutes):
 
 ```sh
-git worktree add /opt/sb-srv-mon-v2 v2          # once
-cd /root && PORT=8898 RHC_NO_JOBS=1 RHC_DEV=1 node /opt/sb-srv-mon-v2/server.js
+git worktree add /opt/rhc-srv-mon-v2 v2          # once
+cd /root && PORT=8898 RHC_NO_JOBS=1 RHC_DEV=1 node /opt/rhc-srv-mon-v2/server.js
 ```
 
 `RHC_NO_JOBS=1` disables every scheduler (update checks, module scans, auto-update, cleanup, backups) — request-triggered
 actions still run against the real box. `RHC_DEV=1` rebuilds the page from `ui/` on every request. Landing:
 
 ```sh
-flock /var/lock/rhc-autocommit sh -c 'git merge --no-edit v2 && pm2 restart sb-srv-mon'
-pm2 logs sb-srv-mon --lines 30      # expect "re-adopted" lines for open SSH sessions
+flock /var/lock/rhc-autocommit sh -c 'git merge --no-edit v2 && pm2 restart rhc-srv-mon'
+pm2 logs rhc-srv-mon --lines 30      # expect "re-adopted" lines for open SSH sessions
 ```
 
 ## Copying out of the SSH terminal

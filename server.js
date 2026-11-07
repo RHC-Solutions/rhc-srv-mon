@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * sb-srv-mon (RHC SRV Manager) — server entry point.
+ * rhc-srv-mon (RHC SRV Manager) — server entry point.
  *
  * Feature code lives in lib/ (one module per tab/section), the browser UI in ui/ (assembled by
  * lib/page.js). This file wires the HTTP dispatcher, the WebSocket upgrade for the SSH terminal,
@@ -541,5 +541,5 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 }
 
 server.listen(PORT, HOST, () => {
-  console.log(`sb-srv-mon (RHC SRV Manager) listening on http://${HOST}:${PORT}`);
+  console.log(`rhc-srv-mon (RHC SRV Manager) listening on http://${HOST}:${PORT}`);
 });

@@ -30,7 +30,7 @@ async function check(name, fn) {
 function eq(actual, expected, what) { if (actual !== expected) throw new Error((what || '') + ' expected ' + JSON.stringify(expected) + ', got ' + JSON.stringify(actual)); }
 function ok(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed'); }
 const section = (s) => console.log('\n### ' + s);
-const store2 = () => require('/opt/sb-srv-mon-v2/lib/sites/store');
+const store2 = () => require('/opt/rhc-srv-mon-v2/lib/sites/store');
 
 (async () => {
   console.log('QA sweep against ' + BASE + (SLOW ? ' (+slow)' : '') + (NET ? ' (+net)' : ''));
@@ -585,7 +585,7 @@ const store2 = () => require('/opt/sb-srv-mon-v2/lib/sites/store');
   });
   await check('file manager helper is readable by the site user (app dir is 0700 in a real install)', async () => {
     const { execFileSync } = require('child_process');
-    const out = execFileSync('sudo', ['-n', '-u', php.user, 'sh', '-c', 'cat /var/lib/sb-srv-mon/fileop.js > /dev/null && echo ok'], { encoding: 'utf8' }).trim();
+    const out = execFileSync('sudo', ['-n', '-u', php.user, 'sh', '-c', 'cat /var/lib/rhc-srv-mon/fileop.js > /dev/null && echo ok'], { encoding: 'utf8' }).trim();
     eq(out, 'ok');
   });
   await check('file manager confinement', async () => {
@@ -638,7 +638,7 @@ const store2 = () => require('/opt/sb-srv-mon-v2/lib/sites/store');
     eq((await req('PUT', '/api/ssh/hosts/aaaaaaaaaa', { name: 'x', host: 'y' })).status, 404);
     eq((await req('DELETE', '/api/ssh/hosts/aaaaaaaaaa')).status, 404);
   });
-  await check('the sb-srv-mon remote installer is gone, not merely hidden', async () => {
+  await check('the rhc-srv-mon remote installer is gone, not merely hidden', async () => {
     const r = await req('POST', '/api/ssh/install', { hostId: 'aaaaaaaaaa', opts: {} });
     ok(r.status === 404 || r.status === 405, 'POST /api/ssh/install still answers ' + r.status + ' — a hidden button leaves a callable root installer');
     return 'POST /api/ssh/install → ' + r.status;
