@@ -58,11 +58,36 @@ function vaultRenderLists(){
       h += '<tr><td><b>' + esc(s.name) + '</b>' + (s.url ? '<br><a class="mono dim" style="font-size:13px" href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.url) + '</a>' : '') + '</td>'
         + '<td class="dim" style="font-size:13.5px">' + (s.manage ? '<a href="' + esc(s.manage) + '">' + esc(s.where) + '</a>' : esc(s.where)) + '</td>'
         + '<td class="mono" style="font-size:13px">' + esc(s.username || '') + '</td>'
-        + '<td style="min-width:16em">' + vaultSecretCell('s:' + s.id, s.present) + '</td></tr>';
+        + '<td style="min-width:16em">' + vaultSecretCell('s:' + s.id, s.present)
+        + (s.settable ? '<div style="display:flex;gap:6px;margin-top:4px"><button class="btn small" onclick="armConfirm(this, \'Reset now?\', () => vaultSetSystemPassword(\'' + esc(s.id) + '\', false))">Reset password</button><button class="btn small" onclick="vaultSetSystemPassword(\'' + esc(s.id) + '\', true)">Set password…</button></div>' : '')
+        + '</td></tr>';
     }
     h += '</table>';
   }
   el.innerHTML = h + '</div>';
+}
+function vaultAnnounceText(a){
+  if (!a) return '';
+  return a.sentTo && a.sentTo.length ? 'Sent to ' + a.sentTo.join(' and ') + '.' + (a.failed && a.failed.length ? ' Failed: ' + a.failed.join('; ') : '')
+    : '⚠ Not sent: ' + ((a.failed && a.failed.length ? a.failed.join('; ') : a.note) || 'no channel');
+}
+async function vaultSetSystemPassword(id, ask){
+  let pw = null;
+  if (ask) {
+    pw = await askModal({ title: 'Set password', label: 'New password (12+ characters, no spaces)', password: true, ok: 'Set password' });
+    if (pw == null) return;
+    if (pw.length < 12) return toast('At least 12 characters', 'error');
+  }
+  try {
+    const r = await stApi('POST', 'api/vault/system/' + encodeURIComponent(id) + '/password', pw ? { password: pw } : {});
+    delete vaultShown['s:' + id];
+    sshModal('<h3>🔑 ' + esc(r.name) + '</h3>'
+      + (r.username ? stField('Username', '<input class="mono" readonly value="' + esc(r.username) + '" onclick="this.select()">') : '')
+      + stField(r.generated ? 'New password (generated)' : 'New password', '<input class="mono" readonly value="' + esc(r.password) + '" onclick="this.select()">', 'also kept in the Vault — Show it there any time')
+      + '<p class="dim" style="font-size:14px">' + esc(vaultAnnounceText(r.announce)) + '</p>'
+      + '<div class="foot"><button class="btn" onclick="vaultCopyText(' + JSON.stringify(r.password).replace(/"/g, '&quot;') + ')">Copy password</button><button class="btn pri" onclick="sshModalClose()">Done</button></div>');
+    vaultData = null; loadVault();
+  } catch(e){ stErr(e, 'Password'); }
 }
 async function vaultFetchSecret(key){
   if (vaultShown[key] != null) return vaultShown[key];
@@ -107,8 +132,8 @@ async function vaultSave(id){
   const body = { name: g('vf-name'), kind: g('vf-kind'), username: g('vf-user'), url: g('vf-url'), notes: g('vf-notes'), tags: g('vf-tags') };
   if (g('vf-secret')) body.secret = g('vf-secret');
   try {
-    await stApi(id ? 'PUT' : 'POST', 'api/vault' + (id ? '/' + id : ''), body);
-    sshModalClose(); toast(id ? 'Secret updated' : 'Secret stored', 'success');
+    const r = await stApi(id ? 'PUT' : 'POST', 'api/vault' + (id ? '/' + id : ''), body);
+    sshModalClose(); toast((id ? 'Secret updated' : 'Secret stored') + (r.announce ? ' · ' + vaultAnnounceText(r.announce) : ''), r.announce && !(r.announce.sentTo || []).length ? 'warn' : 'success');
     if (id) delete vaultShown['e:' + id];
     vaultData = null; renderVault();
   } catch(e){ stErr(e, 'Vault'); }
