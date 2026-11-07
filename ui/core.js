@@ -124,6 +124,7 @@ const TABS = {
   backup:  { slug:'backups',  label:'Backups',    view:'backupview',  render: () => renderBackup(),  onRefresh: () => renderBackup() },
   ssh:     { slug:'ssh',      label:'SSH',        view:'sshview',     render: () => renderSsh() },
   certs:   { slug:'certificates', label:'Certificates', view:'certsview', render: () => renderCertsTab() },
+  ooda:    { slug:'self-repair', label:'Self-repair', view:'oodaview', render: () => renderOoda(), onRefresh: () => renderOoda() },
   vault:   { slug:'vault',    label:'Vault',      view:'vaultview',   render: () => renderVault() },
   tunnels: { slug:'tunnels',  label:'Tunnels',    view:'tunnelsview', render: () => renderTunnelsTab() },
   events:  { slug:'events',   label:'Events',     view:'eventsview',  render: () => renderEvents(),  onRefresh: () => refreshEvents() },
@@ -131,7 +132,7 @@ const TABS = {
 };
 const TAB_SLUG = Object.fromEntries(Object.entries(TABS).map(([k, v]) => [k, v.slug]));
 const SLUG_TAB = Object.assign(Object.fromEntries(Object.entries(TAB_SLUG).map(([k,v]) => [v,k])),
-  { pm2:'pm2', services:'pm2', databases:'db', postgres:'db', postgresql:'db', db:'db', backup:'backup', terminal:'ssh', certs:'certs', certificate:'certs', tunnel:'tunnels' });
+  { pm2:'pm2', services:'pm2', databases:'db', postgres:'db', postgresql:'db', db:'db', backup:'backup', terminal:'ssh', certs:'certs', certificate:'certs', tunnel:'tunnels', ooda:'ooda', repair:'ooda' });
 function tabFromPath(){ const seg = (location.pathname.split('/').filter(Boolean).pop() || '').toLowerCase(); return SLUG_TAB[seg] || null; }
 function setTab(tab, opts){
   opts = opts || {};

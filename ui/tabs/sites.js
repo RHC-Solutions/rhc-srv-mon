@@ -2,7 +2,7 @@
 // List (cards with health) → detail with CloudPanel-style sub-tabs. Sub-navigation lives in the
 // query string (sites?d=<domain>&t=<tab>) so every relative api/ URL keeps working behind nginx.
 let lastSites = null;
-const SITE_TABS = [['settings', 'Settings'], ['procs', 'Processes'], ['vhost', 'Vhost'], ['databases', 'Databases'], ['ssl', 'SSL/TLS'], ['cloudflare', 'Cloudflare'], ['rules', 'Domains & Rules'], ['security', 'Security'], ['ssh', 'SSH/FTP'], ['files', 'File Manager'], ['cron', 'Cron Jobs'], ['logs', 'Logs']];
+const SITE_TABS = [['settings', 'Settings'], ['overrides', 'Overrides'], ['procs', 'Processes'], ['vhost', 'Vhost'], ['databases', 'Databases'], ['ssl', 'SSL/TLS'], ['cloudflare', 'Cloudflare'], ['rules', 'Domains & Rules'], ['security', 'Security'], ['ssh', 'SSH/FTP'], ['files', 'File Manager'], ['cron', 'Cron Jobs'], ['logs', 'Logs']];
 let siteView = { domain: null, tab: 'settings', data: null, loading: false, sub: {} };   // sub: per-tab fetched data
 // Not kept across visits: Chrome autofills the saved sign-in name into this box, and keeping it
 // turned that into a filter that hid every site ("No sites match.") on every visit.
@@ -399,7 +399,7 @@ function renderSiteDetail(){
   // do not clobber a form the user is typing in (10 s refresh)
   if (view.contains(document.activeElement) && ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;
   const s = siteView.data;
-  const body = ({ settings: siteTabSettings, procs: siteTabProcs, vhost: siteTabVhost, databases: siteTabDatabases, ssl: siteTabSsl, cloudflare: siteTabCf, rules: siteTabRules, security: siteTabSecurity, ssh: siteTabSsh, files: siteTabFiles, cron: siteTabCron, logs: siteTabLogs }[siteView.tab] || siteTabSettings)(s);
+  const body = ({ settings: siteTabSettings, overrides: siteTabOverrides, procs: siteTabProcs, vhost: siteTabVhost, databases: siteTabDatabases, ssl: siteTabSsl, cloudflare: siteTabCf, rules: siteTabRules, security: siteTabSecurity, ssh: siteTabSsh, files: siteTabFiles, cron: siteTabCron, logs: siteTabLogs }[siteView.tab] || siteTabSettings)(s);
   view.innerHTML = siteHeader(s) + '<div class="site-body">' + body + '</div>';
   if (typeof siteView.afterRender === 'function') { const f = siteView.afterRender; siteView.afterRender = null; f(); }
 }
@@ -1348,3 +1348,59 @@ async function siteLogFetch(){
   renderSiteDetail();
 }
 function siteLogFollow(on){ clearInterval(siteLogTimer); siteLogTimer = null; if (on) siteLogTimer = setInterval(() => { if (state.tab === 'sites' && siteView.tab === 'logs') siteLogFetch(); else siteLogFollow(false); }, 3000); }
+
+/* ---- Overrides: this site's own notifications / tunnel / backups / self-repair, or the shared Settings ---- */
+function siteTabOverrides(s){
+  return siteSub('overrides', siteUrl('/overrides'), (v) => {
+    const o = v.overrides, e = v.effective, sh = v.shared;
+    const sel = (id, cur, opts) => '<select id="' + id + '">' + opts.map(([val, label]) => '<option value="' + val + '"' + (val === cur ? ' selected' : '') + '>' + esc(label) + '</option>').join('') + '</select>';
+    const intro = '<p class="dim" style="margin:0 0 12px;font-size:14.5px">Everything on <a href="settings">Settings</a> is shared by every site. Switch a group here to give <b>' + esc(s.domain) + '</b> its own value; the other sites keep the shared one.</p>';
+    const n = o.notify;
+    const notifyCard = siteCard('Notifications',
+      siteField('Alerts about this site go to', sel('ovNotify', n.mode, [['shared', 'Shared channels (Settings → Telegram / Slack / Brevo)'], ['own', 'This site\'s own channels only'], ['off', 'Nowhere — no alerts for this site']]))
+      + '<div id="ovNotifyOwn" style="display:' + (n.mode === 'own' ? '' : 'none') + '">'
+      + '<div class="row2">' + siteField('Telegram bot token', '<input type="password" id="ovTgToken" autocomplete="new-password" placeholder="' + (n.telegram.has_botToken ? '•••••••• (stored — leave empty to keep)' : '123456:ABC…') + '">')
+      + siteField('Telegram chat ID', '<input id="ovTgChat" value="' + esc(n.telegram.chatId || '') + '" placeholder="-100123456789">') + '</div>'
+      + siteField('Slack webhook URL', '<input type="password" id="ovSlack" autocomplete="new-password" placeholder="' + (n.slack.has_webhookUrl ? '•••••••• (stored — leave empty to keep)' : 'https://hooks.slack.com/services/…') + '">')
+      + siteField('Brevo e-mail recipients', '<input id="ovBrevo" value="' + esc(n.brevo.to || '') + '" placeholder="ops@example.com, …">', 'sent with the shared Brevo API key')
+      + '</div><div class="site-actions"><button class="btn pri" onclick="siteOvSave(\'notify\')">Save</button></div>');
+    const t = v.tunnel;
+    const cfCard = siteCard('Cloudflare &amp; tunnel',
+      '<p class="dim" style="margin:0 0 8px;font-size:14.5px">API token: <b>' + esc(e.cloudflareToken === 'site' ? 'this site\'s own' : e.cloudflareToken === 'account' ? 'the shared one' : 'none') + '</b> — set an own token on the <a href="#" onclick="siteGo(\'' + esc(s.domain) + '\', \'cloudflare\');return false">Cloudflare</a> tab.'
+      + (t ? '<br>Published through ' + (t.shared ? 'the <b>shared host tunnel</b>' : 'its <b>own tunnel</b> (' + esc(t.unit || '') + ')') + ': ' + esc((t.hosts || []).join(', ')) : '<br>Not published through a tunnel.') + '</p>'
+      + siteField('Tunnel', sel('ovTunnel', o.cloudflare.tunnel, [['default', 'Shared default (' + (sh.tunnel === 'shared' ? 'shared host tunnel' : 'own tunnel') + ')'], ['own', 'Own tunnel'], ['shared', 'Route on the shared host tunnel']]), t ? 'changing this moves the site at once: its routes and DNS switch tunnels (a few seconds)' : 'applies when the site is published')
+      + '<div class="site-actions"><button class="btn pri" onclick="siteOvSave(\'cloudflare\')">Save</button></div>');
+    const b = o.backups, w = b.wasabi;
+    const bkCard = siteCard('Backups',
+      siteField('Backups of this site', sel('ovBk', b.mode, [['shared', 'Shared (Settings → Wasabi, nightly host backup)'], ['own', 'Also to this site\'s own Wasabi bucket, nightly']]))
+      + '<div id="ovBkOwn" style="display:' + (b.mode === 'own' ? '' : 'none') + '"><div class="row2">'
+      + siteField('Access key', '<input id="ovWk" autocomplete="off" value="' + esc(w.accessKey || '') + '">')
+      + siteField('Secret key', '<input type="password" id="ovWs" autocomplete="new-password" placeholder="' + (w.has_secretKey ? '•••••••• (stored — leave empty to keep)' : 'secret key') + '">') + '</div><div class="row3">'
+      + siteField('Region', '<input id="ovWr" value="' + esc(w.region || 'eu-central-1') + '">')
+      + siteField('Bucket', '<input id="ovWb" value="' + esc(w.bucket || '') + '">')
+      + siteField('Folder', '<input id="ovWp" value="' + esc(w.prefix || '') + '" placeholder="host default">') + '</div></div>'
+      + '<div class="site-actions"><button class="btn pri" onclick="siteOvSave(\'backups\')">Save</button></div>');
+    const rpCard = siteCard('Self-repair',
+      siteField('When this site\'s apps are down', sel('ovRepair', o.repair.mode, [['inherit', 'Shared default (' + (sh.repair === 'off' ? 'off' : 'repair automatically') + ')'], ['auto', 'Repair automatically'], ['off', 'Do not touch — alert only']]), 'now: ' + (e.repair === 'off' ? 'off' : 'automatic') + ' · see <a href="self-repair">Self-repair</a>')
+      + '<div class="site-actions"><button class="btn pri" onclick="siteOvSave(\'repair\')">Save</button></div>');
+    setTimeout(() => {
+      const nm = document.getElementById('ovNotify'); if (nm) nm.onchange = () => { document.getElementById('ovNotifyOwn').style.display = nm.value === 'own' ? '' : 'none'; };
+      const bm = document.getElementById('ovBk'); if (bm) bm.onchange = () => { document.getElementById('ovBkOwn').style.display = bm.value === 'own' ? '' : 'none'; };
+    }, 0);
+    return intro + '<div class="upd-grid">' + notifyCard + cfCard + bkCard + rpCard + '</div>';
+  });
+}
+async function siteOvSave(group){
+  const g = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  let body;
+  if (group === 'notify') body = { notify: { mode: g('ovNotify'), telegram: Object.assign({ chatId: g('ovTgChat') }, g('ovTgToken') ? { botToken: g('ovTgToken') } : {}), slack: g('ovSlack') ? { webhookUrl: g('ovSlack') } : {}, brevo: { to: g('ovBrevo') } } };
+  else if (group === 'cloudflare') body = { cloudflare: { tunnel: g('ovTunnel') } };
+  else if (group === 'backups') body = { backups: { mode: g('ovBk'), wasabi: Object.assign({ accessKey: g('ovWk'), region: g('ovWr'), bucket: g('ovWb'), prefix: g('ovWp') }, g('ovWs') ? { secretKey: g('ovWs') } : {}) } };
+  else body = { repair: { mode: g('ovRepair') } };
+  if (group === 'cloudflare') toast('Saving — if the site is published it moves to the other tunnel now…');
+  try {
+    const r = await siteApi('PUT', siteUrl('/overrides'), body);
+    toast('Saved' + (r.steps && r.steps.length ? ' — ' + r.steps.length + ' tunnel steps done' : ''), 'success', r.steps && r.steps.length ? { detail: r.steps.join('\n'), duration: 10000 } : {});
+    siteSubReload('overrides');
+  } catch(e){ siteErr(e, 'Overrides'); }
+}

@@ -46,6 +46,13 @@ function renderSettings(){
     + stField('Incoming webhook URL', '<input type="password" id="slUrl" placeholder="' + (sl.hasUrl ? esc(sl.webhookUrl) + ' (leave empty to keep)' : 'https://hooks.slack.com/services/T…/B…/…') + '">', 'Slack → Apps → Incoming Webhooks → pick a channel')
     + '<div class="upd-chk-grid"><label><input type="checkbox" id="slUpd"' + (sl.notifyOnUpdate !== false ? ' checked' : '') + '> Updates available</label><label><input type="checkbox" id="slDone"' + (sl.notifyOnComplete !== false ? ' checked' : '') + '> Update / backup / cleanup results</label><label><input type="checkbox" id="slAuth"' + (sl.notifyOnAuth !== false ? ' checked' : '') + '> Web login attempts</label><label><input type="checkbox" id="slSite"' + (sl.notifyOnSite !== false ? ' checked' : '') + '> Site start / stop / restart</label></div>'
     + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'slack\')">📨 Send test</button><button class="btn pri" onclick="saveSlackSettings()">Save</button></div></div>';
+  // Sites & apps: what every current and future site inherits
+  const sd = lastSettings.sitesDefaults || { tunnel: 'own', repair: 'auto' };
+  html += '<div class="upd-card" id="sites-defaults"><h3>Sites &amp; apps (shared)</h3>'
+    + '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Every setting on this page — Telegram, Slack, Brevo, Cloudflare, Wasabi, self-repair — is shared by all current and future sites. A site can switch any group to its own value on its <b>Overrides</b> tab.</p>'
+    + '<div class="row2">' + stField('Tunnel for new sites', '<select id="sdTunnel"><option value="own"' + (sd.tunnel === 'own' ? ' selected' : '') + '>Own tunnel per site</option><option value="shared"' + (sd.tunnel === 'shared' ? ' selected' : '') + '>Route on the shared host tunnel</option></select>')
+    + stField('Self-repair for sites', '<select id="sdRepair"><option value="auto"' + (sd.repair === 'auto' ? ' selected' : '') + '>Repair automatically</option><option value="off"' + (sd.repair === 'off' ? ' selected' : '') + '>Off — alert only</option></select>', 'the loop itself: <a href="self-repair">Self-repair</a>') + '</div>'
+    + '<div class="site-actions"><button class="btn pri" onclick="saveSitesDefaults()">Save</button></div></div>';
   // Brevo (e-mail)
   html += '<div class="upd-card" id="brevo"><h3>Brevo (e-mail)</h3>'
     + '<div class="upd-toggle"><label class="switch"><input type="checkbox" id="brOn"' + (br.enabled ? ' checked' : '') + '><span class="slider"></span></label><label>Enabled</label></div>'
@@ -256,6 +263,10 @@ async function saveSlackSettings(){
   if (g('slUrl').value.trim()) body.webhookUrl = g('slUrl').value.trim();
   try { await stApi('PUT', 'api/settings/slack', body); toast('Slack settings saved', 'success'); lastSettings = null; renderSettings(); }
   catch(e){ stErr(e, 'Slack'); }
+}
+async function saveSitesDefaults(){
+  try { await stApi('PUT', 'api/settings/sites-defaults', { tunnel: document.getElementById('sdTunnel').value, repair: document.getElementById('sdRepair').value }); toast('Shared site defaults saved', 'success'); lastSettings = null; renderSettings(); }
+  catch(e){ stErr(e, 'Sites & apps'); }
 }
 function brevoBody(){
   const g = (id) => document.getElementById(id);
