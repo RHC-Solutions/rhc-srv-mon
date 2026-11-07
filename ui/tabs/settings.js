@@ -18,7 +18,7 @@ function renderSettings(){
   showBanner(null); setStatus([]);
   if (!lastSettings) { view.innerHTML = '<div class="upd-card">Loading…</div>'; loadSettings(); return; }
   if (view.contains(document.activeElement) && ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;
-  const d = lastSettings, g = d.general, tg = d.telegram, sl = d.slack, cf = d.cloudflare, ts = d.turnstile || { enabled: false, siteKey: '' };
+  const d = lastSettings, g = d.general, tg = d.telegram, sl = d.slack, br = d.brevo || { senderEmail: 'sys@synergybeam.com', to: 'sys@synergybeam.com' }, cf = d.cloudflare, ts = d.turnstile || { enabled: false, siteKey: '' };
   document.getElementById('updated').textContent = g.panelDomain + ' · ' + g.hostname + ' · ' + g.timezone + ' · node ' + g.node;
   let html = '<div class="upd-grid">';
   // General
@@ -44,6 +44,15 @@ function renderSettings(){
     + stField('Incoming webhook URL', '<input type="password" id="slUrl" placeholder="' + (sl.hasUrl ? esc(sl.webhookUrl) + ' (leave empty to keep)' : 'https://hooks.slack.com/services/T…/B…/…') + '">', 'Slack → Apps → Incoming Webhooks → pick a channel')
     + '<div class="upd-chk-grid"><label><input type="checkbox" id="slUpd"' + (sl.notifyOnUpdate !== false ? ' checked' : '') + '> Updates available</label><label><input type="checkbox" id="slDone"' + (sl.notifyOnComplete !== false ? ' checked' : '') + '> Update / backup / cleanup results</label><label><input type="checkbox" id="slAuth"' + (sl.notifyOnAuth !== false ? ' checked' : '') + '> Web login attempts</label><label><input type="checkbox" id="slSite"' + (sl.notifyOnSite !== false ? ' checked' : '') + '> Site start / stop / restart</label></div>'
     + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'slack\')">📨 Send test</button><button class="btn pri" onclick="saveSlackSettings()">Save</button></div></div>';
+  // Brevo (e-mail)
+  html += '<div class="upd-card" id="brevo"><h3>Brevo (e-mail)</h3>'
+    + '<div class="upd-toggle"><label class="switch"><input type="checkbox" id="brOn"' + (br.enabled ? ' checked' : '') + '><span class="slider"></span></label><label>Enabled</label></div>'
+    + stField('API key', '<input type="password" id="brKey" autocomplete="new-password" placeholder="' + (br.hasKey ? esc(br.apiKey) + ' (leave empty to keep)' : 'xkeysib-…') + '">', 'Brevo → SMTP &amp; API → API keys. Stored encrypted.')
+    + '<div class="row2">' + stField('Sender e-mail', '<input id="brFrom" type="email" value="' + esc(br.senderEmail || '') + '" placeholder="sys@synergybeam.com">', 'must be a verified sender or domain in Brevo')
+    + stField('Sender name', '<input id="brName" maxlength="70" value="' + esc(br.senderName || '') + '" placeholder="' + esc(g.hostname) + '">') + '</div>'
+    + stField('Recipients', '<input id="brTo" value="' + esc(br.to || '') + '" placeholder="sys@synergybeam.com">', 'separate several with commas')
+    + '<div class="upd-chk-grid"><label><input type="checkbox" id="brUpd"' + (br.notifyOnUpdate !== false ? ' checked' : '') + '> Updates available</label><label><input type="checkbox" id="brDone"' + (br.notifyOnComplete !== false ? ' checked' : '') + '> Update / backup / cleanup results</label><label><input type="checkbox" id="brAuth"' + (br.notifyOnAuth !== false ? ' checked' : '') + '> Web login attempts</label><label><input type="checkbox" id="brSite"' + (br.notifyOnSite !== false ? ' checked' : '') + '> Site start / stop / restart</label></div>'
+    + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'brevo\')">📨 Send test</button><button class="btn pri" onclick="saveBrevoSettings()">Save</button></div></div>';
   // Cloudflare
   html += '<div class="upd-card"><h3>Cloudflare</h3>'
     + '<p class="dim" style="margin:0 0 8px;font-size:14.5px">API token with <b>Zone:Read</b> and <b>DNS:Edit</b> (Cloudflare dashboard → My Profile → API Tokens). Stored encrypted. Powers the domains overview below; DNS records for new sites and origin certificates come next.</p>'
@@ -192,6 +201,16 @@ async function saveSlackSettings(){
   try { await stApi('PUT', 'api/settings/slack', body); toast('Slack settings saved', 'success'); lastSettings = null; renderSettings(); }
   catch(e){ stErr(e, 'Slack'); }
 }
+function brevoBody(){
+  const g = (id) => document.getElementById(id);
+  const body = { enabled: g('brOn').checked, senderEmail: g('brFrom').value, senderName: g('brName').value, to: g('brTo').value, notifyOnUpdate: g('brUpd').checked, notifyOnComplete: g('brDone').checked, notifyOnAuth: g('brAuth').checked, notifyOnSite: g('brSite').checked };
+  if (g('brKey').value.trim()) body.apiKey = g('brKey').value.trim();
+  return body;
+}
+async function saveBrevoSettings(){
+  try { await stApi('PUT', 'api/settings/brevo', brevoBody()); toast('Brevo settings saved', 'success'); lastSettings = null; renderSettings(); }
+  catch(e){ stErr(e, 'Brevo'); }
+}
 async function saveCloudflareSettings(){
   const v = document.getElementById('cfToken').value.trim();
   if (!v) return toast('Nothing to save — paste a token, or type REMOVE to delete the stored one', 'warn');
@@ -231,12 +250,13 @@ async function testChannel(which){
   const body = which === 'cloudflare' ? { token: val('cfToken') }
     : which === 'turnstile' ? { secretKey: val('tsSecret') }
     : which === 'telegram' ? { botToken: val('tgToken'), chatId: val('tgChat') }
+    : which === 'brevo' ? brevoBody()
     : { webhookUrl: val('slUrl') };
   toast('Testing ' + which + '…');
   try {
     const r = await stApi('POST', 'api/settings/' + which + '/test', body);
     const cfMsg = 'Token ' + r.status + (r.kind === 'account' ? ' (account-owned' + (r.account ? ', ' + r.account.name : '') + ')' : '') + (r.saved ? '' : ' (not saved yet — press Save to keep it)') + ' · ' + r.zones + ' zone' + (r.zones === 1 ? '' : 's') + (r.zoneNames && r.zoneNames.length ? ': ' + r.zoneNames.join(', ') : '');
-    toast(which === 'cloudflare' ? cfMsg : which === 'turnstile' ? 'Cloudflare accepted the secret key' : 'Test message sent — check ' + which,
+    toast(which === 'cloudflare' ? cfMsg : which === 'turnstile' ? 'Cloudflare accepted the secret key' : which === 'brevo' ? 'Test e-mail sent to ' + r.to : 'Test message sent — check ' + which,
       which === 'cloudflare' && r.warning ? 'warn' : 'success',
       Object.assign({ duration: 9000 }, (which === 'cloudflare' || which === 'turnstile') && (r.warning || r.note) ? { detail: [r.warning, r.note].filter(Boolean).join('\n\n'), duration: 14000 } : {}));
   } catch(e){ stErr(e, which); }
