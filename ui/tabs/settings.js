@@ -53,6 +53,7 @@ function renderSettings(){
   html += '<div class="upd-card" id="sites-defaults"><h3>Sites &amp; apps (shared)</h3>'
     + '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Every setting on this page — Telegram, Slack, Brevo, Cloudflare, Wasabi, self-repair — is shared by all current and future sites. A site can switch any group to its own value on its <b>Overrides</b> tab.</p>'
     + '<div class="row2">' + stField('Tunnel for new sites', '<select id="sdTunnel"><option value="own"' + (sd.tunnel === 'own' ? ' selected' : '') + '>Own tunnel per site</option><option value="shared"' + (sd.tunnel === 'shared' ? ' selected' : '') + '>Route on the shared host tunnel</option></select>')
+    + stField('GitHub owner for site repos', '<input id="sdGhOwner" value="' + esc(sd.githubOwner || 'roman-synergybeam') + '" placeholder="roman-synergybeam">', 'each site gets &lt;owner&gt;/&lt;domain&gt; unless a repo is set on its GitHub tab') + '</div><div class="row2">'
     + stField('Self-repair for sites', '<select id="sdRepair"><option value="auto"' + (sd.repair === 'auto' ? ' selected' : '') + '>Repair automatically</option><option value="off"' + (sd.repair === 'off' ? ' selected' : '') + '>Off — alert only</option></select>', 'the loop itself: <a href="self-repair">Self-repair</a>') + '</div>'
     + '<div class="site-actions"><button class="btn pri" onclick="saveSitesDefaults()">Save</button></div></div>';
   // Brevo (e-mail)
@@ -305,7 +306,7 @@ async function saveWhitelist(btn){
   } catch(e){ stErr(e, 'Whitelist'); btn.disabled = false; }
 }
 async function saveSitesDefaults(){
-  try { await stApi('PUT', 'api/settings/sites-defaults', { tunnel: document.getElementById('sdTunnel').value, repair: document.getElementById('sdRepair').value }); toast('Shared site defaults saved', 'success'); lastSettings = null; renderSettings(); }
+  try { await stApi('PUT', 'api/settings/sites-defaults', { tunnel: document.getElementById('sdTunnel').value, repair: document.getElementById('sdRepair').value, githubOwner: document.getElementById('sdGhOwner').value }); toast('Shared site defaults saved', 'success'); lastSettings = null; renderSettings(); }
   catch(e){ stErr(e, 'Sites & apps'); }
 }
 function brevoBody(){

@@ -1409,15 +1409,15 @@ async function siteOvSave(group){
 function siteTabGithub(s){
   return siteSub('github', siteUrl('/github'), (g) => {
     if (!g.connected) return siteCard('GitHub', '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Not connected. Connecting creates a private repo <b>RHC-Solutions/' + esc(s.domain) + '</b> (or uses the org repo this code was cloned from), gives the site a deploy key that can only reach that repo, and pushes the code to <b>main</b>. Data folders, databases, keys and .env files are never committed.</p>'
-      + '<div class="site-actions"><button class="btn pri" onclick="siteGhAct(\'connect\', this)">Connect to GitHub</button></div>');
+      + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="siteGhRepo()">Use another repo…</button><button class="btn pri" onclick="siteGhAct(\'connect\', this)">Connect to ' + esc(g.defaultOwner) + '/' + esc(s.domain) + '</button></div>');
     const l = g.last;
     const when = (t) => t ? esc(new Date(t).toLocaleString()) : '–';
-    let h = '<p style="margin:0 0 6px"><a href="' + esc(g.url) + '" target="_blank" rel="noopener"><b>' + esc(g.repo) + '</b> ↗</a> · branch <span class="mono">' + esc(g.branch) + '</span>'
+    let h = '<p style="margin:0 0 6px"><a href="' + esc(g.url) + '" target="_blank" rel="noopener"><b>' + esc(g.repo) + '</b> ↗</a>' + (g.manual ? ' <span class="dim">(set by hand)</span>' : ' <span class="dim">(default owner)</span>') + ' · branch <span class="mono">' + esc(g.branch) + '</span>'
       + (g.upstream ? ' · upstream <span class="mono dim">' + esc(g.upstream) + '</span>' : '') + '</p>'
       + '<div class="upd-toggle"><label class="switch"><input type="checkbox"' + (g.autoSync ? ' checked' : '') + ' onchange="siteGhAuto(this.checked)"><span class="slider"></span></label><label>Auto-sync: commit &amp; push changes made on the server every 15 min</label></div>'
       + '<div class="' + (l && !l.ok ? 'site-why' : 'dim') + '" style="font-size:14px;margin:6px 0">Last sync ' + (l ? when(l.at) + ': ' + esc(l.summary) : 'not yet') + (g.dirty ? ' · <b>' + g.dirty + ' uncommitted change(s)</b> on the server' : '') + '</div>';
     if (g.commits && g.commits.length) h += '<table class="upd-table"><tr><th>Commit</th><th>Message</th><th>By</th><th>When</th></tr>' + g.commits.map(c => '<tr><td class="mono"><a href="' + esc(g.url) + '/commit/' + esc(c.hash) + '" target="_blank" rel="noopener">' + esc(c.hash) + '</a></td><td>' + esc(c.subject) + '</td><td class="dim">' + esc(c.author) + '</td><td class="dim" style="white-space:nowrap">' + when(c.date) + '</td></tr>').join('') + '</table>';
-    h += '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="siteGhAct(\'sync\', this)">Commit &amp; push now</button>'
+    h += '<div class="site-actions" style="justify-content:space-between"><span><button class="btn" onclick="siteGhAct(\'sync\', this)">Commit &amp; push now</button> <button class="btn" onclick="siteGhRepo()">Move to another repo…</button></span>'
       + '<button class="btn pri" onclick="armConfirm(this, \'Pull main and restart?\', () => siteGhAct(\'update\', this))">Update from GitHub</button></div>'
       + '<p class="dim" style="font-size:13.5px;margin:8px 0 0">Update commits local changes first, pulls <b>main</b> (rebase), installs requirements.txt / package.json dependencies if they changed, and restarts the site\'s apps. Commits made on GitHub are never pulled automatically.</p>';
     return siteCard('GitHub', h);
@@ -1431,6 +1431,14 @@ async function siteGhAct(what, btn){
     const lines = r.steps || (r.result ? [r.result.summary] : []);
     toast(what === 'connect' ? 'Connected to ' + r.repo : what === 'update' ? 'Updated' : (r.result && r.result.summary) || 'Synced', r.result && !r.result.ok ? 'warn' : 'success', lines.length ? { detail: lines.join('\n'), duration: 12000 } : {});
   } catch(e){ siteErr(e, 'GitHub'); }
+  siteSubReload('github');
+}
+async function siteGhRepo(){
+  const repo = await askModal({ title: 'GitHub repository for this site', label: 'owner/name — created (private) if it does not exist; the site moves there and its deploy key leaves the old repo', placeholder: 'roman-synergybeam/' + siteView.domain, ok: 'Use this repo' });
+  if (!repo) return;
+  toast('Moving to ' + repo + '…');
+  try { const r = await siteApi('POST', siteUrl('/github/connect'), { repo: repo.trim() }); toast('Now syncing to ' + r.repo, 'success', { detail: (r.steps || []).join('\n'), duration: 12000 }); }
+  catch(e){ siteErr(e, 'GitHub'); }
   siteSubReload('github');
 }
 async function siteGhAuto(on){
