@@ -21,6 +21,8 @@ function renderVault(){
 function vaultSecretCell(key, hasValue){
   if (!hasValue) return '<span class="dim">not set</span>';
   const v = vaultShown[key];
+  if (v != null && v.includes('\n')) return '<textarea class="mono" readonly rows="6" style="width:100%;min-width:16em;font-size:12px" onclick="this.select()">' + esc(v) + '</textarea>'
+    + '<div style="display:flex;gap:6px;margin-top:4px"><button class="btn small" onclick="vaultToggle(\'' + esc(key) + '\')">Hide</button><button class="btn small" onclick="vaultCopy(\'' + esc(key) + '\')">Copy</button></div>';
   return '<div style="display:flex;gap:6px;align-items:center"><input class="mono" readonly value="' + esc(v != null ? v : '••••••••••••') + '" style="flex:1;min-width:10em;font-size:13px" onclick="this.select()">'
     + '<button class="btn small" onclick="vaultToggle(\'' + esc(key) + '\')">' + (v != null ? 'Hide' : 'Show') + '</button>'
     + '<button class="btn small" onclick="vaultCopy(\'' + esc(key) + '\')">Copy</button></div>';

@@ -29,7 +29,7 @@ function renderSettings(){
       + (g.logo ? '<button class="btn small" type="button" onclick="removeLogo()">Remove</button>' : '') + '</div>', 'a URL is downloaded once and stored on this server, or upload a file (PNG, JPEG, GIF, WebP, SVG, max 2 MB): top bar, sign-in page, favicon') + '</div><div class="row2">'
     + stField('Panel domain', '<input value="' + esc(g.panelDomain) + '" disabled>', 'from ' + esc(g.panelDomainSource || 'nginx custom-domain.conf'))
     + stField('Server IP', '<input value="' + esc(g.ip || '') + '" disabled>', [g.ipSource, (g.lanIps || []).length ? 'LAN ' + g.lanIps.join(', ') : ''].filter(Boolean).map(esc).join(' · ')) + '</div><div class="row2">'
-    + stField('Timezone', '<input value="' + esc(g.timezone) + '" disabled>')
+    + stField('Timezone', '<select id="stTz"><option>' + esc(g.timezone) + '</option></select>', 'server clock: scheduled backups/updates and all log times follow it')
     + stField('Event log retention (days)', '<input id="stRet" type="number" min="1" max="3650" value="' + esc(g.eventsRetentionDays) + '">') + '</div>'
     + stField('ACME / Let\'s Encrypt e-mail', '<input id="stAcme" type="email" value="' + esc(g.acmeEmail || '') + '" placeholder="admin@example.com">', 'used when certificates are issued from this panel (upcoming)')
     + '<div class="site-actions"><button class="btn pri" onclick="saveGeneralSettings()">Save</button></div></div>';
@@ -46,6 +46,8 @@ function renderSettings(){
     + stField('Incoming webhook URL', '<input type="password" id="slUrl" placeholder="' + (sl.hasUrl ? esc(sl.webhookUrl) + ' (leave empty to keep)' : 'https://hooks.slack.com/services/T…/B…/…') + '">', 'Slack → Apps → Incoming Webhooks → pick a channel')
     + '<div class="upd-chk-grid"><label><input type="checkbox" id="slUpd"' + (sl.notifyOnUpdate !== false ? ' checked' : '') + '> Updates available</label><label><input type="checkbox" id="slDone"' + (sl.notifyOnComplete !== false ? ' checked' : '') + '> Update / backup / cleanup results</label><label><input type="checkbox" id="slAuth"' + (sl.notifyOnAuth !== false ? ' checked' : '') + '> Web login attempts</label><label><input type="checkbox" id="slSite"' + (sl.notifyOnSite !== false ? ' checked' : '') + '> Site start / stop / restart</label></div>'
     + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="testChannel(\'slack\')">📨 Send test</button><button class="btn pri" onclick="saveSlackSettings()">Save</button></div></div>';
+  // Admin IP whitelist (filled in by loadWhitelist — its own endpoint)
+  html += '<div class="upd-card" id="whitelist"><h3>Whitelist (admin IPs)</h3><div id="wlBody">' + wlBodyHtml() + '</div></div>';
   // Sites & apps: what every current and future site inherits
   const sd = lastSettings.sitesDefaults || { tunnel: 'own', repair: 'auto' };
   html += '<div class="upd-card" id="sites-defaults"><h3>Sites &amp; apps (shared)</h3>'
@@ -117,6 +119,7 @@ function renderSettings(){
   const d2 = { cleanup: (lastModules && lastModules.cleanup) || { config: {}, preview: null, running: false, log: [] } };
   html += '<div style="margin-top:14px">' + cleanupCardHtml(d2) + '</div>';
   view.innerHTML = html;
+  fillTzSelect();
   if (location.hash.length > 1 && !view.dataset.jumped) { const el = document.getElementById(location.hash.slice(1)); if (el) { view.dataset.jumped = '1'; el.scrollIntoView({ block: 'start' }); } }
   const cuSaveBtn = document.getElementById('cuSave');
   if (cuSaveBtn) cuSaveBtn.addEventListener('click', () => saveCleanupConfig(false));
@@ -246,8 +249,18 @@ function uploadLogo(inp){
 async function removeLogo(){
   try { await stApi('PUT', 'api/settings/logo', { url: '' }); toast('Logo removed', 'success'); location.reload(); } catch(e){ stErr(e, 'Logo'); }
 }
+// Fill the timezone picker once (≈600 zones), keeping the current one selected.
+let stTzZones = null;
+async function fillTzSelect(){
+  const el = document.getElementById('stTz'); if (!el || el.dataset.filled) return;
+  try { if (!stTzZones) stTzZones = await stApi('GET', 'api/settings/timezones'); } catch(e){ return; }
+  const cur = el.value;
+  el.innerHTML = stTzZones.zones.map(z => '<option' + (z === cur ? ' selected' : '') + '>' + esc(z) + '</option>').join('');
+  el.dataset.filled = '1';
+}
 async function saveGeneralSettings(){
-  try { await stApi('PUT', 'api/settings/general', { panelName: document.getElementById('stName').value, eventsRetentionDays: document.getElementById('stRet').value, acmeEmail: document.getElementById('stAcme').value }); const lg = document.getElementById('stLogo').value.trim(), g0 = lastSettings && lastSettings.general, logoChanged = !!lg && lg !== logoUrlOf(g0 && g0.logo); if (logoChanged) await stApi('PUT', 'api/settings/logo', { url: lg }); toast('Saved', 'success'); const nm = document.getElementById('stName').value.trim(); if (nm !== (g0 && g0.panelName) || logoChanged) { location.reload(); return; } lastSettings = null; renderSettings(); }
+  const tzEl = document.getElementById('stTz'), g0tz = lastSettings && lastSettings.general.timezone;
+  try { await stApi('PUT', 'api/settings/general', { timezone: tzEl ? tzEl.value : undefined, panelName: document.getElementById('stName').value, eventsRetentionDays: document.getElementById('stRet').value, acmeEmail: document.getElementById('stAcme').value }); const lg = document.getElementById('stLogo').value.trim(), g0 = lastSettings && lastSettings.general, logoChanged = !!lg && lg !== logoUrlOf(g0 && g0.logo); if (logoChanged) await stApi('PUT', 'api/settings/logo', { url: lg }); toast('Saved', 'success'); const nm = document.getElementById('stName').value.trim(); if (nm !== (g0 && g0.panelName) || logoChanged || (tzEl && tzEl.value !== g0tz)) { location.reload(); return; } lastSettings = null; renderSettings(); }
   catch(e){ stErr(e, 'Save'); }
 }
 async function saveTelegramSettings(){
@@ -263,6 +276,33 @@ async function saveSlackSettings(){
   if (g('slUrl').value.trim()) body.webhookUrl = g('slUrl').value.trim();
   try { await stApi('PUT', 'api/settings/slack', body); toast('Slack settings saved', 'success'); lastSettings = null; renderSettings(); }
   catch(e){ stErr(e, 'Slack'); }
+}
+let wlData = null, wlLoading = false, wlRows = null;
+function wlBodyHtml(){
+  if (!wlData) { if (!wlLoading) loadWhitelist(); return '<p class="dim">Loading…</p>'; }
+  if (wlData.error) return '<p style="color:var(--md-error-bright)">⚠ ' + esc(wlData.error) + '</p>';
+  const rows = wlRows || (wlRows = wlData.ips.map(e => ({ ip: e.ip, label: e.label || '' })));
+  let h = '<p class="dim" style="margin:0 0 8px;font-size:14.5px">One list for the whole server: <b>SSH</b> (admin users ' + esc(wlData.adminUsers.join(', ')) + ' and every site user: ' + esc(wlData.siteUsers.join(', ') || 'none') + ') is only reachable from these addresses, the firewall opens port 22 only to them, and fail2ban never bans them. IPs or CIDR ranges.</p>';
+  if (wlData.yourIp) h += '<div class="' + (wlData.yourIpListed ? 'dim' : 'site-why') + '" style="font-size:14px;margin-bottom:8px">You are connected from <b class="mono">' + esc(wlData.yourIp) + '</b> — ' + (wlData.yourIpListed ? 'on the list ✓' : 'NOT on the list. <a href="#" onclick="wlAdd(\'' + esc(wlData.yourIp) + '\', \'my current IP\');return false">Add it</a>') + '</div>';
+  h += '<table class="upd-table"><tr><th>IP / range</th><th>Label</th><th></th></tr>';
+  rows.forEach((r, i) => { h += '<tr><td><input class="mono" value="' + esc(r.ip) + '" oninput="wlRows[' + i + '].ip=this.value" placeholder="203.0.113.10 or 10.0.0.0/24"></td><td><input value="' + esc(r.label) + '" oninput="wlRows[' + i + '].label=this.value" placeholder="office, home, VPN…" maxlength="60"></td><td><button class="btn small" onclick="wlRows.splice(' + i + ',1); wlRender()">Remove</button></td></tr>'; });
+  h += '</table><div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="wlAdd(\'\', \'\')">＋ Add IP</button><button class="btn pri" onclick="saveWhitelist(this)">Save &amp; apply</button></div>';
+  return h;
+}
+function wlRender(){ const el = document.getElementById('wlBody'); if (el) el.innerHTML = wlBodyHtml(); }
+function wlAdd(ip, label){ if (!wlRows) return; wlRows.push({ ip, label }); wlRender(); }
+async function loadWhitelist(){
+  wlLoading = true;
+  try { wlData = await stApi('GET', 'api/settings/whitelist'); wlRows = null; } catch(e){ wlData = { error: e.message }; }
+  wlLoading = false; wlRender();
+}
+async function saveWhitelist(btn){
+  btn.disabled = true;
+  try {
+    const r = await stApi('PUT', 'api/settings/whitelist', { ips: wlRows.filter(x => x.ip.trim()).map(x => ({ ip: x.ip.trim(), label: x.label.trim() })) });
+    toast('Whitelist applied', 'success', { detail: r.steps.join('\n'), duration: 10000 });
+    wlData = null; loadWhitelist();
+  } catch(e){ stErr(e, 'Whitelist'); btn.disabled = false; }
 }
 async function saveSitesDefaults(){
   try { await stApi('PUT', 'api/settings/sites-defaults', { tunnel: document.getElementById('sdTunnel').value, repair: document.getElementById('sdRepair').value }); toast('Shared site defaults saved', 'success'); lastSettings = null; renderSettings(); }
