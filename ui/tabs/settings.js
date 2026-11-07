@@ -325,14 +325,24 @@ function cfaBodyHtml(){
 }
 function cfaRender(){ const el = document.getElementById('cfaBody'); if (el) el.innerHTML = cfaBodyHtml(); }
 async function loadCfAccounts(){ cfaLoading = true; try { cfaData = await stApi('GET', 'api/settings/cloudflare/accounts'); } catch(e){ cfaData = { error: e.message }; } cfaLoading = false; cfaRender(); }
+// The token page in the Cloudflare dashboard, step by step — permissions grouped as Cloudflare shows them.
+const CFA_PERMS = {
+  account: [['Cloudflare Tunnel', 'Edit', 'tunnels for sites'], ['Access: Apps and Policies', 'Edit', 'transfer access, login protection'], ['Access: Service Tokens', 'Edit', 'server-to-server access'], ['Account Firewall Access Rules', 'Edit', 'block IP / AS / country for all domains']],
+  zone: [['Zone', 'Read', 'see the domains'], ['DNS', 'Edit', 'already set by the link'], ['SSL and Certificates', 'Edit', 'origin certificates'], ['Firewall Services', 'Edit', 'per-domain blocking']],
+};
 function cfaConnect(){
+  const row = (grp, [name, level, why]) => '<label style="display:flex;gap:8px;align-items:baseline;padding:3px 0"><input type="checkbox"> <span><b>' + esc(name) + '</b> → <b>' + esc(level) + '</b> <span class="dim" style="font-size:12.5px">· ' + esc(why) + '</span></span></label>';
   sshModal('<h3>Connect a Cloudflare account</h3>'
-    + '<ol style="margin:0 0 10px 18px;padding:0;font-size:14.5px;line-height:1.6">'
-    + '<li><a class="btn small pri" href="' + esc(cfaData.connectLink) + '" target="_blank" rel="noopener">Open Cloudflare ↗</a> — pick the account; the token form opens with <b>DNS → Edit</b> already set.</li>'
-    + '<li>On that page also add: <b>Zone → Zone → Read</b>, <b>Account → Cloudflare Tunnel → Edit</b>, <b>Account → Access: Apps and Policies → Edit</b>, <b>Account → Access: Service Tokens → Edit</b>, <b>Account → Account Firewall Access Rules → Edit</b>, <b>Zone → SSL and Certificates → Edit</b>; Zone Resources: <b>All zones</b>.</li>'
-    + '<li>Create the token and paste it here:</li></ol>'
+    + '<div style="font-size:14.5px;line-height:1.5">'
+    + '<p style="margin:0 0 6px"><b>1.</b> <a class="btn small pri" href="' + esc(cfaData.connectLink) + '" target="_blank" rel="noopener">Open Cloudflare ↗</a> and choose the account.</p>'
+    + '<p style="margin:10px 0 6px"><b>2.</b> Add these permissions — one line each <span class="dim">(tick them here as you go)</span>:</p>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+    + '<div><div style="font-weight:700;margin-bottom:2px">Account</div>' + CFA_PERMS.account.map(p => row('account', p)).join('') + '</div>'
+    + '<div><div style="font-weight:700;margin-bottom:2px">Domains (Zone)</div>' + CFA_PERMS.zone.map(p => row('zone', p)).join('') + '</div></div>'
+    + '<p style="margin:10px 0 6px"><b>3.</b> Resources: choose <b>Entire Account</b> (the first option) — it covers every domain of the account, also new ones.</p>'
+    + '<p style="margin:10px 0 6px"><b>4.</b> <b>Create token</b>, copy it, paste it here:</p></div>'
     + stField('API token', '<input id="cfaTok" class="mono" autocomplete="off" placeholder="paste the new token">')
-    + '<p class="dim" style="font-size:13px">The panel then shows which domains the account holds and what the token can do (it writes and deletes one test TXT record to prove DNS edit).</p>'
+    + '<p class="dim" style="font-size:13px;margin:4px 0 0">The panel then lists the account\'s domains and checks what the token can do (it writes and deletes one test DNS record to prove DNS edit).</p>'
     + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="cfaSave(this)">Connect</button></div>');
 }
 async function cfaSave(btn){
