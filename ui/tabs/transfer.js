@@ -44,9 +44,9 @@ function renderTransfer(fromLoad){
   else {
     h += '<p style="margin:0 0 6px">Connected to target <b>' + esc(peers.map(p => p.name).join(', ')) + '</b>' + (peers[0].expires ? ' <span class="dim">(closes ' + when(peers[0].expires) + ' at the latest)</span>' : '') + '</p>'
       + (peers.length > 1 ? stField('Target', '<select id="trPeer">' + peers.map(p => '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>').join('') + '</select>') : '<input type="hidden" id="trPeer" value="' + esc(peers[0].id) + '">')
-      + '<div style="margin:6px 0">' + (sites.length ? sites.map(d => '<label style="display:block"><input type="checkbox" class="trSite" value="' + esc(d) + '"> ' + esc(d) + '</label>').join('') : '<span class="dim">No sites on this server to send.</span>') + '</div>'
-      + '<p class="dim" style="font-size:13.5px;margin:4px 0">Each site moves with its files, databases, settings, secrets, SSH users and GitHub link; the target rebuilds and starts it, then takes over its tunnel — no DNS change. The copy here is stopped and kept. Sites move one after another.</p>'
-      + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="armConfirm(this, \'Close it?\', () => trForget(\'' + esc(peers[0].id) + '\'))">Close connection</button><button class="btn pri" onclick="armConfirm(this, \'Move the checked sites now?\', () => trMove(this))">Move selected</button></div>';
+      + '<div style="margin:6px 0">' + (sites.length ? '<table class="upd-table"><tr><th style="width:24px"><input type="checkbox" onchange="document.querySelectorAll(\'.trSite\').forEach(x => { x.checked = this.checked; if (this.checked) trSel.add(x.value); else trSel.delete(x.value); }); renderTransfer(true)"></th><th>Site</th><th>Readiness on the target</th></tr>' + sites.map(d => { const c = trCheck && trCheck.sites.find(x => x.domain === d); return '<tr><td><input type="checkbox" class="trSite" value="' + esc(d) + '"' + (trSel.has(d) ? ' checked' : '') + ' onchange="trSelToggle(this)"></td><td><b>' + esc(d) + '</b>' + (c && c.type ? '<br><span class="dim" style="font-size:12.5px">' + esc(c.type) + (c.php ? ' · PHP ' + esc(c.php) : '') + (c.databases ? ' · ' + c.databases + ' DB' : '') + (c.viaDns ? ' · DNS switches to the target' : ' · tunnel moves') + '</span>' : '') + '</td><td style="font-size:13.5px">' + (!c ? '<span class="dim">not checked</span>' : c.ok ? '<span style="color:var(--md-success, #2e7d32)">✅ ready</span>' : c.problems.map(p => '<div style="color:var(--md-error-bright)">✗ ' + esc(p) + '</div>').join('')) + '</td></tr>'; }).join('') + '</table>' : '<span class="dim">No sites on this server to send.</span>') + '</div>'
+      + '<p class="dim" style="font-size:13.5px;margin:4px 0">Each site moves with its files, databases, settings, secrets, SSH users and GitHub link; the target rebuilds and starts it, then takes over its tunnel or DNS. The copy here is stopped and kept. <b>Check readiness</b> first — Move unlocks for sites that are ready.</p>'
+      + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="armConfirm(this, \'Close it?\', () => trForget(\'' + esc(peers[0].id) + '\'))">Close connection</button><span style="display:flex;gap:8px"><button class="btn" onclick="trPrecheck(this)">🔍 Check readiness</button><button class="btn pri" ' + (trReadySelected() ? '' : 'disabled title="check the selected sites first — only ready sites can move" ') + 'onclick="armConfirm(this, \'Move the checked sites now?\', () => trMove(this))">Move selected</button></span></div>';
   }
   h += '</div></div>';
   // history
@@ -91,6 +91,21 @@ async function trDecide(id, decision, btn){
   try { const r = await stApi('POST', 'api/cluster/requests/' + id + '/' + decision); toast((decision === 'accept' ? 'Accepted ' : 'Rejected ') + r.domain + (decision === 'accept' ? ' — the source starts sending it now' : ''), decision === 'accept' ? 'success' : 'warn'); loadTransfer(); }
   catch(e){ stErr(e, 'Transfer'); if (btn) btn.disabled = false; }
 }
+let trCheck = null; const trSel = new Set();
+function trSelToggle(el){ if (el.checked) trSel.add(el.value); else trSel.delete(el.value); renderTransfer(true); }
+// Move unlocks only when every selected site was checked and is ready
+function trReadySelected(){ if (!trCheck || !trSel.size) return false; return [...trSel].every(d => { const c = trCheck.sites.find(x => x.domain === d); return c && c.ok; }); }
+async function trPrecheck(btn){
+  const domains = [...document.querySelectorAll('.trSite:checked')].map(x => x.value);
+  if (!domains.length) return toast('Tick the sites to check', 'warn');
+  domains.forEach(d => trSel.add(d));
+  btn.disabled = true; btn.textContent = '⏳ Checking…';
+  try { trCheck = await stApi('POST', 'api/cluster/precheck', { domains, peer: document.getElementById('trPeer').value });
+    const ok = trCheck.sites.filter(s => s.ok).length;
+    toast(ok + ' of ' + trCheck.sites.length + ' ready on ' + trCheck.target, ok === trCheck.sites.length ? 'success' : 'warn'); }
+  catch(e){ stErr(e, 'Check'); }
+  renderTransfer(true);
+}
 async function trSaveSelf(){
   const g = (id) => document.getElementById(id).value;
   const body = { name: g('trName'), url: g('trUrl'), accessClientId: g('trAid') };
@@ -121,8 +136,8 @@ async function trConnect(btn){
 }
 async function trForget(id){ try { await stApi('DELETE', 'api/cluster/peers/' + id); toast('Connection closed', 'success'); loadTransfer(); } catch(e){ stErr(e, 'Close'); } }
 async function trMove(btn){
-  const domains = [...document.querySelectorAll('.trSite:checked')].map(x => x.value);
-  if (!domains.length) return toast('Tick at least one site', 'warn');
+  const domains = [...document.querySelectorAll('.trSite:checked')].map(x => x.value).filter(d => { const c = trCheck && trCheck.sites.find(x => x.domain === d); return c && c.ok; });
+  if (!domains.length) return toast('Check readiness first — only ready sites can move', 'warn');
   btn.disabled = true;
   try { await stApi('POST', 'api/cluster/move', { domains, peer: document.getElementById('trPeer').value }); toast('Transfer of ' + domains.length + ' site(s) started', 'success'); loadTransfer(); }
   catch(e){ stErr(e, 'Move'); btn.disabled = false; }
