@@ -24,7 +24,10 @@ function renderTransfer(fromLoad){
   const inc = trData.incoming || [];
   const pend = inc.filter(r => r.state === 'pending');
   if (inc.length) {
-    h = '<div class="upd-card" style="margin-bottom:14px;border-top:3px solid ' + (pend.length ? 'var(--md-warning)' : 'var(--clp-border)') + '"><h3>📥 Incoming transfers' + (pend.length ? ' — ' + pend.length + ' waiting for you' : '') + '</h3><table class="upd-table"><tr><th>Site</th><th>From</th><th>Details</th><th></th></tr>'
+    // several sites sent together = one batch: decide all at once, or site by site in the rows below
+    const batches = {}; for (const r of pend) if (r.batch) (batches[r.batch] = batches[r.batch] || []).push(r);
+    const bar = Object.entries(batches).filter(([, l]) => l.length > 1).map(([id, l]) => '<div class="site-actions" style="justify-content:space-between;align-items:center;margin:0 0 8px"><span><b>' + esc(l[0].from) + '</b> sends ' + l.length + ' sites: ' + l.map(r => esc(r.domain)).join(', ') + ' <span class="dim">— accept all, or decide site by site below</span></span><span style="white-space:nowrap"><button class="btn small" onclick="armConfirm(this, \'Reject all ' + l.length + '?\', () => trDecideBatch(\'' + esc(id) + '\', \'reject\'))">Reject all</button> <button class="btn small pri" onclick="trDecideBatch(\'' + esc(id) + '\', \'accept\', this)">Accept all ' + l.length + '</button></span></div>').join('');
+    h = '<div class="upd-card" style="margin-bottom:14px;border-top:3px solid ' + (pend.length ? 'var(--md-warning)' : 'var(--clp-border)') + '"><h3>📥 Incoming transfers' + (pend.length ? ' — ' + pend.length + ' waiting for you' : '') + '</h3>' + bar + '<table class="upd-table"><tr><th>Site</th><th>From</th><th>Details</th><th></th></tr>'
       + inc.map(r => '<tr><td><b>' + esc(r.domain) + '</b></td><td>' + esc(r.from) + '</td><td class="dim" style="font-size:13.5px">' + esc(r.type) + (r.php ? ' · PHP ' + esc(r.php) : '') + (r.viaDns ? ' · DNS will be switched to this server' : ' · its tunnel moves here') + '<br>' + esc(new Date(r.at).toLocaleString()) + '</td>'
         + '<td style="text-align:right;white-space:nowrap">' + (r.state === 'pending' ? '<button class="btn small" onclick="armConfirm(this, \'Reject?\', () => trDecide(\'' + r.id + '\', \'reject\'))">Reject</button> <button class="btn small pri" onclick="trDecide(\'' + r.id + '\', \'accept\', this)">Accept</button>' : '<span class="upd-badge ' + (r.state === 'accepted' ? 'ok' : 'na') + '">' + esc(r.state) + (r.decidedBy ? ' by ' + esc(r.decidedBy) : '') + '</span>') + '</td></tr>').join('')
       + '</table></div>' + h;
@@ -81,10 +84,15 @@ function trProgressHtml(m){
   return '<div style="border:1px solid var(--clp-border);border-radius:8px;padding:10px 12px;margin-top:10px">'
     + '<div style="display:flex;justify-content:space-between;gap:8px"><b>' + esc(m.domain || '…') + ' ' + (m.role === 'source' ? '→ ' + esc((m.peer || {}).name || '') : '← ' + esc(m.from || 'source')) + '</b><span class="dim mono">' + el + '</span></div>'
     + '<div style="height:10px;background:var(--clp-border);border-radius:5px;overflow:hidden;margin:8px 0 6px"><div style="height:100%;width:' + pct + '%;background:' + color + ';transition:width .6s"></div></div>'
-    + '<div style="font-size:13.5px;margin-bottom:4px"><b>' + pct + '%</b> · ' + esc(failed ? 'FAILED — ' + (m.error || '') : done ? (m.role === 'source' ? 'done — the site runs on ' + ((m.peer || {}).name || 'the target') : 'done — the site runs here') : m.state === 'queued' ? 'waiting for the move before it' : (m.detail || m.phase || 'working')) + '</div>'
+    + '<div style="font-size:13.5px;margin-bottom:4px"><b>' + pct + '%</b> · ' + esc(failed ? 'FAILED — ' + (m.error || '') : done ? (m.role === 'source' ? 'done — the site runs on ' + ((m.peer || {}).name || 'the target') : 'done — the site runs here') : m.state === 'queued' ? 'starting' : (m.detail || m.phase || 'working')) + '</div>'
     + '<div style="font-size:13px">' + chips + '</div>'
     + '<details' + (live || failed ? ' open' : '') + ' style="margin-top:6px"><summary class="dim" style="cursor:pointer;font-size:13px">Log (' + (m.steps || []).length + ' steps)</summary><div class="mono" style="font-size:12px;white-space:pre-wrap;margin-top:4px;max-height:220px;overflow:auto">'
     + esc((m.steps || []).map(x => x.at.slice(11, 19) + '  ' + x.text).concat(m.remote && live ? (m.remote.steps || []).map(x => '        ' + x.text) : []).join('\n')) + '</div></details></div>';
+}
+async function trDecideBatch(id, decision, btn){
+  if (btn) btn.disabled = true;
+  try { const r = await stApi('POST', 'api/cluster/request-batches/' + encodeURIComponent(id) + '/' + decision); toast((decision === 'accept' ? 'Accepted ' : 'Rejected ') + r.domains.length + ' sites' + (decision === 'accept' ? ' — the source sends them now, in parallel' : ''), decision === 'accept' ? 'success' : 'warn'); loadTransfer(); }
+  catch(e){ stErr(e, 'Transfer'); if (btn) btn.disabled = false; }
 }
 async function trDecide(id, decision, btn){
   if (btn) btn.disabled = true;
