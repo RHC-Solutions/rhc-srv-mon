@@ -284,13 +284,33 @@ function wlBodyHtml(){
   if (wlData.error) return '<p style="color:var(--md-error-bright)">⚠ ' + esc(wlData.error) + '</p>';
   const rows = wlRows || (wlRows = wlData.ips.map(e => ({ ip: e.ip, label: e.label || '' })));
   let h = '<p class="dim" style="margin:0 0 8px;font-size:14.5px">One list for the whole server: <b>SSH</b> (admin users ' + esc(wlData.adminUsers.join(', ')) + ' and every site user: ' + esc(wlData.siteUsers.join(', ') || 'none') + ') is only reachable from these addresses, the firewall opens port 22 only to them, and fail2ban never bans them. IPs or CIDR ranges.</p>';
-  if (wlData.yourIp) h += '<div class="' + (wlData.yourIpListed ? 'dim' : 'site-why') + '" style="font-size:14px;margin-bottom:8px">You are connected from <b class="mono">' + esc(wlData.yourIp) + '</b> — ' + (wlData.yourIpListed ? 'on the list ✓' : 'NOT on the list. <a href="#" onclick="wlAdd(\'' + esc(wlData.yourIp) + '\', \'my current IP\');return false">Add it</a>') + '</div>';
+  if (wlData.yourIp && wlData.yourIpIsCloudflare) h += '<div class="dim" style="font-size:14px;margin-bottom:8px">This panel sees a Cloudflare address (<span class="mono">' + esc(wlData.yourIp) + '</span>), not your own — your real public IP is not passed through on this server, so it cannot be checked here. Look it up (e.g. <a href="https://ifconfig.me" target="_blank" rel="noopener">ifconfig.me</a>) and add it below.</div>';
+  else if (wlData.yourIp) h += '<div class="' + (wlData.yourIpListed ? 'dim' : 'site-why') + '" style="font-size:14px;margin-bottom:8px">You are connected from <b class="mono">' + esc(wlData.yourIp) + '</b> — ' + (wlData.yourIpListed ? 'on the list ✓' : 'NOT on the list. <a href="#" onclick="wlAdd(\'' + esc(wlData.yourIp) + '\', \'my current IP\');return false">Add it</a>') + '</div>';
   h += '<table class="upd-table"><tr><th>IP / range</th><th>Label</th><th></th></tr>';
   rows.forEach((r, i) => { h += '<tr><td><input class="mono" value="' + esc(r.ip) + '" oninput="wlRows[' + i + '].ip=this.value" placeholder="203.0.113.10 or 10.0.0.0/24"></td><td><input value="' + esc(r.label) + '" oninput="wlRows[' + i + '].label=this.value" placeholder="office, home, VPN…" maxlength="60"></td><td><button class="btn small" onclick="wlRows.splice(' + i + ',1); wlRender()">Remove</button></td></tr>'; });
-  h += '</table><div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="wlAdd(\'\', \'\')">＋ Add IP</button><button class="btn pri" onclick="saveWhitelist(this)">Save &amp; apply</button></div>';
+  h += '</table>'
+    + '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:14px">＋ Add several at once</summary>'
+    + '<textarea id="wlBulk" class="mono" rows="5" style="width:100%;font-size:12.5px;margin-top:6px" placeholder="203.0.113.10        # office&#10;198.51.100.0/24     # VPN&#10;192.0.2.7, 192.0.2.8"></textarea>'
+    + '<div class="site-actions"><button class="btn" onclick="wlBulkAdd()">Add to the list</button></div></details>'
+    + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="wlAdd(\'\', \'\')">＋ Add IP</button><button class="btn pri" onclick="saveWhitelist(this)">Save &amp; apply</button></div>';
   return h;
 }
 function wlRender(){ const el = document.getElementById('wlBody'); if (el) el.innerHTML = wlBodyHtml(); }
+// Bulk: one or more IPs/ranges per line (comma/space separated), optional "# label" for that line.
+function wlBulkAdd(){
+  const txt = (document.getElementById('wlBulk') || {}).value || '';
+  let added = 0, skipped = [];
+  for (const raw of txt.split('\n')) {
+    const [list, ...lab] = raw.split('#'); const label = lab.join('#').trim().slice(0, 60);
+    for (const ip of list.split(/[\s,;]+/).map(x => x.trim()).filter(Boolean)) {
+      if (!/^[0-9a-fA-F:.]+(\/\d{1,3})?$/.test(ip)) { skipped.push(ip); continue; }
+      if (wlRows.some(r => r.ip === ip)) continue;
+      wlRows.push({ ip, label }); added++;
+    }
+  }
+  wlRender();
+  toast(added + ' added to the list' + (skipped.length ? ' · skipped: ' + skipped.slice(0, 5).join(', ') : '') + ' — press Save & apply', skipped.length ? 'warn' : 'success');
+}
 function wlAdd(ip, label){ if (!wlRows) return; wlRows.push({ ip, label }); wlRender(); }
 async function loadWhitelist(){
   wlLoading = true;
