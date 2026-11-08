@@ -495,6 +495,7 @@
 
   /* ============================ SNACKBAR ===============================
      Toasts: white card with a coloured leading edge, bottom-left. */
+  .tab .tr-pending { margin-left:auto; min-width:20px; height:20px; padding:0 6px; border-radius:10px; background:var(--md-warning); color:#fff; font-size:12px; font-weight:600; line-height:20px; text-align:center; }
   #toast-host { position:fixed; bottom:24px; left:24px; display:flex; flex-direction:column; gap:8px;
                 z-index:9999; max-width:min(480px, calc(100vw - 48px)); pointer-events:none; }
   .toast { display:flex; align-items:flex-start; gap:12px; min-height:48px;

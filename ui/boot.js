@@ -32,6 +32,36 @@
   };
   tick(); setInterval(tick, 1000);
 })();
+// Incoming transfers waiting for a decision — noticed on every page within 5 s, no F5: a toast that
+// opens the Transfer page, a count on its tab, a "(n)" in the window title; the Transfer page itself
+// reloads when the waiting set changes.
+(function transferWatch(){
+  const seen = new Set(); let lastKey = null, first = true; const baseTitle = document.title;
+  async function tick(){
+    let p = [];
+    try { const r = await fetch('api/cluster/pending', { cache: 'no-store' }); if (!r.ok) return; p = (await r.json()).pending || []; } catch(_){ return; }
+    const tab = document.querySelector('.tab[data-tab="transfer"]');
+    if (tab) {
+      let b = tab.querySelector('.tr-pending');
+      if (p.length) { if (!b) { b = document.createElement('span'); b.className = 'tr-pending'; tab.appendChild(b); } b.textContent = p.length; b.title = p.length + ' incoming transfer(s) waiting for Accept'; }
+      else if (b) b.remove();
+    }
+    document.title = (p.length ? '(' + p.length + ') ' : '') + baseTitle;
+    const fresh = p.filter(r => !seen.has(r.id)); p.forEach(r => seen.add(r.id));
+    if (fresh.length) {
+      const froms = [...new Set(fresh.map(r => r.from))].join(', ');
+      const what = fresh.length === 1 ? fresh[0].domain : fresh.length + ' sites (' + fresh.slice(0, 3).map(r => r.domain).join(', ') + (fresh.length > 3 ? ', …' : '') + ')';
+      if (!(first && state.tab === 'transfer')) {
+        const el = toast('📥 ' + froms + ' wants to move ' + what + ' to this server — click to Accept or Reject', 'warn', { duration: 0 });
+        if (el) { el.style.cursor = 'pointer'; el.querySelector('.body').addEventListener('click', () => { setTab('transfer'); el.querySelector('.x').click(); }); }
+      }
+    }
+    first = false;
+    const key = p.map(r => r.id).sort().join(',');
+    if (key !== lastKey) { const changed = lastKey !== null; lastKey = key; if (changed && state.tab === 'transfer' && typeof loadTransfer === 'function') loadTransfer(); }
+  }
+  tick(); setInterval(tick, 5000);
+})();
 setTab(tabFromPath() || state.tab, { replace: true });
 window.addEventListener('popstate', () => setTab(tabFromPath() || state.tab, { noHistory: true }));
 refresh(); setInterval(refresh, 10000);
