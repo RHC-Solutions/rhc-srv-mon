@@ -30,6 +30,7 @@ require('./lib/api/appstore');
 require('./lib/api/security');
 require('./lib/api/firewall');
 require('./lib/api/panel');
+require('./lib/api/pm2');
 const notifyEvents = require('./lib/notify-events');
 const clpImport = require('./lib/clp-import');
 const cloudpanel = require('./lib/cloudpanel');
@@ -176,26 +177,6 @@ const server = http.createServer((req, res) => {
   if (url === '/api/sites') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify(Object.assign({ sites: [], generated_at: null }, sites.getCache() || {}, { tunnels: tunnels.get() })));
-  }
-  if (url.startsWith('/api/pm2/') && req.method === 'POST') {
-    const parts = url.slice('/api/pm2/'.length).split('/');
-    const action = parts[0];
-    const targetUser = parts[1];
-    const appName = parts[2];
-    const pm2Home = `/home/${targetUser}/.pm2`;
-    const cmd = action === 'start' ? 'start' : action === 'stop' ? 'stop' : 'restart';
-    // -H and an accessible cwd matter: pm2 spawns the app from its own cwd, and this process runs
-    // from /root (0700), so an inherited cwd makes the app's `spawn node` fail with EACCES.
-    execFile('sudo', ['-n', '-H', '-u', targetUser, 'sh', '-c',
-      `cd /home/${targetUser} && PM2_HOME=${pm2Home} pm2 ${cmd} ${appName} 2>&1`],
-      { timeout: 30000 },
-      (err, stdout) => {
-        const result = { action, user: targetUser, app: appName, success: !err, output: stdout.trim() };
-        events.emit('pm2.' + cmd, { req, target: targetUser + '/' + appName, level: err ? 'error' : 'info', message: 'pm2 ' + cmd + ' ' + appName + ' (' + targetUser + ')' + (err ? ' failed' : ''), data: err ? { output: result.output.slice(0, 1000) } : undefined });
-        res.writeHead(err ? 500 : 200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(result));
-      });
-    return;
   }
   if (url === '/api/sites/check' && req.method === 'POST') {
     sites.collectSites().then((data) => {

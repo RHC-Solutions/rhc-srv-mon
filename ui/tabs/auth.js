@@ -4,10 +4,40 @@ async function authInit(){
     const d = await fetch('api/auth/me').then(r => r.json());
     const bar = document.getElementById('userbar'); if (!bar) return;
     if (!d.user) { bar.innerHTML = ''; return; }
-    bar.innerHTML = '<span class="who">👤 ' + esc(d.user) + (d.local ? ' <small>local access · no login</small>' : (d.sessions > 1 ? ' <small>' + d.sessions + ' sessions</small>' : '')) + '</span>'
+    bar.innerHTML = '<span class="who">👤 ' + esc(d.user) + (d.local ? ' <small>local access · no login</small>' : (d.sessions ? ' <small class="ub-sess" role="button" tabindex="0" title="See and end your sessions" onclick="authSessions()" onkeydown="if(event.key===\'Enter\')authSessions()">' + d.sessions + ' session' + (d.sessions > 1 ? 's' : '') + '</small>' : '')) + '</span>'
       + (d.local ? '' : '<button class="upd-test-btn ub-btn" onclick="authAccount()" title="Account" aria-label="Account">🔐<span class="lbl"> Account</span></button>'
       + '<button class="upd-test-btn ub-btn" onclick="authLogout()" title="Logout" aria-label="Logout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4"/></svg><span class="lbl">Logout</span></button>');
   } catch(e){}
+}
+// Account → sessions: every browser logged in as you, with where and when; end one or all others.
+function authUa(ua){
+  ua = String(ua || '');
+  const b = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : /curl|wget|python|node/i.test(ua) ? ua.split('/')[0] : 'Browser';
+  const o = /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Windows/.test(ua) ? 'Windows' : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : '';
+  return b + (o ? ' · ' + o : '');
+}
+function authAgo(t){ if (!t) return '—'; const s = Math.max(0, (Date.now() - t) / 1000); return s < 90 ? 'just now' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 172800 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; }
+async function authSessions(){
+  let d; try { d = await stApi('GET', 'api/auth/sessions'); } catch(e){ return stErr(e, 'Sessions'); }
+  const L = d.sessions || [];
+  sshModal('<h3>Your sessions <span class="dim" style="font-weight:400">' + L.length + '</span></h3>'
+    + '<p class="dim" style="margin:0 0 10px;font-size:14px">Every browser logged in as you. Ending one logs it out at its next click. "Last seen" updates at most once an hour.</p>'
+    + '<table class="upd-table"><tr><th>Device</th><th>IP</th><th>Last seen</th><th>Logged in</th><th></th></tr>'
+    + L.map(x => '<tr><td title="' + esc(x.ua) + '"><b>' + esc(authUa(x.ua)) + '</b>' + (x.current ? ' <span class="upd-badge ok">this browser</span>' : '') + '</td>'
+      + '<td class="mono" style="font-size:13px">' + esc(x.ip || '—') + '</td>'
+      + '<td style="white-space:nowrap">' + esc(authAgo(x.seen)) + '</td>'
+      + '<td class="dim" style="font-size:13px;white-space:nowrap" title="expires ' + esc(new Date(x.expires).toLocaleString()) + '">' + esc(x.created ? new Date(x.created).toLocaleString() : '—') + '</td>'
+      + '<td style="text-align:right"><button class="btn small" onclick="armConfirm(this, \'' + (x.current ? 'Log out here?' : 'End it?') + '\', () => authSessionEnd(\'' + x.id + '\'))">' + (x.current ? 'Log out' : 'Disconnect') + '</button></td></tr>').join('')
+    + '</table>'
+    + '<div class="foot">' + (L.length > 1 ? '<button class="btn danger" onclick="armConfirm(this, \'Click again — ' + (L.length - 1) + ' other(s)\', () => authSessionEnd(null))">Disconnect all others</button>' : '') + '<button class="btn pri" onclick="sshModalClose()">Close</button></div>');
+}
+async function authSessionEnd(id){
+  try {
+    const r = await stApi('POST', 'api/auth/sessions/revoke', id ? { id } : { others: true });
+    if (r.self) { location.replace('login'); return; }
+    toast('Ended ' + r.ended + ' session' + (r.ended > 1 ? 's' : ''), 'success');
+    authInit(); authSessions();
+  } catch(e){ stErr(e, 'Sessions'); }
 }
 async function authLogout(){ try { await fetch('api/auth/logout', { method:'POST' }); } catch(e){} location.replace('login'); }
 function authQrLib(){ return window.qrcode ? Promise.resolve() : new Promise((ok, bad) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js'; s.onload = ok; s.onerror = bad; document.head.appendChild(s); }); }

@@ -240,6 +240,8 @@
   .userbar .who { margin-right:6px; color:var(--md-on-surface); font-weight:600; white-space:nowrap; }
   .userbar .ub-btn { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
   .userbar .ub-btn svg { width:16px; height:16px; flex-shrink:0; }
+  .userbar .ub-sess { cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px; }
+  .userbar .ub-sess:hover, .userbar .ub-sess:focus-visible { color:var(--md-primary); outline:none; }
   .userbar .who small { color:var(--md-on-surface-med); font-weight:400; }
 
   /* ------------------------------------------- layout + sidebar (CloudPanel admin .sidebar) */

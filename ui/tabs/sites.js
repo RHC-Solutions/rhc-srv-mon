@@ -120,6 +120,13 @@ function siteTunnelHtml(t, q){
                    : '<div class="upd-card dim">' + (t.generated_at ? 'No routes match.' : 'Reading tunnels…') + '</div>')
     + '</div>';
 }
+async function siteWwwEdge(domain, btn){
+  if (btn) btn.disabled = true;
+  try { const r = await stApi('POST', 'api/sites/' + encodeURIComponent(domain) + '/tunnel/www-edge'); toast('www.' + domain + ' is now on Cloudflare', 'success', { detail: (r.steps || []).join('\n'), duration: 10000 }); }
+  catch(e){ stErr(e, 'www'); }
+  if (btn) btn.disabled = false;
+  siteSubReload('overrides');
+}
 // Start/stop/restart for a site's PM2 apps. Rendered on the list (whole site) and per process in the
 // Processes tab; clicks never bubble into the card/row navigation.
 function siteCtlHtml(domain, app, user, kind){
@@ -1369,7 +1376,9 @@ function siteTabOverrides(s){
     const t = v.tunnel;
     const cfCard = siteCard('Cloudflare &amp; tunnel',
       '<p class="dim" style="margin:0 0 8px;font-size:14.5px">API token: <b>' + esc(e.cloudflareToken === 'site' ? 'this site\'s own' : e.cloudflareToken === 'account' ? 'the shared one' : 'none') + '</b> — set an own token on the <a href="#" onclick="siteGo(\'' + esc(s.domain) + '\', \'cloudflare\');return false">Cloudflare</a> tab.'
-      + (t ? '<br>Published through ' + (t.shared ? 'the <b>shared host tunnel</b>' : 'its <b>own tunnel</b> (' + esc(t.unit || '') + ')') + ': ' + esc((t.hosts || []).join(', ')) : '<br>Not published through a tunnel.') + '</p>'
+      + (t ? '<br>Published through ' + (t.shared ? 'the <b>shared host tunnel</b>' : 'its <b>own tunnel</b> (' + esc(t.unit || '') + ')') + ': ' + esc((t.hosts || []).join(', '))
+        + (t.wwwEdge ? '<br>www.' + esc(s.domain) + ': on Cloudflare — CNAME → ' + esc(s.domain) + ', 301 redirect at the edge (never reaches this server)' : '') : '<br>Not published through a tunnel.') + '</p>'
+      + (t && !t.wwwEdge && (t.hosts || []).includes('www.' + s.domain) ? '<div class="site-why" style="margin-bottom:10px">www.' + esc(s.domain) + ' is a tunnel route of its own. <button class="btn small" onclick="siteWwwEdge(\'' + esc(s.domain) + '\', this)">Move www to Cloudflare</button> <span class="dim" style="font-size:13px">CNAME www → ' + esc(s.domain) + ' + a 301 redirect rule at Cloudflare; needs the token permission Zone → Single Redirect → Edit</span></div>' : '')
       + siteField('Tunnel', sel('ovTunnel', o.cloudflare.tunnel, [['default', 'Shared default (' + (sh.tunnel === 'shared' ? 'shared host tunnel' : 'own tunnel') + ')'], ['own', 'Own tunnel'], ['shared', 'Route on the shared host tunnel']]), t ? 'changing this moves the site at once: its routes and DNS switch tunnels (a few seconds)' : 'applies when the site is published')
       + '<div class="site-actions"><button class="btn pri" onclick="siteOvSave(\'cloudflare\')">Save</button></div>');
     const b = o.backups, w = b.wasabi;

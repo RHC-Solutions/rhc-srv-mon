@@ -130,10 +130,10 @@ document.getElementById('sharedToggle').addEventListener('click', () => {
 });
 async function pm2Action(action, user, app) {
   try {
-    const r = await fetch('api/pm2/' + action + '/' + user + '/' + app, { method: 'POST' });
+    const r = await fetch('api/pm2/' + encodeURIComponent(action) + '/' + encodeURIComponent(user) + '/' + encodeURIComponent(app), { method: 'POST' });
     const data = await r.json();
     if (data.success) toast(action + ' sent · ' + app, 'success');
-    else toast('Error', 'error', { detail: data.output || 'unknown', duration: 10000 });
+    else toast('Error', 'error', { detail: data.output || data.error || 'unknown', duration: 10000 });
     refresh();
   } catch(e) { toast('Error: ' + e, 'error'); }
 }
