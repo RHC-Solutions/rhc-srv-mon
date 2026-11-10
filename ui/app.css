@@ -260,6 +260,13 @@
   .tab.active svg, .tab:hover svg { color:var(--md-primary); }
   .tab:focus-visible { outline:none; background:var(--md-state-focus); }
   .sidenav .side-ft { margin-top:auto; padding:16px 20px 4px; font-size:12px; line-height:16px; color:var(--md-on-surface-dis); }
+  /* ☰ button: narrow screens only (see RESPONSIVE) */
+  .menu-btn { display:none; align-items:center; gap:8px; height:40px; min-width:0; padding:0 12px 0 10px; margin:0;
+              background:none; border:1px solid var(--clp-border); border-radius:var(--md-shape-s);
+              color:var(--md-on-surface); font-family:inherit; font-size:15px; font-weight:600; cursor:pointer; }
+  .menu-btn svg { width:22px; height:22px; flex-shrink:0; color:var(--md-primary); }
+  .menu-btn .menu-cur { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .menu-btn:focus-visible { outline:2px solid var(--md-primary); outline-offset:2px; }
 
   /* ------------------------------------------------ page header (CloudPanel .page-header) */
   .hdr-row { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
@@ -896,23 +903,25 @@
 
   /* ============================ RESPONSIVE ============================= */
   @media (max-width:860px){ .beats, .hdr .beats-h { display:none; } }
-  /* narrow screens: 56px header, the sidebar becomes a scrollable tab strip under it */
+  /* narrow screens: 56px header; the sidebar becomes a drop-down panel behind the ☰ button, every
+     entry with its label (it used to be a sideways strip that hid most of the 16 entries) */
   @media (max-width:900px){
     .topbar { height:56px; }
-    .topbar .logo { flex:0 0 auto; padding:0 14px; font-size:16px; border-right:none; }
+    .topbar .logo { flex:0 0 auto; padding:0 10px 0 14px; font-size:16px; border-right:none; }
     .topbar .logo svg { width:28px; height:28px; }
+    .topbar .logo .brand-name { display:none; }
+    .menu-btn { display:flex; flex:0 1 auto; }
     .topnav { display:none; }
-    .topright { margin-left:auto; }
+    .topright { margin-left:auto; min-width:0; }
     .topright > * { padding:0 12px; }
     .userbar .who { display:none; }
     .wrap { flex-direction:column; }
-    .sidenav { position:sticky; top:56px; z-index:30; flex:none; width:auto; height:auto; flex-direction:row;
-               align-items:stretch; border-right:none; border-bottom:1px solid var(--clp-border); padding:0; overflow:visible; }
-    .sidenav .grp, .sidenav .side-ft { display:none; }
-    .tabs { flex-direction:row; flex:1; min-width:0; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
-    .tabs::-webkit-scrollbar { display:none; }
-    .tab { padding:12px 14px 9px; border-left:none; border-bottom:3px solid transparent; font-size:14px; gap:8px; }
-    .tab:hover, .tab.active { border-bottom-color:var(--md-primary); }
+    .sidenav { display:none; position:fixed; top:56px; left:0; right:0; bottom:0; z-index:60; width:auto; height:auto;
+               flex-direction:column; padding:8px 0 16px; border-right:none; border-top:1px solid var(--clp-border);
+               overflow-y:auto; overscroll-behavior:contain; box-shadow:var(--md-elev-6); }
+    .sidenav.open { display:flex; }
+    body.menu-open { overflow:hidden; }
+    .tab { padding:12px 20px 12px 17px; font-size:16px; min-height:48px; }
     .content { padding:0 16px 32px; }
     .hdr-row { margin-top:18px; }
     h1 { font-size:24px; line-height:30px; }
@@ -947,8 +956,6 @@
     #sitesview .site-table { display:block; overflow-x:auto; }
     .hdr-row { flex-direction:column; align-items:flex-start; gap:8px; }
     .userbar .upd-test-btn { padding:0 6px; }
-    .tab span { display:none; }
-    .tab.active span { display:inline; }
     .banner { padding:12px 16px; margin-bottom:16px; }
     .group, .upd-card, .mod-card, .auto-card, .site-card, .ssh-inst { padding-left:12px; padding-right:12px; }
     .group { margin-bottom:12px; }

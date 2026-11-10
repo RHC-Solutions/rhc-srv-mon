@@ -148,9 +148,29 @@ function setTab(tab, opts){
   }
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===tab));
   const title = document.getElementById('pagetitle'); if (title) title.textContent = TABS[tab].label || tab;
+  const cur = document.getElementById('menu-cur'), act = document.querySelector('.sidenav .tab.active span');
+  if (cur && act) cur.textContent = act.textContent;
+  menuOpen(false);
   for (const [k, t] of Object.entries(TABS)) { const el = document.getElementById(t.view); if (el) el.style.display = k===tab ? '' : 'none'; }
   TABS[tab].render();
 }
+
+// Narrow screens: the sidebar is a drop-down panel behind the ☰ button (a sideways-scrolling strip
+// of 16 icons hid most of the menu with no sign that there was more).
+function menuOpen(open){
+  const nav = document.getElementById('sidenav'), btn = document.getElementById('menu-btn');
+  if (!nav || !btn) return;
+  nav.classList.toggle('open', open); btn.setAttribute('aria-expanded', String(open));
+  document.body.classList.toggle('menu-open', open);
+}
+(function(){
+  const btn = document.getElementById('menu-btn'), nav = document.getElementById('sidenav');
+  if (!btn || !nav) return;
+  btn.addEventListener('click', (e) => { e.stopPropagation(); menuOpen(!nav.classList.contains('open')); });
+  document.addEventListener('click', (e) => { if (nav.classList.contains('open') && !nav.contains(e.target)) menuOpen(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && nav.classList.contains('open')) { menuOpen(false); btn.focus(); } });
+  matchMedia('(min-width:901px)').addEventListener('change', (m) => { if (m.matches) menuOpen(false); });
+})();
 
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', (e) => {
   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;   // let "open in new tab" use the real href
