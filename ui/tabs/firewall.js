@@ -29,7 +29,13 @@ function renderFirewall(fromLoad){
   // warnings first — they are why someone opens this page
   const warns = [].concat(u.installed && !u.active ? ['ufw is off: every port that listens publicly is open to the whole internet.'] : [],
     u.installed && u.active && !u.adminSshCovered ? ['Not every admin IP has an SSH rule — save Settings → Whitelist once to add them.'] : [], f.warnings || []);
-  if (warns.length) h += '<div class="upd-card" style="border-left:4px solid var(--md-warning);margin-bottom:14px">' + warns.map(w => '<p style="margin:4px 0">⚠ ' + esc(w) + '</p>').join('') + '</div>';
+  // a fix button next to the warnings that have a one-click fix
+  const fixes = [];
+  if (u.installed && !u.active) fixes.push('<button class="btn small" onclick="armConfirm(this, \'Switch ufw on?\', () => fwUfw(\'enable\'))">Switch ufw on</button>');
+  if ((f.jails || []).some(j => j.state === 'broken')) fixes.push('<button class="btn small" onclick="fwDisableBroken(this)">Switch off broken jails</button>');
+  if ((f.warnings || []).some(w => /enforced through ufw/.test(w))) fixes.push('<button class="btn small" onclick="fwBanWith(this, \'nftables\')">Enforce bans with nftables</button>');
+  if (warns.length) h += '<div class="upd-card" style="border-left:4px solid var(--md-warning);margin-bottom:14px">' + warns.map(w => '<p style="margin:4px 0">⚠ ' + esc(w) + '</p>').join('')
+    + (fixes.length ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' + fixes.join('') + '</div>' : '') + '</div>';
   h += fwUfwCard(u) + fwF2bCard(f);
   view.innerHTML = h;
 }
@@ -41,8 +47,8 @@ function fwUfwCard(u){
   if (u.error) h += '<p style="color:var(--md-error-bright)">' + esc(u.error) + '</p>';
   h += '<p class="dim" style="margin:0 0 10px;font-size:14px">The panel and the sites are reached through Cloudflare tunnels (outgoing connections), so blocking incoming traffic never cuts them off. Admin IPs (Settings → Whitelist) always keep SSH.' + (u.active && !u.bootEnabled ? ' <b>ufw.service is not enabled — the firewall would be off after a reboot.</b>' : '') + '</p>';
   h += '<div class="site-actions" style="flex-wrap:wrap;gap:8px;align-items:flex-end">';
-  h += u.active ? '<button class="btn" onclick="armConfirm(this, \'⚠ Click again: everything opens\', () => fwUfw(\'disable\'))">Switch off</button>'
-                : '<button class="btn pri" onclick="armConfirm(this, \'Click again to switch on\', () => fwUfw(\'enable\'))">Switch on</button>';
+  h += stField('Firewall', u.active ? '<button class="btn" style="width:100%" onclick="armConfirm(this, \'⚠ Click again: everything opens\', () => fwUfw(\'disable\'))">Switch off</button>'
+                : '<button class="btn pri" style="width:100%" onclick="armConfirm(this, \'Click again to switch on\', () => fwUfw(\'enable\'))">Switch on</button>');
   h += stField('Incoming (no rule matches)', fwSel('fwDefIn', [['deny', 'deny (drop)'], ['reject', 'reject'], ['allow', 'allow — no firewall']], u.defaults && u.defaults.incoming, ' onchange="fwDefault(\'incoming\', this)"'));
   h += stField('Routed', fwSel('fwDefRt', [['deny', 'deny'], ['reject', 'reject'], ['allow', 'allow']], u.defaults && u.defaults.routed, ' onchange="fwDefault(\'routed\', this)"'));
   h += stField('Outgoing', '<input value="allow (tunnels need it)" disabled>');
@@ -51,9 +57,15 @@ function fwUfwCard(u){
   // exposure
   const P = u.ports || [];
   if (P.length) {
-    h += '<h4 style="margin:16px 0 6px">Public ports on this server</h4><table class="upd-table"><tr><th>Port</th><th>Process</th><th>Reachable</th></tr>';
-    for (const p of P) { const [t, k] = FW_EXPO[p.state] || [p.state, 'dim']; h += '<tr><td class="mono">' + p.port + '/' + esc(p.proto) + '</td><td>' + esc(p.proc || '?') + '</td><td>' + fwPill(t, p.state === 'open' && !u.active ? 'bad' : k) + ' <span class="dim" style="font-size:13px">' + esc(p.why || '') + '</span></td></tr>'; }
-    h += '</table>';
+    h += '<h4 style="margin:16px 0 6px">Public ports on this server</h4><table class="upd-table"><tr><th>Port</th><th>Process</th><th>Reachable</th><th>Access</th></tr>';
+    P.forEach((p, i) => {
+      const [t, k] = FW_EXPO[p.state] || [p.state, 'dim'];
+      const opts = [['', 'Change…'], ['open', 'Open to everyone'], ['admin', 'Admin IPs only'], ['limit', 'Rate-limited (tcp)'], ['blocked', 'Blocked'], ['default', 'No own rule (default policy)']]
+        .filter(([v]) => !(v === 'limit' && p.proto !== 'tcp'));
+      h += '<tr><td class="mono">' + p.port + '/' + esc(p.proto) + '</td><td>' + esc(p.proc || '?') + '</td><td>' + fwPill(t, p.state === 'open' && !u.active ? 'bad' : k) + ' <span class="dim" style="font-size:13px">' + esc(p.why || '') + '</span></td>'
+        + '<td><select onchange="fwPortAccess(' + i + ', this)" style="max-width:190px">' + opts.map(([v, l]) => '<option value="' + v + '">' + l + '</option>').join('') + '</select></td></tr>';
+    });
+    h += '</table><p class="dim" style="font-size:13px;margin:6px 0 0">Ports belong to running programs — to remove one, stop or uninstall the program. Access replaces this port\'s own rules; the admin SSH rules (Settings → Whitelist) always stay.</p>';
   }
   // rules
   const R = u.rules || [];
@@ -154,6 +166,20 @@ function fwJailEnable(btn, i, on){ const j = fwJ(i); fwRun(btn, () => stApi('PUT
 function fwJailReset(btn, i){ const j = fwJ(i); fwRun(btn, () => stApi('DELETE', 'api/firewall/fail2ban/jails/' + encodeURIComponent(j.name)), j.name + ': back to file defaults'); }
 function fwJailOn(btn){ const n = document.getElementById('fwNewJail').value; toast('Switching on ' + n + '… (tested first)'); fwRun(btn, () => stApi('PUT', 'api/firewall/fail2ban/jails/' + encodeURIComponent(n), { enabled: true }), n + ' is running'); }
 function fwBanaction(btn){ const c = document.getElementById('fwBanAct').value; toast('Applying… (restarts the jails; bans are restored)'); fwRun(btn, () => stApi('PUT', 'api/firewall/fail2ban/banaction', { choice: c || null }), 'Bans enforced with ' + (c || 'the jail.local default')); }
+function fwPortAccess(i, sel){
+  const p = fwData.ufw.ports[i], mode = sel.value; if (!p || !mode) return;
+  const label = sel.options[sel.selectedIndex].text;
+  const risky = (mode === 'blocked' || mode === 'admin' || mode === 'default') && [22, 80, 443].includes(p.port);
+  const why = p.port === 22 ? 'SSH: only the admin IPs (Settings → Whitelist) will still get in.' : 'Port ' + p.port + ' serves the websites — direct visitors (not through Cloudflare) will be cut off.';
+  if (!confirm('Port ' + p.port + '/' + p.proto + ' (' + (p.proc || '?') + '): ' + label + '?' + (risky ? '\n\n⚠ ' + why : ''))) { sel.value = ''; return; }
+  fwRun(sel, async () => {
+    const r = await stApi('PUT', 'api/firewall/ufw/port', { port: p.port, proto: p.proto, mode });
+    if (r.note) toast('Port ' + p.port + ': ' + r.note, 'warn', { duration: 10000 });
+    return { log: [].concat(r.removed.map(x => '− ' + x), r.added.map(x => '+ ' + x)) };
+  }, 'Port ' + p.port + '/' + p.proto + ': ' + label);
+}
+function fwDisableBroken(btn){ toast('Switching off the broken jails… (tested first)'); fwRun(btn, async () => { const r = await stApi('POST', 'api/firewall/fail2ban/disable-broken'); return r; }, 'Broken jails switched off'); }
+function fwBanWith(btn, c){ toast('Applying… (restarts the jails; bans are restored)'); fwRun(btn, () => stApi('PUT', 'api/firewall/fail2ban/banaction', { choice: c }), 'Bans enforced with ' + c); }
 function fwF2bSvc(btn, a){ fwRun(btn, () => stApi('POST', 'api/firewall/fail2ban/service/' + a), { reload: 'fail2ban reloaded', restart: 'fail2ban restarted', 'unban-all': 'Everyone unbanned' }[a]); }
 function fwBan(btn, i){ const j = fwJ(i), ip = document.getElementById('fwBan' + i).value.trim(); fwRun(btn, () => stApi('POST', 'api/firewall/fail2ban/' + encodeURIComponent(j.name) + '/ban', { ip }), 'Banned ' + ip); }
 function fwUnban(btn, i){ const j = fwJ(i), ip = btn.dataset.ip; fwRun(btn, () => stApi('POST', 'api/firewall/fail2ban/' + encodeURIComponent(j.name) + '/unban', { ip }), 'Unbanned ' + ip); }

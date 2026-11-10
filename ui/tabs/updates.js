@@ -106,7 +106,11 @@ function renderUpdates(){
         if (ag) {
           html += '<td>' + agStateHtml(ag, c, u) + '</td>';
         } else if (userV) {
-          html += '<td>' + esc(userV) + (isUpd ? ' <span class="upd-badge new">⬆ ' + esc(latestC.latestVersion) + '</span>' : ' <span class="upd-badge ok">✓</span>') + '</td>';
+          // remove sits with the version it removes: a quiet icon, red only on hover (refused server-side
+          // when the user sits on the shared system npm prefix — that is a system-wide removal)
+          html += '<td><span class="upd-ver">' + esc(userV) + (isUpd ? ' <span class="upd-badge new">⬆ ' + esc(latestC.latestVersion) + '</span>' : ' <span class="upd-badge ok">✓</span>')
+            + '<button class="upd-remove upd-rm-icon" data-user="' + esc(u) + '" data-comp="' + c.key + '" data-label="' + esc(c.label) + '" title="Uninstall ' + esc(c.label) + ' for ' + esc(u) + '" aria-label="Uninstall ' + esc(c.label) + ' for ' + esc(u) + '">'
+            + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button></span></td>';
         } else if (c.agent) {
           html += '<td><button class="btn small" style="font-size:12.5px" title="install ' + esc(c.label) + ' for ' + esc(u) + '" onclick="agentDeploy(\'' + c.key + '\', [\'' + esc(u) + '\'], this)">＋ Install</button></td>';
         } else {
@@ -125,13 +129,7 @@ function renderUpdates(){
           }
         }
       } else {
-        html += '<span class="upd-badge ok" style="font-size:12.5px">✓ up to date</span>';
-      }
-      // one remove control per component this user actually has (refused server-side
-      // when the user sits on the shared system npm prefix — that is a system-wide removal)
-      for (const c of userComps) {
-        if (c.key === 'node' || !uv[c.key]) continue;
-        html += ' <button class="btn danger small upd-remove" data-user="' + esc(u) + '" data-comp="' + c.key + '" data-label="' + esc(c.label) + '" style="margin:1px" title="npm rm -g ' + esc(c.label) + ' for ' + esc(u) + '">🗑 ' + c.key + '</button>';
+        html += '<span class="dim" style="font-size:13px">up to date</span>';
       }
       html += '</td>';
       html += '</tr>';

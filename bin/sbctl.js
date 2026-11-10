@@ -88,25 +88,7 @@ async function cmdStatus() {
   return h.ok ? 0 : 1;
 }
 
-// Compile every server and UI script without running it, and build-check the UI page — the
-// checks that catch the typo that would otherwise take the panel down on restart.
-function check() {
-  const vm = require('vm');
-  const files = [];
-  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) { if (e.name !== 'node_modules') walk(f); } else if (e.name.endsWith('.js')) files.push(f); } };
-  for (const d of ['lib', 'ui', 'bin']) if (fs.existsSync(path.join(ROOT, d))) walk(path.join(ROOT, d));
-  files.push(path.join(ROOT, 'server.js'));
-  const bad = [];
-  for (const f of files) {
-    let src = fs.readFileSync(f, 'utf8');
-    if (src.startsWith('#!')) src = '//' + src;
-    try { new vm.Script(f.includes('/ui/') ? src : '(function (exports, require, module, __filename, __dirname) {' + src + '\n})', { filename: f }); }
-    catch (e) { bad.push(path.relative(ROOT, f) + ': ' + e.message + (e.stack && /:\d+/.test(e.stack.split('\n')[0]) ? ' (' + e.stack.split('\n')[0] + ')' : '')); }
-  }
-  const page = run(process.execPath, [path.join(ROOT, 'scripts/check-page.js'), '--idents-only'], { cwd: ROOT });
-  if (page.status !== 0) bad.push('UI page: ' + ((page.stdout || '') + (page.stderr || '')).trim().split('\n').slice(-6).join('\n    '));
-  return { files: files.length, bad };
-}
+function check() { return require(path.join(ROOT, 'lib/selfcheck')).check(); }
 function cmdCheck() {
   const r = check();
   if (r.bad.length) { console.log(red('✗ ') + r.bad.length + ' problem(s) in ' + r.files + ' files:'); for (const b of r.bad) console.log('  ' + b); return 1; }

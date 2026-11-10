@@ -124,10 +124,32 @@ async function vaultEdit(id){
     + stField('Kind', '<select id="vf-kind">' + (vaultData.kinds || Object.keys(VAULT_KIND_LABEL)).map(k => '<option value="' + k + '"' + (k === e.kind ? ' selected' : '') + '>' + esc(VAULT_KIND_LABEL[k] || k) + '</option>').join('') + '</select>') + '</div>'
     + '<div class="row2">' + stField('Username', '<input id="vf-user" autocomplete="off" value="' + esc(e.username || '') + '" placeholder="optional">')
     + stField('URL / host', '<input id="vf-url" value="' + esc(e.url || '') + '" placeholder="https://… (optional)">') + '</div>'
-    + stField('Secret', '<div style="display:flex;gap:6px"><textarea id="vf-secret" rows="2" class="mono" autocomplete="off" spellcheck="false" style="flex:1" placeholder="' + (id ? 'leave empty to keep the stored secret' : 'password, token, key…') + '"></textarea><button class="btn small" type="button" onclick="vaultGenerate()" title="Generate a random 28-character password">Generate</button></div>', 'encrypted before it is stored')
+    + stField('Secret', '<div style="display:flex;gap:6px"><textarea id="vf-secret" rows="2" class="mono" autocomplete="off" spellcheck="false" style="flex:1" placeholder="' + (id ? 'leave empty to keep the stored secret' : 'password, token, key…') + '"></textarea><span style="display:flex;flex-direction:column;gap:6px"><button class="btn small" type="button" onclick="vaultGenerate()" title="Generate a random 28-character password">Generate</button><button class="btn small" type="button" onclick="document.getElementById(\'vf-file\').click()" title="Read a key or certificate file (id_ed25519, id_rsa, .pem…) into the secret">Upload file…</button></span><input type="file" id="vf-file" hidden onchange="vaultReadFile(this.files[0]); this.value=\'\'"></div>', 'encrypted before it is stored · you can also drop a key file on the box')
     + stField('Notes', '<textarea id="vf-notes" rows="3" placeholder="optional — encrypted too">' + esc(notes) + '</textarea>')
     + stField('Tags', '<input id="vf-tags" value="' + esc(e.tags || '') + '" placeholder="comma separated, e.g. hosting, prod">')
     + '<div class="site-actions" style="justify-content:flex-end;gap:8px"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="vaultSave(' + (id || 'null') + ')">Save</button></div>');
+}
+// A key/certificate file → the secret box (read in the browser; only the text is sent, encrypted at rest).
+// Picks the kind and a name from the file when those are still empty.
+function vaultReadFile(f){
+  if (!f) return;
+  if (f.size > 64 * 1024) return toast(f.name + ' is larger than 64 KB — not a key file?', 'error');
+  const r = new FileReader();
+  r.onerror = () => toast('Could not read ' + f.name, 'error');
+  r.onload = () => {
+    const t = String(r.result || '');
+    if (/[\x00-\x08\x0e-\x1f]/.test(t)) return toast(f.name + ' is a binary file — the vault keeps text (PEM / OpenSSH keys, certificates, tokens)', 'error');
+    document.getElementById('vf-secret').value = t.replace(/\r\n/g, '\n');
+    const priv = /-----BEGIN (OPENSSH|RSA|EC|DSA|ENCRYPTED)? ?PRIVATE KEY-----/.test(t), pub = /^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-\S+|sk-\S+) [A-Za-z0-9+\/=]+/m.test(t.trim());
+    const cert = /-----BEGIN CERTIFICATE-----/.test(t);
+    const kind = document.getElementById('vf-kind'), name = document.getElementById('vf-name');
+    if (priv || pub) kind.value = 'ssh-key'; else if (cert) kind.value = 'certificate';
+    if (!name.value.trim()) name.value = f.name + (pub && !priv ? ' (public)' : '');
+    const notes = document.getElementById('vf-notes');
+    if (pub && !priv && !notes.value) { const c = t.trim().split(/\s+/)[2]; if (c) notes.value = 'comment: ' + c; }
+    toast('Read ' + f.name + (priv ? ' — private key' + (/ENCRYPTED|aes\d+-ctr|bcrypt/.test(t) ? ' (passphrase-protected)' : '') : pub ? ' — public key' : cert ? ' — certificate' : ''), 'success');
+  };
+  r.readAsText(f);
 }
 async function vaultSave(id){
   const g = (x) => document.getElementById(x).value;

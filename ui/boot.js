@@ -28,7 +28,7 @@
   const tick = () => {
     const d = new Date();
     const off = fOff ? ((fOff.formatToParts(d).find(p => p.type === 'timeZoneName') || {}).value || '') : '';
-    el.innerHTML = '<b>' + esc(fTime.format(d)) + '</b><span>' + esc(fDate.format(d)) + '<span class="tzl"> · ' + esc((tz || 'local') + (off ? ' (' + off + ')' : '')) + '</span></span>';
+    el.innerHTML = '<b>' + esc(fTime.format(d)) + '</b><span class="dt">' + esc(fDate.format(d)) + '<span class="tzl"> · ' + esc((tz || 'local') + (off ? ' (' + off + ')' : '')) + '</span></span>';
   };
   tick(); setInterval(tick, 1000);
 })();

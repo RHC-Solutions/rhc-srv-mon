@@ -276,7 +276,18 @@ of a row, and pages backwards. Retention defaults to 90 days (`PUT /api/events/s
   the same hold: `stop` holds the site stopped (self-repair and the hold guard leave it down), `start`/`restart` release it
   and then check the apps stay up, quoting the crash if they do not.
 
+**Left menu → Panel** (bottom): *Restart panel* runs the same code check as `sbctl restart` (lib/selfcheck.js) and refuses
+when it fails; *Stop panel* stops it. Both hand `pm2 restart|stop` to a transient systemd unit (lib/api/panel.js), since
+the command kills the process that runs it; after a restart the page waits for the new process and reloads. There is no
+Start — a stopped panel serves no page; `sbctl start` on the server.
+
 ## Firewall tab (ufw + fail2ban)
+
+Public ports → **Access** sets who can reach one listening port: open / admin IPs only / rate-limited / blocked / no own
+rule. It replaces that port's own rules (exact port, not ranges or app profiles, never the "ssh allowlist" ones) and
+inserts the new ones before the first rule that already decides the port, but never above the admin SSH rules; if
+something else still decides first, the reply says so. Closing 22 needs every admin IP's SSH rule in place.
+The warnings box has one-click fixes: switch ufw on, switch off broken jails, enforce bans with nftables.
 
 `lib/firewall.js`, `lib/fail2ban.js`, API `lib/api/firewall.js` (`GET /api/firewall`, changes need `settings.write`).
 

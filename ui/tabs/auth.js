@@ -5,7 +5,8 @@ async function authInit(){
     const bar = document.getElementById('userbar'); if (!bar) return;
     if (!d.user) { bar.innerHTML = ''; return; }
     bar.innerHTML = '<span class="who">👤 ' + esc(d.user) + (d.local ? ' <small>local access · no login</small>' : (d.sessions > 1 ? ' <small>' + d.sessions + ' sessions</small>' : '')) + '</span>'
-      + (d.local ? '' : '<button class="upd-test-btn" onclick="authAccount()">🔐 Account</button><button class="upd-test-btn" onclick="authLogout()">Logout</button>');
+      + (d.local ? '' : '<button class="upd-test-btn ub-btn" onclick="authAccount()" title="Account" aria-label="Account">🔐<span class="lbl"> Account</span></button>'
+      + '<button class="upd-test-btn ub-btn" onclick="authLogout()" title="Logout" aria-label="Logout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4"/></svg><span class="lbl">Logout</span></button>');
   } catch(e){}
 }
 async function authLogout(){ try { await fetch('api/auth/logout', { method:'POST' }); } catch(e){} location.replace('login'); }

@@ -33,17 +33,17 @@ function armConfirm(btn, armedLabel, onConfirm){
   if (_armed.has(btn)) {            // Second click → execute
     const t = _armed.get(btn);
     clearTimeout(t.timer);
-    btn.textContent = t.original;
+    btn.innerHTML = t.original;
     btn.classList.remove('arm-confirm');
     _armed.delete(btn);
     try { onConfirm(); } catch(e) { toast('Error: '+e.message, 'error'); }
     return;
   }
-  const original = btn.textContent;
+  const original = btn.innerHTML;     // innerHTML, so icon buttons get their icon back
   btn.textContent = armedLabel;
   btn.classList.add('arm-confirm');
   const timer = setTimeout(() => {
-    btn.textContent = original;
+    btn.innerHTML = original;
     btn.classList.remove('arm-confirm');
     _armed.delete(btn);
   }, 5000);
@@ -173,6 +173,28 @@ function menuOpen(open){
   matchMedia('(min-width:901px)').addEventListener('change', (m) => { if (m.matches) menuOpen(false); });
 })();
 
+// Left menu → Panel: restart / stop the panel itself. A restart is followed until the new process
+// answers, then the page reloads; a stop leaves a note on how to bring it back.
+async function panelCtl(action, force){
+  try { await stApi('POST', 'api/panel/' + action, force ? { force: true } : {}); }
+  catch(e){
+    if (action === 'restart' && !force && e.detail) {
+      toast('Not restarted — the code has problems (the panel stays up)', 'error', { detail: e.detail, duration: 20000 });
+      return;
+    }
+    return stErr(e, 'Panel');
+  }
+  if (action === 'stop') { toast('Panel stopping. Start it again on the server as root: sbctl start', 'warn', { duration: 60000 }); return; }
+  toast('Restarting the panel…', 'info', { duration: 20000 });
+  const t0 = Date.now();
+  await new Promise(r => setTimeout(r, 2500));
+  while (Date.now() - t0 < 60000) {
+    try { const r = await fetch('api/auth/state', { cache: 'no-store' }); if (r.ok) { location.reload(); return; } } catch(_){}
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  toast('The panel has not come back after 60 s — on the server: sbctl status / sbctl logs', 'error', { duration: 60000 });
+}
+
 // Menu order: the ⇅ button next to "Server" switches the sidebar into reorder mode — drag an item
 // (mouse or touch) or move the focused one with ↑/↓. Saved per browser in state.navOrder.
 const NAV_DEFAULT = [...document.querySelectorAll('.sidenav .tab')].map(t => t.dataset.tab);
@@ -183,9 +205,32 @@ function navApply(order){
   seq.forEach(k => box.appendChild(by[k]));
 }
 function navSave(){
+  topnavRender();
   const cur = [...document.querySelectorAll('.sidenav .tab')].map(t => t.dataset.tab);
   if (cur.join() === NAV_DEFAULT.join()) delete state.navOrder; else state.navOrder = cur;
   saveState();
+}
+// Top bar: the pages pinned with ☆ in the left menu's reorder mode, in left-menu order (state.topPins).
+function topnavRender(){
+  const top = document.getElementById('topnav'); if (!top) return;
+  const pins = new Set(state.topPins || []);
+  top.innerHTML = '';
+  document.querySelectorAll('.sidenav .tab').forEach(t => {
+    const on = pins.has(t.dataset.tab);
+    const pin = t.querySelector('.pin-top');
+    if (pin) { pin.classList.toggle('on', on); pin.textContent = on ? '★' : '☆'; pin.title = on ? 'Remove from the top bar' : 'Add to the top bar'; pin.setAttribute('aria-pressed', String(on)); }
+    if (!on) return;
+    const a = document.createElement('a');
+    a.className = 'tab' + (t.dataset.tab === state.tab ? ' active' : ''); a.href = t.getAttribute('href'); a.dataset.tab = t.dataset.tab;
+    a.textContent = (t.querySelector('span:not(.pin-top)') || t).textContent;
+    a.addEventListener('click', (e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); setTab(a.dataset.tab, { fromBar: true }); });
+    top.appendChild(a);
+  });
+}
+function topPinToggle(tab){
+  const pins = new Set(state.topPins || []);
+  if (pins.has(tab)) pins.delete(tab); else pins.add(tab);
+  state.topPins = [...pins]; saveState(); topnavRender();
 }
 function navEditing(on){
   const nav = document.getElementById('sidenav'); if (!nav) return;
@@ -199,16 +244,23 @@ function navEditing(on){
   const nav = document.getElementById('sidenav'), box = nav && nav.querySelector('.tabs');
   if (!box) return;
   if (Array.isArray(state.navOrder)) navApply(state.navOrder);
+  box.querySelectorAll('.tab').forEach(t => { const p = document.createElement('span'); p.className = 'pin-top'; p.setAttribute('role', 'button'); t.appendChild(p); });
+  topnavRender();
   document.getElementById('nav-edit').addEventListener('click', () => navEditing(!nav.classList.contains('reorder')));
   document.getElementById('nav-done').addEventListener('click', () => navEditing(false));
   document.getElementById('nav-reset').addEventListener('click', () => { navApply(NAV_DEFAULT); navSave(); });
   // While reordering, a click never navigates (capture phase beats the tab's own handler).
-  box.addEventListener('click', (e) => { if (nav.classList.contains('reorder')) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+  box.addEventListener('click', (e) => {
+    if (!nav.classList.contains('reorder')) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    const pin = e.target.closest('.pin-top'); if (pin) topPinToggle(pin.closest('.tab').dataset.tab);
+  }, true);
   box.addEventListener('keydown', (e) => {
     if (!nav.classList.contains('reorder')) return;
     const t = e.target.closest('.tab'); if (!t) return;
     if (e.key === 'ArrowUp' && t.previousElementSibling) { box.insertBefore(t, t.previousElementSibling); }
     else if (e.key === 'ArrowDown' && t.nextElementSibling) { box.insertBefore(t.nextElementSibling, t); }
+    else if (e.key === ' ' || e.key === '*') { topPinToggle(t.dataset.tab); e.preventDefault(); return; }
     else if (e.key === 'Escape' || e.key === 'Enter') { navEditing(false); }
     else return;
     e.preventDefault(); t.focus(); navSave();
@@ -216,7 +268,7 @@ function navEditing(on){
   let drag = null;
   box.addEventListener('pointerdown', (e) => {
     if (!nav.classList.contains('reorder') || e.button !== 0) return;
-    const t = e.target.closest('.tab'); if (!t) return;
+    const t = e.target.closest('.tab'); if (!t || e.target.closest('.pin-top')) return;
     e.preventDefault(); drag = { t, id: e.pointerId };
     t.classList.add('dragging'); t.setPointerCapture(e.pointerId);
   });
@@ -238,7 +290,7 @@ function navEditing(on){
   box.addEventListener('pointerup', end); box.addEventListener('pointercancel', end);
 })();
 
-document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', (e) => {
+document.querySelectorAll('.sidenav .tab').forEach(t => t.addEventListener('click', (e) => {
   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;   // let "open in new tab" use the real href
   e.preventDefault(); setTab(t.dataset.tab, { fromBar: true });
 }));
