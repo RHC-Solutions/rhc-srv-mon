@@ -173,6 +173,71 @@ function menuOpen(open){
   matchMedia('(min-width:901px)').addEventListener('change', (m) => { if (m.matches) menuOpen(false); });
 })();
 
+// Menu order: the ⇅ button next to "Server" switches the sidebar into reorder mode — drag an item
+// (mouse or touch) or move the focused one with ↑/↓. Saved per browser in state.navOrder.
+const NAV_DEFAULT = [...document.querySelectorAll('.sidenav .tab')].map(t => t.dataset.tab);
+function navApply(order){
+  const box = document.querySelector('.sidenav .tabs'); if (!box) return;
+  const by = {}; box.querySelectorAll('.tab').forEach(t => { by[t.dataset.tab] = t; });
+  const seq = (order || []).filter(k => by[k]).concat(NAV_DEFAULT.filter(k => !(order || []).includes(k)));
+  seq.forEach(k => box.appendChild(by[k]));
+}
+function navSave(){
+  const cur = [...document.querySelectorAll('.sidenav .tab')].map(t => t.dataset.tab);
+  if (cur.join() === NAV_DEFAULT.join()) delete state.navOrder; else state.navOrder = cur;
+  saveState();
+}
+function navEditing(on){
+  const nav = document.getElementById('sidenav'); if (!nav) return;
+  nav.classList.toggle('reorder', on);
+  document.getElementById('nav-edit-bar').hidden = !on;
+  document.getElementById('nav-edit').setAttribute('aria-pressed', String(on));
+  nav.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-roledescription', on ? 'movable item' : ''));
+  if (!on) navSave();
+}
+(function(){
+  const nav = document.getElementById('sidenav'), box = nav && nav.querySelector('.tabs');
+  if (!box) return;
+  if (Array.isArray(state.navOrder)) navApply(state.navOrder);
+  document.getElementById('nav-edit').addEventListener('click', () => navEditing(!nav.classList.contains('reorder')));
+  document.getElementById('nav-done').addEventListener('click', () => navEditing(false));
+  document.getElementById('nav-reset').addEventListener('click', () => { navApply(NAV_DEFAULT); navSave(); });
+  // While reordering, a click never navigates (capture phase beats the tab's own handler).
+  box.addEventListener('click', (e) => { if (nav.classList.contains('reorder')) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+  box.addEventListener('keydown', (e) => {
+    if (!nav.classList.contains('reorder')) return;
+    const t = e.target.closest('.tab'); if (!t) return;
+    if (e.key === 'ArrowUp' && t.previousElementSibling) { box.insertBefore(t, t.previousElementSibling); }
+    else if (e.key === 'ArrowDown' && t.nextElementSibling) { box.insertBefore(t.nextElementSibling, t); }
+    else if (e.key === 'Escape' || e.key === 'Enter') { navEditing(false); }
+    else return;
+    e.preventDefault(); t.focus(); navSave();
+  });
+  let drag = null;
+  box.addEventListener('pointerdown', (e) => {
+    if (!nav.classList.contains('reorder') || e.button !== 0) return;
+    const t = e.target.closest('.tab'); if (!t) return;
+    e.preventDefault(); drag = { t, id: e.pointerId };
+    t.classList.add('dragging'); t.setPointerCapture(e.pointerId);
+  });
+  box.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    for (const o of box.querySelectorAll('.tab')) {
+      if (o === drag.t) continue;
+      const r = o.getBoundingClientRect();
+      if (e.clientY >= r.top && e.clientY <= r.bottom) {
+        box.insertBefore(drag.t, e.clientY < r.top + r.height / 2 ? o : o.nextElementSibling);
+        break;
+      }
+    }
+    // keep the dragged item visible when the list scrolls (phone drop-down)
+    const nr = nav.getBoundingClientRect();
+    if (e.clientY < nr.top + 30) nav.scrollTop -= 8; else if (e.clientY > nr.bottom - 30) nav.scrollTop += 8;
+  });
+  const end = (e) => { if (!drag || e.pointerId !== drag.id) return; drag.t.classList.remove('dragging'); drag = null; navSave(); };
+  box.addEventListener('pointerup', end); box.addEventListener('pointercancel', end);
+})();
+
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', (e) => {
   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;   // let "open in new tab" use the real href
   e.preventDefault(); setTab(t.dataset.tab, { fromBar: true });

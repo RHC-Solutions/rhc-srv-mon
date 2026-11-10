@@ -102,7 +102,10 @@ function renderUpdates(){
         const latestC = userComps.find(x => x.key === c.key);
         const isUpd = userV && latestC && latestC.latestVersion && userV !== latestC.latestVersion;
         if (isUpd) hasOutdated = true;
-        if (userV) {
+        const ag = c.agent ? agUserState(c.key, u, userV) : null;
+        if (ag) {
+          html += '<td>' + agStateHtml(ag, c, u) + '</td>';
+        } else if (userV) {
           html += '<td>' + esc(userV) + (isUpd ? ' <span class="upd-badge new">⬆ ' + esc(latestC.latestVersion) + '</span>' : ' <span class="upd-badge ok">✓</span>') + '</td>';
         } else if (c.agent) {
           html += '<td><button class="btn small" style="font-size:12.5px" title="install ' + esc(c.label) + ' for ' + esc(u) + '" onclick="agentDeploy(\'' + c.key + '\', [\'' + esc(u) + '\'], this)">＋ Install</button></td>';
@@ -209,13 +212,52 @@ function agentsCardHtml(){
   for (const j of agData.jobs || []) h += '<div class="dim" style="font-size:13.5px;margin-top:6px">' + (j.state === 'running' ? '⏳ ' : j.state === 'queued' ? '🕒 ' : '') + esc(j.label) + ' → ' + esc(j.users.join(', ')) + ': ' + (j.state === 'queued' ? 'waiting…' : j.state === 'running' ? 'installing' + (j.current ? ' for ' + esc(j.current) : '') + '…' : j.results.map(r => esc(r.user) + ' ' + (r.ok ? '✅ ' + esc(r.version || '') : '❌')).join(' · ')) + '</div>';
   return h;
 }
+// Per-user install status for the By User table, from the deploy jobs (newest first): queued /
+// installing (with a running clock) / installed-awaiting-version-check / failed (with the output).
+function agUserState(key, user, haveVersion){
+  for (const j of (agData && agData.jobs) || []) {
+    if (j.key !== key || !j.users.includes(user)) continue;
+    const r = j.results.find(x => x.user === user);
+    if (!r) {
+      if (j.state === 'done') continue;
+      return j.state === 'running' && j.current === user ? { s: 'installing', since: j.currentSince || j.started } : { s: 'queued' };
+    }
+    if (!r.ok) return { s: 'failed', output: r.output || '' };
+    if (!haveVersion) return { s: 'installed', version: r.version };
+    return null;
+  }
+  return null;
+}
+function agStateHtml(st, c, u){
+  if (st.s === 'installing') return '<span class="upd-badge run"><span class="ag-spin"></span>Installing… <span class="ag-since" data-since="' + esc(st.since) + '">' + agElapsed(st.since) + '</span></span>';
+  if (st.s === 'queued') return '<span class="upd-badge na">🕒 Queued</span>';
+  if (st.s === 'installed') return '<span class="upd-badge ok">✓ Installed' + (st.version ? ' ' + esc(st.version) : '') + '</span>';
+  return '<span class="upd-badge err" style="cursor:help" title="' + esc(st.output.slice(-600)) + '">✗ Failed</span> '
+    + '<button class="btn small" style="font-size:12.5px" onclick="agentDeploy(\'' + c.key + '\', [\'' + esc(u) + '\'], this)">Retry</button>';
+}
+function agElapsed(since){ const s = Math.max(0, Math.round((Date.now() - Date.parse(since)) / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+setInterval(() => document.querySelectorAll('.ag-since').forEach(e => { e.textContent = agElapsed(e.dataset.since); }), 1000);
 function agRender(){ const el = document.getElementById('agentsCard'); if (el) el.innerHTML = agentsCardHtml(); }
 async function loadAgents(){
   agLoading = true;
   try { agData = await stApi('GET', 'api/agents'); } catch(e){ agData = { error: e.message }; }
-  agLoading = false; agRender();
+  agLoading = false;
+  if (state.tab === 'updates' && lastUpdates) renderUpdates(); else agRender();   // the By User table shows the job status too
   clearTimeout(agPoll);
-  if (agData && (agData.jobs || []).some(j => j.state === 'running' || j.state === 'queued')) agPoll = setTimeout(async () => { await loadAgents(); if (!(agData.jobs || []).some(j => j.state === 'running')) checkUpdates(); }, 4000);
+  const busy = (j) => j.state === 'running' || j.state === 'queued';
+  if (agData && (agData.jobs || []).some(busy)) {
+    const before = new Set(agData.jobs.filter(busy).map(j => j.id));
+    agPoll = setTimeout(async () => {
+      await loadAgents();
+      const finished = (agData.jobs || []).filter(j => before.has(j.id) && j.state === 'done');
+      if (!finished.length) return;
+      const res = finished.flatMap(j => j.results.map(r => Object.assign({ label: j.label }, r)));
+      const bad = res.filter(r => !r.ok);
+      toast(bad.length ? bad.map(r => r.label + ' failed for ' + r.user).join(', ') + ' — hover "Failed" for the output'
+                       : res.map(r => r.label + ' installed for ' + r.user + (r.version ? ' (' + r.version + ')' : '')).join(', '), bad.length ? 'error' : 'success', { duration: 8000 });
+      checkUpdates();
+    }, 3000);
+  }
 }
 async function agentTrack(key, on){
   const keys = agData.agents.filter(a => !a.always && !a.custom && (a.key === key ? on : a.tracked)).map(a => a.key);
@@ -248,9 +290,9 @@ function agentDeployDialog(key){
 }
 async function agentDeploy(key, users, btn){
   if (!users.length) return toast('Pick at least one user', 'warn');
-  if (btn) btn.disabled = true;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Starting…'; }
   try { const j = await stApi('POST', 'api/agents/' + key + '/deploy', { users }); sshModalClose(); toast('Deploying ' + j.label + ' for ' + users.join(', ') + '…', 'success'); loadAgents(); }
-  catch(e){ stErr(e, 'Deploy'); if (btn) btn.disabled = false; }
+  catch(e){ stErr(e, 'Deploy'); if (btn) { btn.disabled = false; btn.textContent = '＋ Install'; } }
 }
 function agentAddCustom(){
   sshModal('<h3>＋ Custom AI agent</h3>'

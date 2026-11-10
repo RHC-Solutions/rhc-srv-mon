@@ -261,6 +261,21 @@ failures, update runs, module updates / auto-update / cleanup, backups, pm2 star
 remote installs, settings saves. The tab filters by type group, level, user, site and free text, expands the JSON details
 of a row, and pages backwards. Retention defaults to 90 days (`PUT /api/events/settings {retentionDays}`); pruning runs daily.
 
+## Command line (`sbctl`)
+
+`bin/sbctl.js`, run as root; install once with `ln -s /opt/sb-srv-mon/bin/sbctl.js /usr/local/bin/sbctl`.
+`sbctl help` lists everything:
+
+- **Panel:** `status`, `start`, `stop` (asks; `-y`), `restart` (compiles every lib/ui/bin file and builds the UI page first,
+  and refuses to restart a panel that would not come back — `--force` skips that), `logs [-f] [-n N]`, `check`.
+- **Login:** `users`, `passwd <user>` (ends that user's sessions unless `--keep-sessions`), `2fa-reset <user>` (prints the
+  new setup key), `logout <user>|--all`. These edit `auth.json`; the running panel watches the file and reloads it
+  (`loadAuth({ watch: true })` in server.js), and sbctl re-checks after 2.5 s and re-applies if a login in that window
+  wrote the panel's old copy back. Password and authenticator changes are logged and alerted like the web ones (ip `cli`).
+- **Sites:** `sites`, `site <domain> [status|start|stop|restart|logs]` — the same `procs.act` as the panel buttons, and
+  the same hold: `stop` holds the site stopped (self-repair and the hold guard leave it down), `start`/`restart` release it
+  and then check the apps stay up, quoting the crash if they do not.
+
 ## Firewall tab (ufw + fail2ban)
 
 `lib/firewall.js`, `lib/fail2ban.js`, API `lib/api/firewall.js` (`GET /api/firewall`, changes need `settings.write`).

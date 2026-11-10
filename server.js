@@ -504,7 +504,7 @@ catch (e) { console.error('cert store seed failed:', e.message); }
 ssh.ensureSshHelpers();
 ssh.loadSsh();
 ssh.sshAdoptDaemons();
-auth.loadAuth();
+auth.loadAuth({ watch: true });
 history.loadHistory();
 updates.loadUpdates();
 modules.loadModulesCache();
