@@ -173,26 +173,50 @@ function menuOpen(open){
   matchMedia('(min-width:901px)').addEventListener('change', (m) => { if (m.matches) menuOpen(false); });
 })();
 
-// Left menu → Panel: restart / stop the panel itself. A restart is followed until the new process
-// answers, then the page reloads; a stop leaves a note on how to bring it back.
+// Left menu → Panel: restart / stop the panel itself. A restart shows its progress step by step
+// (code check → restart → waiting for the new process → reload); "back" means a *new* process
+// answers (its pid differs), not the old one still finishing its last second.
+function panelSteps(steps, cur, note){
+  const el = document.getElementById('panel-steps'); if (!el) return;
+  el.innerHTML = steps.map((t, i) => '<li class="' + (i < cur ? 'done' : i === cur ? 'now' : 'todo') + '">'
+    + '<span class="ps-ico">' + (i < cur ? '✓' : i === cur ? '<span class="ag-spin"></span>' : '•') + '</span>' + t + '</li>').join('')
+    + (note ? '<li class="note">' + note + '</li>' : '');
+}
 async function panelCtl(action, force){
-  try { await stApi('POST', 'api/panel/' + action, force ? { force: true } : {}); }
+  if (action === 'stop') {
+    try { await stApi('POST', 'api/panel/stop'); } catch(e){ return stErr(e, 'Panel'); }
+    toast('Panel stopping. Start it again on the server as root: sbctl start', 'warn', { duration: 60000 });
+    return;
+  }
+  const steps = ['Checking the code', 'Restarting the panel', 'Waiting for it to come back', 'Reloading this page'];
+  let before = null; try { before = (await stApi('GET', 'api/panel')).pid; } catch(_){}
+  sshModal('<h3>Restarting the panel</h3><ul class="panel-steps" id="panel-steps"></ul>'
+    + '<p class="dim" id="panel-elapsed" style="margin:10px 0 0;font-size:13px"></p>');
+  const t0 = Date.now(), tick = setInterval(() => { const e = document.getElementById('panel-elapsed'); if (e) e.textContent = Math.round((Date.now() - t0) / 1000) + ' s'; }, 500);
+  const done = () => clearInterval(tick);
+  panelSteps(steps, force ? 1 : 0);
+  try { await stApi('POST', 'api/panel/restart', force ? { force: true } : {}); }
   catch(e){
-    if (action === 'restart' && !force && e.detail) {
-      toast('Not restarted — the code has problems (the panel stays up)', 'error', { detail: e.detail, duration: 20000 });
-      return;
-    }
-    return stErr(e, 'Panel');
+    done();
+    if (e.detail) {
+      panelSteps(steps, 0, '❌ ' + esc(e.message) + '<pre class="mono" style="white-space:pre-wrap;font-size:12px;margin:8px 0 0">' + esc(e.detail) + '</pre>');
+      document.getElementById('panel-steps').insertAdjacentHTML('afterend', '<div class="foot"><button class="btn" onclick="sshModalClose()">Close</button><button class="btn danger" onclick="panelCtl(\'restart\', true)" title="restart even though the check failed — the panel may not come back">Restart anyway</button></div>');
+    } else { sshModalClose(); stErr(e, 'Panel'); }
+    return;
   }
-  if (action === 'stop') { toast('Panel stopping. Start it again on the server as root: sbctl start', 'warn', { duration: 60000 }); return; }
-  toast('Restarting the panel…', 'info', { duration: 20000 });
-  const t0 = Date.now();
-  await new Promise(r => setTimeout(r, 2500));
-  while (Date.now() - t0 < 60000) {
-    try { const r = await fetch('api/auth/state', { cache: 'no-store' }); if (r.ok) { location.reload(); return; } } catch(_){}
+  panelSteps(steps, 2);
+  while (Date.now() - t0 < 90000) {
     await new Promise(r => setTimeout(r, 1000));
+    try {
+      const r = await fetch('api/panel', { cache: 'no-store' });
+      if (r.ok) { const j = await r.json(); if (!before || j.pid !== before) break; }
+      else if (r.status === 401 || r.status === 403) break;     // up, just asking for a login
+    } catch(_){}
   }
-  toast('The panel has not come back after 60 s — on the server: sbctl status / sbctl logs', 'error', { duration: 60000 });
+  done();
+  if (Date.now() - t0 >= 90000) { panelSteps(steps, 2, '⚠ Not back after 90 s — on the server: <code>sbctl status</code> / <code>sbctl logs</code>'); return; }
+  panelSteps(steps, 3);
+  setTimeout(() => location.reload(), 600);
 }
 
 // Menu order: the ⇅ button next to "Server" switches the sidebar into reorder mode — drag an item
