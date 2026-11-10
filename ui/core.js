@@ -184,7 +184,7 @@ function panelSteps(steps, cur, note){
 }
 async function panelCtl(action, force){
   if (action === 'stop') {
-    try { await stApi('POST', 'api/panel/stop'); } catch(e){ return stErr(e, 'Panel'); }
+    try { await stApi('POST', 'api/panel/stop'); } catch(e){ return /HTTP 404/.test(e.message) ? toast('The running panel is older than this button — on the server as root: sbctl stop', 'warn', { duration: 15000 }) : stErr(e, 'Panel'); }
     toast('Panel stopping. Start it again on the server as root: sbctl start', 'warn', { duration: 60000 });
     return;
   }
@@ -201,6 +201,9 @@ async function panelCtl(action, force){
     if (e.detail) {
       panelSteps(steps, 0, '❌ ' + esc(e.message) + '<pre class="mono" style="white-space:pre-wrap;font-size:12px;margin:8px 0 0">' + esc(e.detail) + '</pre>');
       document.getElementById('panel-steps').insertAdjacentHTML('afterend', '<div class="foot"><button class="btn" onclick="sshModalClose()">Close</button><button class="btn danger" onclick="panelCtl(\'restart\', true)" title="restart even though the check failed — the panel may not come back">Restart anyway</button></div>');
+    } else if (/HTTP 404|^not found/i.test(e.message)) {
+      panelSteps(steps, 0, '❌ The running panel is older than this button, so it cannot restart itself. Once, on the server as root: <code>sbctl restart</code> — from then on this button works.');
+      document.getElementById('panel-steps').insertAdjacentHTML('afterend', '<div class="foot"><button class="btn pri" onclick="sshModalClose()">OK</button></div>');
     } else { sshModalClose(); stErr(e, 'Panel'); }
     return;
   }
