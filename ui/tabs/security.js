@@ -5,8 +5,6 @@ async function loadSecurity(){
   try { secData = await stApi('GET', 'api/security'); } catch(e){ secData = { error: e.message }; }
   secLoading = false;
   if (state.tab === 'security') renderSecurity(true);
-  const ips = [...new Set(((secData && secData.fail2ban && secData.fail2ban.jails) || []).flatMap(j => j.banned))].filter(ip => !secIntel[ip]).slice(0, 40);
-  if (ips.length) { try { Object.assign(secIntel, await stApi('POST', 'api/security/intel', { ips })); } catch(_){} if (state.tab === 'security') renderSecurity(true); }
 }
 const secFlag = (cc) => cc && /^[A-Z]{2}$/.test(cc) ? String.fromCodePoint(...[...cc].map(c => 0x1F1E6 + c.charCodeAt(0) - 65)) : '';
 function secIntelLine(i){
@@ -16,7 +14,7 @@ function secIntelLine(i){
   return secFlag(i.country) + ' ' + esc([i.country, i.city].filter(Boolean).join(' · ')) + (i.asn ? ' · <span class="mono">' + esc(i.asn) + '</span> ' + esc(i.org || '') : (i.org ? ' · ' + esc(i.org) : '')) + ab;
 }
 function renderSecurity(fromLoad){
-  plainTabHeader('fail2ban, IP lookups (ipinfo.io, AbuseIPDB) and block rules by IP, range, AS or country');
+  plainTabHeader('IP lookups (ipinfo.io, AbuseIPDB) and block rules by IP, range, AS or country — fail2ban and ufw are on the Firewall page');
   const view = document.getElementById('securityview');
   if (!secData) { view.innerHTML = '<div class="upd-card">Loading…</div>'; if (!secLoading) loadSecurity(); return; }
   if (!fromLoad && view.contains(document.activeElement) && ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) return;
@@ -63,20 +61,12 @@ function renderSecurity(fromLoad){
     h += '</table>';
   }
   h += '</div>';
-  // fail2ban
-  const f = secData.fail2ban;
-  h += '<div class="upd-card" style="margin-top:14px"><h3>fail2ban</h3>';
-  if (!f.installed) h += '<p class="dim">fail2ban is not running: ' + esc(f.error || '') + '</p>';
-  for (const j of f.jails || []) {
-    h += '<h4 style="margin:10px 0 6px">' + esc(j.name) + ' <span class="dim" style="font-weight:400;font-size:13.5px">· ' + j.currentlyBanned + ' banned now, ' + j.totalBanned + ' in total · ' + j.currentlyFailed + ' failing now</span></h4>';
-    h += '<div style="display:flex;gap:8px;margin-bottom:6px"><input id="secBan_' + esc(j.name) + '" class="mono" placeholder="ban an IP by hand" style="max-width:240px"><button class="btn small" onclick="secBan(\'' + esc(j.name) + '\')">Ban</button></div>';
-    if (j.banned.length) {
-      h += '<table class="upd-table"><tr><th>IP</th><th>Who</th><th></th></tr>';
-      for (const ip of j.banned) h += '<tr><td class="mono">' + esc(ip) + '</td><td style="font-size:13.5px">' + secIntelLine(secIntel[ip]) + '</td><td style="text-align:right;white-space:nowrap"><button class="btn small" onclick="secLookupIp(\'' + esc(ip) + '\')">Details</button> <button class="btn small" onclick="secUnban(\'' + esc(j.name) + '\',\'' + esc(ip) + '\')">Unban</button></td></tr>';
-      h += '</table>';
-    } else h += '<p class="dim" style="margin:0">Nobody banned right now.</p>';
-  }
-  view.innerHTML = h + '</div>';
+  // fail2ban lives on the Firewall page (jails, settings, bans); a pointer with the headline here
+  const f = secData.fail2ban || {};
+  const nBanned = (f.jails || []).reduce((a, j) => a + (j.banned || []).length, 0);
+  h += '<div class="upd-card" style="margin-top:14px"><h3>fail2ban</h3><p style="margin:0">' + (f.installed ? (f.jails || []).length + ' jail(s) running, ' + nBanned + ' IP(s) banned. ' : 'fail2ban is not running. ')
+    + '<a href="firewall" onclick="event.preventDefault();setTab(\'firewall\')">Manage jails and bans on the Firewall page →</a></p></div>';
+  view.innerHTML = h;
 }
 async function secDoLookup(){ const ip = (document.getElementById('secIp') || {}).value.trim(); if (!ip) return; secLookupIp(ip); }
 async function secLookupIp(ip){
@@ -104,6 +94,4 @@ async function secAddRule(btn){
   catch(e){ stErr(e, 'Block'); btn.disabled = false; }
 }
 async function secRemoveRule(id){ try { await stApi('DELETE', 'api/security/rules/' + id); toast('Unblocked', 'success'); secData = null; loadSecurity(); } catch(e){ stErr(e, 'Unblock'); } }
-async function secBan(jail){ const ip = document.getElementById('secBan_' + jail).value.trim(); try { await stApi('POST', 'api/security/fail2ban/' + jail + '/ban', { ip }); toast('Banned ' + ip, 'success'); secData = null; loadSecurity(); } catch(e){ stErr(e, 'Ban'); } }
-async function secUnban(jail, ip){ try { await stApi('POST', 'api/security/fail2ban/' + jail + '/unban', { ip }); toast('Unbanned ' + ip, 'success'); secData = null; loadSecurity(); } catch(e){ stErr(e, 'Unban'); } }
 async function secReport(ip){ try { const r = await stApi('POST', 'api/security/report', { ip, comment: 'abusive traffic seen by ' + location.host }); toast('Reported — abuse score now ' + r.score + '%', 'success'); } catch(e){ stErr(e, 'Report'); } }

@@ -261,6 +261,24 @@ failures, update runs, module updates / auto-update / cleanup, backups, pm2 star
 remote installs, settings saves. The tab filters by type group, level, user, site and free text, expands the JSON details
 of a row, and pages backwards. Retention defaults to 90 days (`PUT /api/events/settings {retentionDays}`); pruning runs daily.
 
+## Firewall tab (ufw + fail2ban)
+
+`lib/firewall.js`, `lib/fail2ban.js`, API `lib/api/firewall.js` (`GET /api/firewall`, changes need `settings.write`).
+
+**ufw**: on/off, default incoming/routed policy, logging, rules (read with `ufw show added`, deleted by their spec — not by
+number, which shifts), and a table of every publicly listening port with what the rules make of it. Guard rails: switching
+ufw on first adds 22/tcp for every admin IP (Settings → Whitelist) and refuses when no one would keep SSH; the "ssh
+allowlist" rules are owned by the Whitelist and cannot be edited here; a deny/reject may not overlap an admin IP (one for a
+specific source is inserted at the top, one from anywhere appended after the allows); outgoing must stay `allow` because
+the panel and all sites are reached through Cloudflare tunnels. On/off and ban-backend changes are sent to Telegram/Slack.
+
+**fail2ban**: running/broken/available jails from fail2ban's own resolved config (`fail2ban-client -d`, `-t`), per-jail
+bantime/findtime/maxretry, switch jails on/off, bans (ban/unban by hand, unban everyone), which backend enforces bans
+(ufw / nftables / iptables), recent log. The panel writes only `/etc/fail2ban/jail.d/zz-sb-srv-mon.local` (read last, so it
+wins over `jail.local`, which keeps the Whitelist's `ignoreip`). Every change: write → `fail2ban-client -t` (refused if it adds
+an error, or a jail being switched on is broken, e.g. its log file is missing) → `reload` → check the jails came up; any
+failure restores the previous file and reloads. Warns when bans go through ufw while ufw is off (bans then block nothing).
+
 ## Development
 
 Work in the `v2` worktree, never in the live checkout (an auto-commit cron pushes `main` every 15 minutes):

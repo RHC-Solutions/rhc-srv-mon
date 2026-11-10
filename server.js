@@ -28,6 +28,7 @@ require('./lib/api/cluster');
 require('./lib/api/agents');
 require('./lib/api/appstore');
 require('./lib/api/security');
+require('./lib/api/firewall');
 const notifyEvents = require('./lib/notify-events');
 const clpImport = require('./lib/clp-import');
 const cloudpanel = require('./lib/cloudpanel');
