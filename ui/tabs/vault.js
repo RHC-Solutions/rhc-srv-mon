@@ -1,6 +1,11 @@
 // ---- Vault: encrypted passwords / tokens / keys / notes, plus the server's own secrets (read-only).
 let vaultData = null, vaultLoading = false, vaultQ = '';
 const vaultShown = {};   // 'e:<id>' | 's:<id>' → revealed secret, only after an explicit Show / Copy
+// Filter + sort (remembered per browser in state.vault): kind, tag, sort key and direction.
+const vaultView = Object.assign({ kind: '', tag: '', sort: 'name', dir: 1 }, state.vault || {});
+function vaultSetView(patch){ Object.assign(vaultView, patch); state.vault = Object.assign({}, vaultView); saveState(); renderVault(); }
+function vaultSortBy(key){ vaultSetView(vaultView.sort === key ? { dir: -vaultView.dir } : { sort: key, dir: key === 'updated' ? -1 : 1 }); }
+function vaultTagsOf(e){ return String(e.tags || '').split(',').map(t => t.trim()).filter(Boolean); }
 const VAULT_KIND_LABEL = { password: 'Password', token: 'Token', 'api-key': 'API key', 'ssh-key': 'SSH key', certificate: 'Certificate', note: 'Note', other: 'Other' };
 async function loadVault(){
   vaultLoading = true;
@@ -13,7 +18,18 @@ function renderVault(){
   const view = document.getElementById('vaultview');
   if (!vaultData) { view.innerHTML = '<div class="upd-card">Loading…</div>'; if (!vaultLoading) loadVault(); return; }
   if (view.contains(document.activeElement) && document.activeElement.id === 'vaultQ') { vaultRenderLists(); return; }
-  view.innerHTML = '<div class="toolbar" style="margin-bottom:12px"><input id="vaultQ" type="search" placeholder="Search name, user, URL, tags…" value="' + esc(vaultQ) + '" oninput="vaultQ=this.value; vaultRenderLists()" autocomplete="off">'
+  const all = (vaultData.entries || []).concat(vaultData.system || []);
+  const kinds = [...new Set(all.map(e => e.kind).filter(Boolean))].sort((a, b) => (VAULT_KIND_LABEL[a] || a).localeCompare(VAULT_KIND_LABEL[b] || b));
+  const tags = [...new Set((vaultData.entries || []).flatMap(vaultTagsOf))].sort((a, b) => a.localeCompare(b));
+  if (vaultView.kind && !kinds.includes(vaultView.kind)) vaultView.kind = '';
+  if (vaultView.tag && !tags.includes(vaultView.tag)) vaultView.tag = '';
+  const opt = (v, l, cur) => '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(l) + '</option>';
+  const sorts = [['name:1', 'Name A → Z'], ['name:-1', 'Name Z → A'], ['updated:-1', 'Recently updated'], ['updated:1', 'Least recently updated'], ['kind:1', 'Kind'], ['username:1', 'Username']];
+  view.innerHTML = '<div class="toolbar vault-bar" style="margin-bottom:12px"><input id="vaultQ" type="search" placeholder="Search name, user, URL, tags…" value="' + esc(vaultQ) + '" oninput="vaultQ=this.value; vaultRenderLists()" autocomplete="off">'
+    + '<select title="Kind" onchange="vaultSetView({ kind: this.value })">' + opt('', 'All kinds', vaultView.kind) + kinds.map(k => opt(k, VAULT_KIND_LABEL[k] || k, vaultView.kind)).join('') + '</select>'
+    + (tags.length ? '<select title="Tag" onchange="vaultSetView({ tag: this.value })">' + opt('', 'All tags', vaultView.tag) + tags.map(t => opt(t, '# ' + t, vaultView.tag)).join('') + '</select>' : '')
+    + '<select title="Sort" onchange="const [s, d] = this.value.split(\':\'); vaultSetView({ sort: s, dir: Number(d) })">' + sorts.map(([v, l]) => opt(v, l, vaultView.sort + ':' + vaultView.dir)).join('') + '</select>'
+    + (vaultView.kind || vaultView.tag || vaultQ ? '<button class="btn" onclick="vaultQ=\'\'; vaultSetView({ kind: \'\', tag: \'\' })" title="Clear search and filters">✕ Clear</button>' : '')
     + '<button class="btn pri" onclick="vaultEdit(null)">＋ Add secret</button><button class="btn" onclick="vaultData=null; renderVault()">↻</button></div>'
     + '<div id="vaultLists"></div>';
   vaultRenderLists();
@@ -33,15 +49,19 @@ function vaultRenderLists(){
   const hit = (...xs) => !q || xs.join(' ').toLowerCase().includes(q);
   let h = '';
   if (d.error) h += '<div class="site-why">⚠ ' + esc(d.error) + '</div>';
-  const entries = (d.entries || []).filter(e => hit(e.name, e.username, e.url, e.tags, e.kind));
-  h += '<div class="upd-card"><h3>Secrets <span class="dim" style="font-weight:400">' + entries.length + '</span></h3>';
+  const kindOk = (e) => !vaultView.kind || e.kind === vaultView.kind;
+  const val = (e, k) => k === 'updated' ? (Date.parse(e.updated_at) || 0) : k === 'kind' ? (VAULT_KIND_LABEL[e.kind] || e.kind || '') : String(e[k] || '').toLowerCase();
+  const byView = (a, b) => { const x = val(a, vaultView.sort), y = val(b, vaultView.sort); const c = typeof x === 'number' ? x - y : String(x).localeCompare(String(y)); return (c || String(a.name).localeCompare(String(b.name))) * (c ? vaultView.dir : 1); };
+  const entries = (d.entries || []).filter(e => kindOk(e) && (!vaultView.tag || vaultTagsOf(e).includes(vaultView.tag)) && hit(e.name, e.username, e.url, e.tags, e.kind, VAULT_KIND_LABEL[e.kind])).sort(byView);
+  const th = (k, l) => '<th class="sortable' + (vaultView.sort === k ? ' on' : '') + '" onclick="vaultSortBy(\'' + k + '\')" title="Sort by ' + l.toLowerCase() + '">' + l + (vaultView.sort === k ? (vaultView.dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+  h += '<div class="upd-card"><h3>Secrets <span class="dim" style="font-weight:400">' + entries.length + ((d.entries || []).length !== entries.length ? ' of ' + (d.entries || []).length : '') + '</span></h3>';
   if (!(d.entries || []).length) h += '<p class="dim">Nothing stored yet — <a href="#" onclick="vaultEdit(null);return false">add the first secret</a>.</p>';
   else if (!entries.length) h += '<p class="dim">No match.</p>';
   else {
-    h += '<table class="upd-table"><tr><th>Name</th><th>Kind</th><th>Username</th><th>Secret</th><th>Updated</th><th></th></tr>';
+    h += '<table class="upd-table"><tr>' + th('name', 'Name') + th('kind', 'Kind') + th('username', 'Username') + '<th>Secret</th>' + th('updated', 'Updated') + '<th></th></tr>';
     for (const e of entries) {
       h += '<tr><td><b>' + esc(e.name) + '</b>' + (e.url ? '<br><span class="mono dim" style="font-size:13px">' + (/^https?:\/\//.test(e.url) ? '<a href="' + esc(e.url) + '" target="_blank" rel="noopener noreferrer">' + esc(e.url) + '</a>' : esc(e.url)) + '</span>' : '')
-        + (e.tags ? '<br>' + e.tags.split(',').map(t => '<span class="chip" style="font-size:12px;padding:1px 8px;margin:2px 4px 0 0;display:inline-block">' + esc(t.trim()) + '</span>').join('') : '') + '</td>'
+        + (e.tags ? '<br>' + vaultTagsOf(e).map(t => '<span class="chip vault-tag' + (t === vaultView.tag ? ' on' : '') + '" role="button" tabindex="0" title="' + (t === vaultView.tag ? 'Show all tags' : 'Only #' + esc(t)) + '" onclick="vaultSetView({ tag: ' + (t === vaultView.tag ? '\'\'' : JSON.stringify(t).replace(/"/g, '&quot;')) + ' })" style="font-size:12px;padding:1px 8px;margin:2px 4px 0 0;display:inline-block">' + esc(t) + '</span>').join('') : '') + '</td>'
         + '<td>' + esc(VAULT_KIND_LABEL[e.kind] || e.kind) + (e.hasNotes ? ' <span class="dim" title="has notes">📝</span>' : '') + '</td>'
         + '<td class="mono" style="font-size:13px">' + (e.username ? esc(e.username) + ' <button class="btn small" onclick="vaultCopyText(' + JSON.stringify(e.username).replace(/"/g, '&quot;') + ', \'Username\')">Copy</button>' : '') + '</td>'
         + '<td style="min-width:16em">' + vaultSecretCell('e:' + e.id, true) + '</td>'
@@ -51,7 +71,9 @@ function vaultRenderLists(){
     h += '</table>';
   }
   h += '</div>';
-  const sys = (d.system || []).filter(s => hit(s.name, s.where, s.username, s.kind));
+  // system secrets have no tags: a tag filter hides them; kind/search/sort by name apply
+  const sys = vaultView.tag ? [] : (d.system || []).filter(s => kindOk(s) && hit(s.name, s.where, s.username, s.kind, VAULT_KIND_LABEL[s.kind]))
+    .sort((a, b) => (vaultView.sort === 'name' ? vaultView.dir : 1) * String(a.name).localeCompare(String(b.name)));
   h += '<div class="upd-card" style="margin-top:14px"><h3>System secrets <span class="dim" style="font-weight:400">' + sys.length + '</span></h3>'
     + '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Credentials this server already uses, read from where they live — rotating one there is reflected here at once. Read-only; change them where they are managed.</p>';
   if (sys.length) {
@@ -128,9 +150,20 @@ async function vaultEdit(id){
     + stField('Notes', '<textarea id="vf-notes" rows="3" placeholder="optional — encrypted too">' + esc(notes) + '</textarea>')
     + stField('Tags', '<input id="vf-tags" value="' + esc(e.tags || '') + '" placeholder="comma separated, e.g. hosting, prod">')
     + '<div class="site-actions" style="justify-content:flex-end;gap:8px"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" onclick="vaultSave(' + (id || 'null') + ')">Save</button></div>');
+  const ta = document.getElementById('vf-secret');
+  if (ta) {
+    ta.addEventListener('dragover', (ev) => { if (ev.dataTransfer && [...ev.dataTransfer.types].includes('Files')) ev.preventDefault(); });
+    ta.addEventListener('drop', (ev) => { const f = ev.dataTransfer && ev.dataTransfer.files[0]; if (f) { ev.preventDefault(); vaultReadFile(f); } });
+  }
 }
 // A key/certificate file → the secret box (read in the browser; only the text is sent, encrypted at rest).
 // Picks the kind and a name from the file when those are still empty.
+// PEM keys say ENCRYPTED in the header; OpenSSH keys name their cipher inside the base64 body ("none" = no passphrase).
+function vaultKeyEncrypted(t){
+  if (/ENCRYPTED/.test(t)) return true;
+  if (!/BEGIN OPENSSH PRIVATE KEY/.test(t)) return false;
+  try { return !atob(t.split('-----')[2].replace(/\s/g, '')).slice(0, 40).includes('none'); } catch(e){ return false; }
+}
 function vaultReadFile(f){
   if (!f) return;
   if (f.size > 64 * 1024) return toast(f.name + ' is larger than 64 KB — not a key file?', 'error');
@@ -147,7 +180,7 @@ function vaultReadFile(f){
     if (!name.value.trim()) name.value = f.name + (pub && !priv ? ' (public)' : '');
     const notes = document.getElementById('vf-notes');
     if (pub && !priv && !notes.value) { const c = t.trim().split(/\s+/)[2]; if (c) notes.value = 'comment: ' + c; }
-    toast('Read ' + f.name + (priv ? ' — private key' + (/ENCRYPTED|aes\d+-ctr|bcrypt/.test(t) ? ' (passphrase-protected)' : '') : pub ? ' — public key' : cert ? ' — certificate' : ''), 'success');
+    toast('Read ' + f.name + (priv ? ' — private key' + (vaultKeyEncrypted(t) ? ' (passphrase-protected)' : '') : pub ? ' — public key' : cert ? ' — certificate' : ''), 'success');
   };
   r.readAsText(f);
 }

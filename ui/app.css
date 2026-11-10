@@ -521,6 +521,11 @@
   .upd-rm-icon svg { width:16px; height:16px; }
   .upd-rm-icon.arm-confirm { width:auto; padding:0 8px; font-size:12.5px; font-weight:600; color:var(--md-error-bright); border-color:var(--md-error); background:var(--md-error-container); }
   .upd-rm-icon:hover, .upd-rm-icon:focus-visible { color:var(--md-error-bright); border-color:var(--md-error); background:var(--md-error-container); outline:none; }
+  .upd-table th.sortable { cursor:pointer; user-select:none; white-space:nowrap; }
+  .upd-table th.sortable:hover, .upd-table th.sortable.on { color:var(--md-primary); }
+  .vault-bar select { width:auto; }
+  .vault-tag { cursor:pointer; }
+  .vault-tag:hover, .vault-tag.on { background:var(--md-primary); color:var(--md-on-primary, #fff); }
   .badge.type, .badge.unknown, .upd-badge.na, .sev.none      { background:var(--md-neutral-container); color:var(--md-on-surface-med); }
   .sev, .ev-level { text-transform:uppercase; letter-spacing:.5px; font-size:11px; }
   .statuses { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
