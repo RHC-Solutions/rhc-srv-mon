@@ -91,7 +91,7 @@ function renderSitesList(){
       for (const p of s.pm2) { const pUp = p.status === 'online'; html += '<div class="prow"><span class="pname">' + esc(p.name) + '</span><span class="pstat ' + (pUp?'up':'down') + '">' + (pUp?'🟢':'🔴') + ' ' + esc(p.status) + ' <span class="dim">CPU ' + p.cpu + '% · ' + fmtMem(p.memory) + '</span></span></div>'; }
       html += '</div>';
     }
-    if (s.canControl) html += siteCtlHtml(s.domain, null, null, 'card');
+    html += s.canControl ? siteCtlHtml(s.domain, null, null, 'card') : '<div class="site-ctl on-card" onclick="event.stopPropagation()">' + siteCfPurgeBtn(s.domain) + '</div>';
     html += '</div>';
   }
   if (!sorted.length) html += '<div class="upd-card dim">' + (d.sites.length ? 'No sites match.' : 'No nginx sites on this host.') + '</div>';
@@ -136,7 +136,12 @@ function siteCtlHtml(domain, app, user, kind){
     + a('start', '▶', 'Start ' + what + ' (resurrects a pm2 daemon that is down)')
     + a('restart', '⟳', 'Restart ' + what)
     + a('stop', '⏹', 'Stop ' + what, 'danger')
+    + (app ? '' : siteCfPurgeBtn(domain))
     + '</div>';
+}
+// ☁ on every site card / table row: purge this site's hostnames (apex + www) from Cloudflare's cache.
+function siteCfPurgeBtn(domain){
+  return '<button class="btn small" title="Purge Cloudflare cache for ' + esc(domain) + ' and www (whole-zone and per-URL purge: Cloudflare tab)" onclick="event.stopPropagation(); siteCfPurge(this, \'' + esc(domain) + '\', \'site\')">☁</button>';
 }
 async function siteCtl(btn, domain, action, app, user){
   if (action === 'stop' && btn && !btn._armed) { armConfirm(btn, 'stop?', () => { btn._armed = true; siteCtl(btn, domain, action, app, user); }); return; }
@@ -216,7 +221,7 @@ function siteTableHtml(list, byStatus){
       + '<td>' + pm2 + '</td>'
       + '<td class="mono">' + esc(s.disk || '?') + '</td>'
       + '<td>' + (s.managed_by === 'clp' ? '<span class="badge type">CloudPanel</span>' : '<span class="badge online">this panel</span>') + '</td>'
-      + '<td style="text-align:right;white-space:nowrap">' + (s.canControl ? siteCtlHtml(s.domain, null, null, 'row') : '') + '<a class="btn small" href="sites?d=' + esc(encodeURIComponent(s.domain)) + '&t=settings" onclick="event.stopPropagation(); event.preventDefault(); siteGo(\'' + esc(s.domain) + '\', \'settings\')">Open</a> <a class="btn small" href="https://' + esc(s.domain) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">↗</a></td></tr>';
+      + '<td style="text-align:right;white-space:nowrap">' + (s.canControl ? siteCtlHtml(s.domain, null, null, 'row') : siteCfPurgeBtn(s.domain) + ' ') + '<a class="btn small" href="sites?d=' + esc(encodeURIComponent(s.domain)) + '&t=settings" onclick="event.stopPropagation(); event.preventDefault(); siteGo(\'' + esc(s.domain) + '\', \'settings\')">Open</a> <a class="btn small" href="https://' + esc(s.domain) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">↗</a></td></tr>';
   }
   if (!rows.length) h += '<tr><td colspan="11" class="dim">No sites match.</td></tr>';
   return h + '</tbody></table></div>';
@@ -630,6 +635,7 @@ function siteTabCf(s){
       + rows(d.records, 'apex') + rows(d.www, 'www') + '</tbody></table>'
       + '<div class="site-actions"><button class="btn" onclick="siteCfPointHere(this, true)" title="Create or update the apex A record to this server, proxied">Point ' + esc(s.domain) + ' here (proxied)</button>'
       + '<button class="btn" onclick="siteCfPointHere(this, false)" title="Same, but DNS-only (grey cloud)">Point here (DNS only)</button></div>';
+    body += siteCfPurgeHtml(s, zone);
     if (!d.hasOwnToken) body += '<div class="site-cf-alt"><p class="dim">This site is using the account-wide token. If ' + esc(s.domain) + ' ever moves to another Cloudflare account, connect a token of its own here.</p>' + siteCfConnectForm(s, d) + '</div>';
     return siteCard('Cloudflare', body, d.hasOwnToken ? '<button class="btn small danger" onclick="siteCfDisconnect(this)">Disconnect</button>' : '');
   });
@@ -644,7 +650,8 @@ function siteCfHowTo(s, ip){
     + '<li><b>Permissions</b> — these two rows, nothing else:'
     + '<div class="site-cf-perms"><span>Zone</span><span>Zone</span><span>Read</span><span>Zone</span><span>DNS</span><span>Edit</span></div>'
     + 'Pick the row called plainly <b>DNS</b> ("Grants read access to DNS") — <i>Zone DNS Settings</i> is a different permission and never gives access to records. '
-    + 'It must be <b>Edit</b>, not Read: the buttons on this tab create the A record and flip the orange cloud.</li>'
+    + 'It must be <b>Edit</b>, not Read: the buttons on this tab create the A record and flip the orange cloud. '
+    + 'For the cache buttons add a third row, <b>Zone → Cache Purge → Purge</b>.</li>'
     + '<li><b>Zone Resources → Include → Specific zone → ' + esc(s.domain) + '</b>, or <i>Include → All zones</i> of that account if one token should cover several sites.</li>'
     + '<li><b>Client IP Address Filtering: leave it empty.</b> If your policy demands one, the only address to allow is this server, <span class="mono">' + esc(ip || 'its public IP') + '</span> — otherwise Cloudflare answers "not permitted from location" and nothing on this tab works.</li>'
     + '<li><b>TTL: leave the end date unset.</b> An expiring token silently stops DNS management on the day it lapses.</li>'
@@ -679,6 +686,35 @@ async function siteCfProxy(btn, id, proxied){
   try { await siteApi('POST', siteUrl('/cloudflare/records/' + encodeURIComponent(id) + '/proxy'), { proxied }); toast(proxied ? 'Proxy enabled' : 'Proxy disabled', 'success'); siteSubReload('cf'); }
   catch(e){ siteErr(e, 'Cloudflare'); }
   finally { if (btn) btn.disabled = false; }
+}
+// Cache purge. "This site" purges by hostname (apex + www) and touches nothing else in the zone;
+// "everything" purges the whole zone, so it names the other sites on that zone before it is armed.
+function siteCfPurgeHtml(s, zone){
+  const z = zone.name.toLowerCase();
+  const others = ((lastSites && lastSites.sites) || []).map(x => x.domain).filter(x => x !== s.domain && (x === z || x.endsWith('.' + z)));
+  return '<h3 style="margin:18px 0 6px">Cache</h3>'
+    + '<div class="site-actions">'
+    + '<button class="btn pri" onclick="siteCfPurge(this, \'' + esc(s.domain) + '\', \'site\')" title="Purge every cached file of ' + esc(s.domain) + ' and www.' + esc(s.domain) + ' — other hostnames in the zone are left alone">☁ Purge this site</button>'
+    + '<button class="btn danger" onclick="siteCfPurge(this, \'' + esc(s.domain) + '\', \'everything\')" title="Purge the whole zone ' + esc(zone.name) + (others.length ? ', including ' + esc(others.join(', ')) : '') + '">Purge everything in ' + esc(zone.name) + '</button>'
+    + '</div>'
+    + (others.length ? '<p class="dim" style="margin:4px 0 0">"Everything" also empties the cache of ' + others.map(esc).join(', ') + ' — they share the zone.</p>' : '')
+    + siteField('Purge specific URLs', '<textarea id="stCfUrls" rows="3" class="mono" placeholder="/css/app.css&#10;https://' + esc(s.domain) + '/index.html"></textarea>'
+      + '<div style="margin-top:6px"><button class="btn" onclick="siteCfPurge(this, \'' + esc(s.domain) + '\', \'urls\')">Purge these URLs</button></div>',
+      'One per line — a path or a full URL on ' + esc(s.domain) + ' / www. Needs the token permission <b>Zone → Cache Purge → Purge</b>.');
+}
+// Also called from the site list (card / table row), where siteView.domain is not set — hence the explicit domain.
+function siteCfPurge(btn, domain, mode){
+  const label = mode === 'everything' ? 'purge whole zone?' : mode === 'urls' ? 'purge URLs?' : 'purge cache?';
+  armConfirm(btn, label, async () => {
+    const body = { mode };
+    if (mode === 'urls') { const el = document.getElementById('stCfUrls'); body.urls = el ? el.value : ''; if (!body.urls.trim()) return toast('Enter at least one URL', 'warn'); }
+    if (btn) btn.disabled = true;
+    try { const r = await siteApi('POST', 'api/sites/' + encodeURIComponent(domain) + '/cloudflare/purge', body);
+      toast('Cloudflare cache purged · ' + r.what, 'success', { duration: 8000 });
+      if (mode === 'urls') { const el = document.getElementById('stCfUrls'); if (el) el.value = ''; } }
+    catch(e){ siteErr(e, 'Purge ' + domain); }
+    finally { if (btn) btn.disabled = false; }
+  });
 }
 function siteCfPointHere(btn, proxied){
   armConfirm(btn, 'change DNS?', async () => {
