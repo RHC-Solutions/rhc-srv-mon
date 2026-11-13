@@ -31,7 +31,7 @@ function siteGo(domain, tab, opts){
 async function siteApi(method, url, body){
   const r = await fetch(url, { method, headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}, body: body !== undefined ? JSON.stringify(body) : undefined });
   let j = null; try { j = await r.json(); } catch(e){}
-  if (!r.ok) { const e = new Error((j && j.error) || ('HTTP ' + r.status)); e.detail = j && j.detail; e.status = r.status; throw e; }
+  if (!r.ok) { const e = new Error((j && j.error) || ('HTTP ' + r.status)); e.detail = j && j.detail; e.code = j && j.code; e.status = r.status; throw e; }
   return j;
 }
 function siteErr(e, what){ toast((what ? what + ': ' : '') + e.message, 'error', e.detail ? { detail: e.detail, duration: 12000 } : { duration: 8000 }); }
@@ -241,6 +241,7 @@ function siteNewDialog(){
     + '<div class="row2">' + siteField('Template', '<select id="nsTpl"></select>', 'sets the document root subdirectory and the default PHP version')
     + siteField('Site user *', '<input id="nsUser" autocomplete="off">', '<span id="nsUserHint" class="dim">owns /home/&lt;user&gt;; php-fpm runs as this account</span>') + '</div>'
     + '<div class="row2" id="nsTypeFields"></div>'
+    + siteField('GitHub repo', '<input id="nsRepo" placeholder="owner/name or https://github.com/owner/name" autocomplete="off">', 'empty → a new private repo &lt;default owner&gt;/&lt;domain&gt; is created · an existing repo with code → the site gets that code (dependencies installed, app restarted) · a repo that does not exist yet is created')
     + siteField('Site user password', '<input id="nsPw" placeholder="leave empty to generate one" autocomplete="off">', 'shown once after creation and stored encrypted')
     + '<label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsSelfSigned" checked> no store certificate covers it → install a self-signed one so https answers immediately</label>'
     + '<div id="nsCert" class="dim" style="font-size:13.5px;margin:6px 0 2px">Certificate: the central store is checked once the domain is typed.</div>'
@@ -296,6 +297,7 @@ async function siteNewGo(btn){
     sqlite: !!(document.getElementById('nsSqlite') || {}).checked,
     claude: !!(document.getElementById('nsClaude') || {}).checked };
   if (v('nsPw')) body.password = v('nsPw');
+  if (v('nsRepo')) body.repo = v('nsRepo');
   if (body.type === 'nodejs' && v('nsPort')) body.port = Number(v('nsPort'));
   if (body.type === 'reverse-proxy') body.reverse_proxy_url = v('nsProxy');
   if (!body.domain) return toast('Enter a domain', 'warn');
@@ -1455,8 +1457,8 @@ async function siteOvSave(group){
 /* ---- GitHub: own private repo, auto commit & push to main, Update = pull + restart ---- */
 function siteTabGithub(s){
   return siteSub('github', siteUrl('/github'), (g) => {
-    if (!g.connected) return siteCard('GitHub', '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Not connected. Connecting creates a private repo <b>RHC-Solutions/' + esc(s.domain) + '</b> (or uses the org repo this code was cloned from), gives the site a deploy key that can only reach that repo, and pushes the code to <b>main</b>. Data folders, databases, keys and .env files are never committed.</p>'
-      + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="siteGhRepo()">Use another repo…</button><button class="btn pri" onclick="siteGhAct(\'connect\', this)">Connect to ' + esc(g.defaultOwner) + '/' + esc(s.domain) + '</button></div>');
+    if (!g.connected) return siteCard('GitHub', '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Not connected. Connecting creates a private repo <b>' + esc(g.defaultOwner) + '/' + esc(s.domain) + '</b> (or uses the repo this code was cloned from), gives the site a deploy key that can only reach that repo, and pushes the code to <b>main</b>. Data folders, databases, keys and .env files are never committed.</p>'
+      + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="siteGhRepo()">Use another repo…</button><button class="btn pri" onclick="this.disabled=true;siteGhConnect({})">Connect to ' + esc(g.defaultOwner) + '/' + esc(s.domain) + '</button></div>');
     const l = g.last;
     const when = (t) => t ? esc(new Date(t).toLocaleString()) : '–';
     let h = '<p style="margin:0 0 6px"><a href="' + esc(g.url) + '" target="_blank" rel="noopener"><b>' + esc(g.repo) + '</b> ↗</a>' + (g.manual ? ' <span class="dim">(set by hand)</span>' : ' <span class="dim">(default owner)</span>') + ' · branch <span class="mono">' + esc(g.branch) + '</span>'
@@ -1464,7 +1466,7 @@ function siteTabGithub(s){
       + '<div class="upd-toggle"><label class="switch"><input type="checkbox"' + (g.autoSync ? ' checked' : '') + ' onchange="siteGhAuto(this.checked)"><span class="slider"></span></label><label>Auto-sync: commit &amp; push changes made on the server every 15 min</label></div>'
       + '<div class="' + (l && !l.ok ? 'site-why' : 'dim') + '" style="font-size:14px;margin:6px 0">Last sync ' + (l ? when(l.at) + ': ' + esc(l.summary) : 'not yet') + (g.dirty ? ' · <b>' + g.dirty + ' uncommitted change(s)</b> on the server' : '') + '</div>';
     if (g.commits && g.commits.length) h += '<table class="upd-table"><tr><th>Commit</th><th>Message</th><th>By</th><th>When</th></tr>' + g.commits.map(c => '<tr><td class="mono"><a href="' + esc(g.url) + '/commit/' + esc(c.hash) + '" target="_blank" rel="noopener">' + esc(c.hash) + '</a></td><td>' + esc(c.subject) + '</td><td class="dim">' + esc(c.author) + '</td><td class="dim" style="white-space:nowrap">' + when(c.date) + '</td></tr>').join('') + '</table>';
-    h += '<div class="site-actions" style="justify-content:space-between"><span><button class="btn" onclick="siteGhAct(\'sync\', this)">Commit &amp; push now</button> <button class="btn" onclick="siteGhRepo()">Move to another repo…</button></span>'
+    h += '<div class="site-actions" style="justify-content:space-between"><span><button class="btn" onclick="siteGhAct(\'sync\', this)">Commit &amp; push now</button> <button class="btn" onclick="siteGhRepo()">Move to another repo…</button> <button class="btn danger" onclick="armConfirm(this, \'Stop syncing? Click again\', () => siteGhDisconnect(this))">Disconnect</button></span>'
       + '<button class="btn pri" onclick="armConfirm(this, \'Pull main and restart?\', () => siteGhAct(\'update\', this))">Update from GitHub</button></div>'
       + '<p class="dim" style="font-size:13.5px;margin:8px 0 0">Update commits local changes first, pulls <b>main</b> (rebase), installs requirements.txt / package.json dependencies if they changed, and restarts the site\'s apps. Commits made on GitHub are never pulled automatically.</p>';
     return siteCard('GitHub', h);
@@ -1481,10 +1483,44 @@ async function siteGhAct(what, btn){
   siteSubReload('github');
 }
 async function siteGhRepo(){
-  const repo = await askModal({ title: 'GitHub repository for this site', label: 'owner/name — created (private) if it does not exist; the site moves there and its deploy key leaves the old repo', placeholder: 'roman-synergybeam/' + siteView.domain, ok: 'Use this repo' });
-  if (!repo) return;
-  toast('Moving to ' + repo + '…');
-  try { const r = await siteApi('POST', siteUrl('/github/connect'), { repo: repo.trim() }); toast('Now syncing to ' + r.repo, 'success', { detail: (r.steps || []).join('\n'), duration: 12000 }); }
+  const repo = await askModal({ title: 'GitHub repository for this site', label: 'owner/name or a github.com URL — created (private) if it does not exist; the site moves there and its deploy key leaves the old repo', placeholder: 'roman-synergybeam/' + siteView.domain, ok: 'Use this repo' });
+  if (!repo || !repo.trim()) return;
+  await siteGhConnect({ repo: repo.trim() });
+}
+// Connect (or move) — when the repo already holds other code, ask which code wins and try again.
+async function siteGhConnect(body){
+  toast(body.repo ? 'Connecting to ' + body.repo + '…' : 'Connecting to GitHub…');
+  try {
+    const r = await siteApi('POST', siteUrl('/github/connect'), body);
+    toast('Now syncing to ' + r.repo, 'success', { detail: (r.steps || []).join('\n'), duration: 12000 });
+  } catch(e){
+    if (e.code === 'repo-has-code' && !body.mode) {
+      const mode = await siteGhChoose(body.repo || 'that repo', e.detail);
+      if (mode) return siteGhConnect(Object.assign({}, body, { mode }));
+    } else siteErr(e, 'GitHub');
+  }
+  siteSubReload('github');
+}
+function siteGhChoose(repo, detail){
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; document.removeEventListener('keydown', onKey); sshModalClose(); resolve(v); };
+    const onKey = (e) => { if (e.key === 'Escape') finish(null); };
+    const bg = sshModal('<h3>' + esc(repo) + ' already has code</h3>'
+      + '<p class="dim" style="font-size:14px;margin:0 0 10px">' + esc(detail || '') + '</p>'
+      + '<p style="font-size:14px;margin:0 0 6px"><b>Use the repo\'s code</b> — the site\'s files are replaced by the repo (ignored data such as .env, data/ and uploads stays), dependencies are installed and the apps restart. The current code is kept on a local <span class="mono">rhc-before-…</span> branch.</p>'
+      + '<p style="font-size:14px;margin:0 0 6px"><b>Keep the server\'s code</b> — it is committed on top of the repo\'s history and pushed. Nothing on GitHub is rewritten; the repo\'s files are replaced by the server\'s in that new commit.</p>'
+      + '<div class="foot"><button class="btn" id="ghNo">Cancel</button><button class="btn" id="ghSrv">Keep the server\'s code</button><button class="btn pri" id="ghRepo">Use the repo\'s code</button></div>');
+    bg.querySelector('#ghNo').onclick = () => finish(null);
+    bg.querySelector('#ghSrv').onclick = () => finish('server');
+    bg.querySelector('#ghRepo').onclick = () => finish('repo');
+    bg.addEventListener('mousedown', (e) => { if (e.target === bg) finish(null); });
+    document.addEventListener('keydown', onKey);
+  });
+}
+async function siteGhDisconnect(btn){
+  if (btn) btn.disabled = true;
+  try { const r = await siteApi('POST', siteUrl('/github/disconnect'), {}); toast('Disconnected from GitHub', 'success', { detail: (r.steps || []).join('\n'), duration: 10000 }); }
   catch(e){ siteErr(e, 'GitHub'); }
   siteSubReload('github');
 }
