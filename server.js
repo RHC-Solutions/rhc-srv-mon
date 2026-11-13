@@ -73,7 +73,7 @@ const server = http.createServer((req, res) => {
   if (url === '/api/updates') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     const updatesCache = updates.getCache();
-    return res.end(JSON.stringify(Object.assign({}, updatesCache || { components: [], lastChecked: null, schedule: { enabled: false }, telegram: { enabled: false }, log: [] }, { allUsersRun })));
+    return res.end(JSON.stringify(Object.assign({}, updatesCache || { components: [], lastChecked: null, schedule: { enabled: false }, telegram: { enabled: false }, log: [] }, { allUsersRun, live: updates.getLive() })));
   }
   if (url === '/api/updates/check' && req.method === 'POST') {
     updates.collectUpdates().then((data) => {
@@ -89,11 +89,10 @@ const server = http.createServer((req, res) => {
     const updatesCache = updates.getCache();
     const outdated = (updatesCache ? updatesCache.components : []).filter(c => c.updateAvailable && !c.git);   // the panel restarts itself: its own click
     const actor = actorOf(req);
-    Promise.all(outdated.map(c => updates.runUpdate(c.key, actor))).then((results) => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(results));
-    });
-    return;
+    // In the background: progress is in GET api/updates (live); waiting here outlived proxy timeouts.
+    Promise.all(outdated.map(c => updates.runUpdate(c.key, actor))).catch((e) => console.error('update all failed:', e.message));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ started: true, count: outdated.length }));
   }
   if (url === '/api/updates/run-all-users' && req.method === 'POST') {
     const updatesCache = updates.getCache();
@@ -145,10 +144,15 @@ const server = http.createServer((req, res) => {
     const promise = parts.length >= 2 && parts[1]
       ? updates.runUserUpdate(parts[0], parts[1], actorOf(req))
       : updates.runUpdate(parts[0], actorOf(req));
-    promise.then((result) => {
+    // A quick answer (refused, unknown, already running) comes back as before; anything still running
+    // after 1.5 s continues in the background and the page follows it through GET api/updates (live).
+    // The panel's own update keeps the blocking call: its progress window waits for the result.
+    const detach = parts[0] !== 'panel';
+    Promise.race([promise, detach ? new Promise((r) => setTimeout(() => r({ started: true }), 1500)) : promise]).then((result) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result));
     });
+    promise.catch((e) => console.error('update failed:', e.message));
     return;
   }
   if (url === '/api/updates/config' && req.method === 'POST') {

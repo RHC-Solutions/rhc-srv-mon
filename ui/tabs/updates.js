@@ -13,6 +13,7 @@ function renderUpdates(){
   else setStatus([{ level:'warn', icon:'🔄', text: avail + ' update' + (avail>1?'s':'') + ' available', sub: d.components.filter(c => !c.updateAvailable).length + '/' + d.components.length + ' up to date' }]);
 
   let html = '<div class="upd-grid">';
+  html += '<div id="updLive" style="grid-column:1/-1;display:none"></div>';
 
   // Left column: components table
   html += '<div class="upd-card" style="grid-column:1/-1">';
@@ -29,7 +30,7 @@ function renderUpdates(){
   html += '<table class="upd-table"><tr><th>Component</th><th>Current</th><th>Latest</th><th>Status</th><th></th></tr>';
   for (const c of d.components) {
     const hasUpdate = c.updateAvailable;
-    const isRunning = c.updating;
+    const isRunning = c.updating || (d.live || []).some(j => !j.finishedAt && !j.user && j.key === c.key);
     const statusBadge = !c.currentVersion ? '<span class="upd-badge na">not installed</span>'
       : isRunning ? '<span class="upd-badge" style="background:var(--md-warn-container);color:var(--md-warning)">updating…</span>'
       : c.git && c.error ? '<span class="upd-badge na" title="' + esc(c.error) + '">cannot check</span>'
@@ -184,6 +185,8 @@ function renderUpdates(){
 
   html += '</div>';
   document.getElementById('updatesview').innerHTML = html;
+  renderUpdLive();
+  updLivePoll();
   // Uninstalling is destructive and has no undo, so it goes through the same two-step
   // arm/confirm the rest of the panel uses instead of a browser dialog.
   document.querySelectorAll('.upd-remove').forEach(b => b.addEventListener('click', () => {
@@ -323,6 +326,58 @@ async function checkUpdatesNow(btn){
   updChecking = false;
   if (state.tab === 'updates') renderUpdates();
 }
+// ---- live progress: every update in flight (and those finished in the last 10 min) with its output
+// as it happens. Only this card is redrawn while polling, so the rest of the page stays put.
+const updLiveHidden = new Set();
+function renderUpdLive(){
+  const el = document.getElementById('updLive'); if (!el || !lastUpdates) return;
+  const jobs = (lastUpdates.live || []).filter(j => !updLiveHidden.has(j.id))
+    .sort((a, b) => (!a.finishedAt) - (!b.finishedAt) || Date.parse(a.startedAt) - Date.parse(b.startedAt)).reverse();
+  if (!jobs.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  // keep each log's scroll position; one that was at the bottom follows new lines
+  const keep = {};
+  el.querySelectorAll('pre[data-id]').forEach(p => { keep[p.dataset.id] = { top: p.scrollTop, bottom: p.scrollHeight - p.scrollTop - p.clientHeight < 24 }; });
+  const running = jobs.filter(j => !j.finishedAt).length;
+  let h = '<div class="upd-card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><h3 style="margin:0">'
+    + (running ? '⏳ Running now <span style="font-weight:400;font-size:14px;color:var(--md-on-surface-dis)">' + running + ' update' + (running > 1 ? 's' : '') + '</span>' : 'Recent updates') + '</h3>'
+    + (jobs.some(j => j.finishedAt) ? '<button class="btn" style="font-size:12.5px;padding:3px 10px" onclick="updLiveClear()">Hide finished</button>' : '') + '</div>';
+  for (const j of jobs) {
+    const icon = !j.finishedAt ? '⏳' : j.success ? '✅' : '❌';
+    const secs = j.finishedAt ? Math.round((Date.parse(j.finishedAt) - Date.parse(j.startedAt)) / 1000) : null;
+    h += '<div style="margin:8px 0 12px"><div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:4px">'
+      + '<b>' + icon + ' ' + esc(j.label) + '</b>' + (j.user ? '<span class="dim">for ' + esc(j.user) + '</span>' : '<span class="dim">system-wide</span>')
+      + '<span class="dim mono" style="font-size:13px">' + (j.finishedAt ? (j.success ? 'done' : 'failed') + ' in ' + Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0')
+        : 'running <span class="ag-since" data-since="' + esc(j.startedAt) + '">' + agElapsed(j.startedAt) + '</span>') + '</span>'
+      + '<span class="dim" style="font-size:12.5px;margin-left:auto">started ' + esc(new Date(j.startedAt).toLocaleTimeString()) + '</span></div>'
+      + '<pre data-id="' + esc(j.id) + '" class="mono" style="margin:0;max-height:' + (j.finishedAt ? '140' : '280') + 'px;overflow:auto;font-size:12.5px;line-height:1.45;padding:8px 10px;border-radius:6px;background:var(--md-surface-container-high, rgba(127,127,127,.12));white-space:pre-wrap;word-break:break-word">'
+      + (j.lines.length ? esc(j.lines.slice(-250).join('\n')) : '<span class="dim">waiting for output…</span>') + '</pre></div>';
+  }
+  el.innerHTML = h + '</div>';
+  el.style.display = '';
+  el.querySelectorAll('pre[data-id]').forEach(p => { const k = keep[p.dataset.id]; p.scrollTop = !k || k.bottom ? p.scrollHeight : k.top; });
+}
+function updLiveClear(){ (lastUpdates.live || []).filter(j => j.finishedAt).forEach(j => updLiveHidden.add(j.id)); renderUpdLive(); }
+// Poll fast while anything runs; when the last job finishes, redraw the whole page once (new versions).
+let updLiveTimer = null, updLiveWasRunning = false;
+function updLivePoll(){
+  const running = !!(lastUpdates && (lastUpdates.live || []).some(j => !j.finishedAt));
+  if (!running || updLiveTimer) return;
+  updLiveWasRunning = true;
+  updLiveTimer = setTimeout(async () => {
+    updLiveTimer = null;
+    try { const r = await fetch('api/updates', { cache: 'no-store' }); if (r.ok) lastUpdates = await r.json(); } catch(_){}
+    const still = (lastUpdates.live || []).some(j => !j.finishedAt);
+    if (state.tab !== 'updates') { if (still) updLivePoll(); return; }
+    if (still) { renderUpdLive(); updLivePoll(); }
+    else if (updLiveWasRunning) { updLiveWasRunning = false; renderUpdates(); }
+  }, 1500);
+}
+// After starting an update: fetch once so its job (and output) shows at once, then follow it.
+async function updLiveFollow(){
+  try { const r = await fetch('api/updates', { cache: 'no-store' }); if (r.ok) lastUpdates = await r.json(); } catch(_){}
+  if (state.tab === 'updates') renderUpdates(); else updLivePoll();
+}
+
 async function checkUpdates(){
   try {
     const res = await fetch('api/updates/check', { method: 'POST' });
@@ -340,12 +395,10 @@ async function triggerUpdate(key){
   }
   try {
     const res = await fetch('api/updates/run/' + key, { method: 'POST' });
-    const result = await res.json();
-    // Refresh updates data
-    const res2 = await fetch('api/updates');
-    lastUpdates = await res2.json();
-    if (state.tab === 'updates') renderUpdates();
+    const result = await res.json().catch(() => ({}));
+    if (result && result.error) toast(result.error, 'warn');
   } catch(_){}
+  updLiveFollow();
 }
 
 // The panel pulls its new code and restarts itself, so this page goes away for a few seconds: wait for
@@ -420,12 +473,10 @@ async function triggerPanelUpdate(){
 async function triggerUserUpdate(user, key){
   try {
     const res = await fetch('api/updates/run/' + user + '/' + key, { method: 'POST' });
-    const result = await res.json();
-    // Refresh updates data
-    const res2 = await fetch('api/updates');
-    lastUpdates = await res2.json();
-    if (state.tab === 'updates') renderUpdates();
+    const result = await res.json().catch(() => ({}));
+    if (result && result.error) toast(result.error, 'warn');
   } catch(_){}
+  updLiveFollow();
 }
 
 // Uninstall a component: npm rm -g, system-wide or for one user's own npm prefix.
@@ -446,10 +497,8 @@ async function triggerRemove(key, user, label){
 async function triggerUpdateAll(){
   try {
     await fetch('api/updates/run-all', { method: 'POST' });
-    const res = await fetch('api/updates');
-    lastUpdates = await res.json();
-    if (state.tab === 'updates') renderUpdates();
   } catch(_){}
+  updLiveFollow();
 }
 
 // Confirmed by arming the button that calls this (see renderUpdates) rather than by a browser dialog.
