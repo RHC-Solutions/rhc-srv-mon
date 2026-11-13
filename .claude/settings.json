@@ -46,7 +46,9 @@
       "Bash(dig +short www.omega-cloud.com)",
       "Bash(dig +short NS omega-cloud.com)",
       "Bash(curl -sSIL -m 15 https://omega-cloud.com)",
-      "Bash(curl -sSI -m 15 http://omega-cloud.com)"
+      "Bash(curl -sSI -m 15 http://omega-cloud.com)",
+      "Bash(which sqlite3; ls -d /home/uptimekuma/htdocs/kuma.it-saas.com/data 2>&1)",
+      "Read(//home/uptimekuma/htdocs/kuma.it-saas.com/**)"
     ],
     "deny": [
       "Bash(rm -rf /*)",
