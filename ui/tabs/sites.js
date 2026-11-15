@@ -4,7 +4,7 @@ const badgeCls = (x) => (x && x.movedTo ? 'moved' : (x && x.status) || 'unknown'
 // List (cards with health) → detail with CloudPanel-style sub-tabs. Sub-navigation lives in the
 // query string (sites?d=<domain>&t=<tab>) so every relative api/ URL keeps working behind nginx.
 let lastSites = null;
-const SITE_TABS = [['settings', 'Settings'], ['overrides', 'Overrides'], ['github', 'GitHub'], ['procs', 'Processes'], ['vhost', 'Vhost'], ['databases', 'Databases'], ['ssl', 'SSL/TLS'], ['cloudflare', 'Cloudflare'], ['rules', 'Domains & Rules'], ['security', 'Security'], ['ssh', 'SSH/FTP'], ['files', 'File Manager'], ['cron', 'Cron Jobs'], ['logs', 'Logs']];
+const SITE_TABS = [['settings', 'Settings'], ['overrides', 'Overrides'], ['github', 'GitHub'], ['procs', 'Processes'], ['vhost', 'Vhost'], ['databases', 'Databases'], ['backups', 'Backups'], ['ssl', 'SSL/TLS'], ['cloudflare', 'Cloudflare'], ['rules', 'Domains & Rules'], ['security', 'Security'], ['ssh', 'SSH/FTP'], ['files', 'File Manager'], ['cron', 'Cron Jobs'], ['logs', 'Logs']];
 let siteView = { domain: null, tab: 'settings', data: null, loading: false, sub: {} };   // sub: per-tab fetched data
 // Not kept across visits: Chrome autofills the saved sign-in name into this box, and keeping it
 // turned that into a filter that hid every site ("No sites match.") on every visit.
@@ -417,7 +417,7 @@ function renderSiteDetail(){
   // do not clobber a form the user is typing in (10 s refresh)
   if (view.contains(document.activeElement) && ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;
   const s = siteView.data;
-  const body = ({ settings: siteTabSettings, overrides: siteTabOverrides, github: siteTabGithub, procs: siteTabProcs, vhost: siteTabVhost, databases: siteTabDatabases, ssl: siteTabSsl, cloudflare: siteTabCf, rules: siteTabRules, security: siteTabSecurity, ssh: siteTabSsh, files: siteTabFiles, cron: siteTabCron, logs: siteTabLogs }[siteView.tab] || siteTabSettings)(s);
+  const body = ({ settings: siteTabSettings, overrides: siteTabOverrides, github: siteTabGithub, procs: siteTabProcs, vhost: siteTabVhost, databases: siteTabDatabases, backups: siteTabBackups, ssl: siteTabSsl, cloudflare: siteTabCf, rules: siteTabRules, security: siteTabSecurity, ssh: siteTabSsh, files: siteTabFiles, cron: siteTabCron, logs: siteTabLogs }[siteView.tab] || siteTabSettings)(s);
   view.innerHTML = siteHeader(s) + '<div class="site-body">' + body + '</div>';
   if (typeof siteView.afterRender === 'function') { const f = siteView.afterRender; siteView.afterRender = null; f(); }
 }
@@ -1336,6 +1336,62 @@ async function siteFmEdit(p){
 }
 
 /* ---- Cron ---- */
+/* ---- Backups: back up this site now (files + databases), nightly inclusion, its runs, its archives ---- */
+let siteBkPoll = null, siteBkArch = null;
+const siteBkSize = (b) => { b = Number(b) || 0; return b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(0) + ' KB' : b < 1073741824 ? (b / 1048576).toFixed(1) + ' MB' : (b / 1073741824).toFixed(2) + ' GB'; };
+function siteTabBackups(s){
+  return siteSub('backups', 'api/backup/site/' + encodeURIComponent(s.domain), (b) => {
+    const mine = b.running && b.runningSite === s.domain;
+    if (b.running && !siteBkPoll) siteBkPoll = setInterval(() => { if (siteView.tab !== 'backups' || siteView.domain !== s.domain) { clearInterval(siteBkPoll); siteBkPoll = null; return; } siteSubReload('backups'); }, 3000);
+    if (!b.running && siteBkPoll) { clearInterval(siteBkPoll); siteBkPoll = null; siteBkArch = null; }
+    const dest = b.own ? 'this site\'s own Wasabi bucket <b>' + esc(b.ownBucket || '') + '</b> (Overrides tab) — and the shared one nightly' : b.sharedConfigured ? 'the shared Wasabi backup (Settings → Wasabi)' : '<span style="color:var(--md-error-bright)">nowhere yet — set up Wasabi in Settings, or the site\'s own bucket on the Overrides tab</span>';
+    const sch = b.schedule || {};
+    let h = '<p style="margin:0 0 10px;font-size:14.5px">Backups go to ' + dest + '.</p>';
+    h += '<div class="upd-toggle"><label class="switch"><input type="checkbox"' + (b.nightly ? ' checked' : '') + ' onchange="siteBkNightly(this.checked)"><span class="slider"></span></label><label>Include in the nightly backup' + (sch.enabled ? ' (' + String(sch.hour).padStart(2, '0') + ':' + String(sch.minute).padStart(2, '0') + ', ' + (sch.mode === 'diff' ? 'differential, full ' + (sch.fullEvery || 'weekly') : 'full') + ')' : ' — <span style="color:var(--md-warning)">the nightly backup is switched off (Backups page)</span>') + '</label></div>';
+    if (b.running) h += '<div style="margin:10px 0;font-size:14.5px">⏳ ' + (mine ? '<b>Backing up this site</b>' : 'Another backup is running' + (b.runningSite ? ' (' + esc(b.runningSite) + ')' : ' (the server backup)')) + (b.phase ? ' — ' + esc(b.phase) : '') + (b.runningSince ? ' <span class="dim">· ' + esc(modSince(b.runningSince)) + '</span>' : '') + '</div>';
+    h += '<div class="site-actions" style="flex-wrap:wrap;gap:8px;align-items:center"><button class="btn pri" ' + (b.running ? 'disabled' : '') + ' onclick="siteBkRun(\'full\', this)">💾 Back up now</button>'
+      + '<button class="btn" ' + (b.running ? 'disabled' : '') + ' onclick="siteBkRun(\'diff\', this)" title="only files changed since the last full nightly backup — databases are always complete">Differential</button>'
+      + '<label class="chip" style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="siteBkDbs" checked> include databases</label></div>';
+    h += '<p class="dim" style="font-size:13px;margin:6px 0 0">Files: the site folder without node_modules, .next, caches, vendor, .git and logs (all regenerable). Databases: a dump of each database on the Databases tab.</p>';
+    // runs
+    const runs = b.runs || [];
+    h += '<h3 style="margin:16px 0 6px;font-size:16px">Recent runs</h3>';
+    h += runs.length ? '<table class="upd-table"><tr><th>When</th><th>Kind</th><th>Size</th><th>Result</th></tr>' + runs.map(r => '<tr><td style="white-space:nowrap">' + esc(new Date(r.startedAt).toLocaleString()) + '</td><td>' + esc(r.site === s.domain ? 'this site' : r.site ? r.site : 'nightly') + (r.mode === 'diff' ? ' · diff' : '') + '</td><td>' + esc(siteBkSize(r.bytes)) + '</td><td>' + (r.success ? '✅' : '❌ <span style="font-size:13px">' + esc((r.errors || []).slice(0, 2).join('; ')) + '</span>') + '</td></tr>').join('') + '</table>' : '<div class="dim">No backup of this site yet.</div>';
+    // archives
+    h += '<div style="display:flex;align-items:center;justify-content:space-between;margin:16px 0 6px"><h3 style="margin:0;font-size:16px">Backups in the bucket</h3><button class="btn small" onclick="siteBkLoadArch(true)">↻</button></div><div id="siteBkArch">' + siteBkArchHtml(s) + '</div>';
+    if (!siteBkArch) setTimeout(() => siteBkLoadArch(false), 0);
+    return siteCard('Backups', h);
+  });
+}
+function siteBkArchHtml(s){
+  const a = siteBkArch;
+  if (!a) return '<div class="dim">Loading the list from Wasabi…</div>';
+  if (a.error) return '<div style="color:var(--md-error-bright)">' + esc(a.error) + '</div>';
+  if (!a.archives.length) return '<div class="dim">No backups of this site in the bucket yet.</div>';
+  const dl = (g, f) => 'api/backup/site/' + encodeURIComponent(siteView.domain) + '/download?target=' + g.target + '&stamp=' + encodeURIComponent(g.stamp) + '&file=' + encodeURIComponent(f.file);
+  return '<table class="upd-table"><tr><th>Backup</th><th>Where</th><th>Files</th><th style="text-align:right">Size</th></tr>'
+    + a.archives.slice(0, 40).map(g => g.error ? '<tr><td colspan="4" style="color:var(--md-error-bright)">' + esc(g.target) + ': ' + esc(g.error) + '</td></tr>'
+      : '<tr><td style="white-space:nowrap">' + esc(new Date(g.at).toLocaleString()) + '<div class="dim mono" style="font-size:12px">' + esc(g.stamp) + '</div></td><td>' + (g.target === 'own' ? 'own bucket' : 'shared') + '</td><td>'
+        + g.files.map(f => '<a href="' + dl(g, f) + '" title="download">⬇ ' + esc(f.file.replace(/^sites\//, '')) + '</a> <span class="dim" style="font-size:12.5px">' + esc(siteBkSize(f.size)) + '</span>').join('<br>') + '</td><td style="text-align:right">' + esc(siteBkSize(g.bytes)) + '</td></tr>').join('') + '</table>'
+    + '<p class="dim" style="font-size:13px;margin:6px 0 0">Files archive: <span class="mono">zstd -d -c FILE | tar -x</span> (a differential one goes on top of its full). Database: <span class="mono">gunzip -c FILE | mariadb DB</span> or <span class="mono">| psql DB</span>.</p>';
+}
+async function siteBkLoadArch(fresh){
+  const dom = siteView.domain;
+  const el = () => document.getElementById('siteBkArch');
+  if (fresh && el()) el().innerHTML = '<div class="dim">Loading the list from Wasabi…</div>';
+  try { siteBkArch = await siteApi('GET', 'api/backup/site/' + encodeURIComponent(dom) + '/archives' + (fresh ? '?fresh=1' : '')); } catch(e){ siteBkArch = { error: e.message }; }
+  if (siteView.domain === dom && el()) el().innerHTML = siteBkArchHtml();
+}
+async function siteBkRun(mode, btn){
+  if (btn) btn.disabled = true;
+  const dbs = document.getElementById('siteBkDbs'); const q = '?mode=' + mode + (dbs && !dbs.checked ? '&dbs=0' : '');
+  try { await siteApi('POST', 'api/backup/site/' + encodeURIComponent(siteView.domain) + q); toast('Backup started', 'success'); } catch(e){ siteErr(e, 'Backup'); }
+  setTimeout(() => siteSubReload('backups'), 600);
+}
+async function siteBkNightly(on){
+  try { await siteApi('PUT', 'api/backup/site/' + encodeURIComponent(siteView.domain) + '/nightly', { on }); toast(on ? 'Included in the nightly backup' : 'Left out of the nightly backup', 'success'); } catch(e){ siteErr(e, 'Backups'); }
+  siteSubReload('backups');
+}
 function siteTabCron(s){
   return siteSub('cron', siteUrl('/cron'), (v) => {
     const rows = v.jobs.map(j => '<tr><td class="mono">' + esc([j.minute, j.hour, j.day, j.month, j.weekday].join(' ')) + '</td><td class="mono" style="word-break:break-all">' + esc(j.command) + '</td><td style="text-align:right;white-space:nowrap"><button class="btn small" onclick="siteCronEdit(' + j.id + ')">Edit</button> <button class="btn small" onclick="armConfirm(this, \'⚠ Delete?\', () => siteCronDelete(' + j.id + '))">Delete</button></td></tr>').join('');
