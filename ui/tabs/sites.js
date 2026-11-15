@@ -826,7 +826,7 @@ function siteCcrcHtml(c){
   else if (!c.installed) st = '<span style="color:var(--md-warning)">Claude Code is not installed for ' + esc(c.user) + '.</span>';
   else if (!c.loggedIn) st = '<span style="color:var(--md-warning)">No account of this site is signed in to claude.ai yet (' + esc((c.accounts || []).map(a => a.user + (a.installed ? '' : ': Claude Code not installed')).join(', ')) + ') — Remote Control starts once one is.</span> <button class="btn small pri" onclick="siteCcrcLogin(this)" title="signs in the site user ' + esc(c.siteUser) + '">Sign in ' + esc(c.siteUser) + '…</button>';
   else if (c.running) st = '<span class="up">🟢 Running</span> as <b>' + esc(c.user) + '</b> (' + esc(c.email || '') + (c.org ? ' · ' + esc(c.org) : '') + ')' + (c.url ? ' — <a href="' + esc(c.url) + '" target="_blank" rel="noopener">open in claude.ai/code ↗</a>' : '');
-  else st = '<span style="color:var(--md-warning)">Starting… (' + esc(c.state) + ')</span>';
+  else st = '<span style="color:var(--md-warning)">Not running (' + esc(c.state) + ') as ' + esc(c.user) + '</span>' + ((c.log || []).length ? '<pre class="mono" style="font-size:12px;white-space:pre-wrap;margin:6px 0 0;max-height:180px;overflow:auto">' + esc(c.log.join('\n')) + '</pre>' : '');
   return siteCard('Claude Code Remote Control',
     '<p class="dim" style="margin:0 0 8px;font-size:14px">Claude Code runs here as <b>' + esc(c.user) + '</b> in <span class="mono">' + esc(c.folder) + '</span>, named after the site — pick it in claude.ai/code or the Claude app and work on the site from anywhere. Restarted automatically if it stops.</p>'
     + '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px"><label>Remote Control</label>' + sel + '</div>'
