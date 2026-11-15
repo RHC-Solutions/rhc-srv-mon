@@ -444,8 +444,27 @@ const siteCard = (title, inner, right) => '<div class="upd-card"><div class="sit
 // PM2 apps of this site. A site's apps often run under one of its SSH users, and when that user's
 // pm2 daemon is down the apps are only visible in its dump.pm2 — which is exactly when this page
 // matters, so daemons are listed separately from processes.
+async function sitePortOwnerLoad(domain){
+  const el = () => document.getElementById('sitePortOwner');
+  try {
+    const o = await siteApi('GET', 'api/sites/' + encodeURIComponent(domain) + '/port-owner');
+    if (!el()) return;
+    el().className = '';
+    el().innerHTML = o.pid ? '<div style="padding:8px 12px;border-radius:8px;background:color-mix(in srgb, var(--md-warning) 14%, transparent)"><b>Port ' + o.port + ' is held outside pm2</b> — PID <span class="mono">' + o.pid + '</span>, user <b>' + esc(o.user) + '</b><div class="mono" style="font-size:12.5px;margin:4px 0;word-break:break-all">' + esc(o.command) + '</div>'
+      + '<div class="dim" style="font-size:13px">' + (o.cwd ? 'in ' + esc(o.cwd) + ' · ' : '') + (o.started ? 'since ' + esc(o.started) + ' · ' : '') + 'started by ' + esc(o.origin) + '</div>'
+      + '<div style="margin-top:8px"><button class="btn small update" onclick="armConfirm(this, \'Stop PID ' + o.pid + ' and start pm2?\', () => sitePortTakeover(this))" title="stops that process (only if it runs as this site\'s user or one of its SSH users), starts the site\'s pm2 apps and checks they stay up">Hand the port back to pm2</button></div></div>'
+      : 'Nothing is listening on port ' + o.port + ' any more — re-check.';
+  } catch(e){ if (el()) el().textContent = 'Could not look up the process: ' + e.message; }
+}
+async function sitePortTakeover(btn){
+  if (btn) btn.disabled = true;
+  try { const r = await siteApi('POST', siteUrl('/port-takeover'), {}); toast(r.ok ? 'pm2 runs the site again' : 'Stopped the process, but the pm2 apps did not stay up' + (r.crash ? ': ' + r.crash : ''), r.ok ? 'success' : 'error', { duration: 12000 }); }
+  catch(e){ siteErr(e, 'Take over port'); }
+  siteRecheck();
+}
 function siteTabProcs(s){
   const h = s.health || {};
+  if (h.outsidePm2) setTimeout(() => sitePortOwnerLoad(s.domain), 0);
   let head = '';
   if (h.status) {
     const bits = [];
@@ -455,6 +474,7 @@ function siteTabProcs(s){
     else if (h.appError) bits.push('the app did not answer on its own port <span class="dim">(' + esc(h.appError) + ')</span>');
     head = siteCard('Health', '<div class="site-health"><span class="badge ' + badgeCls(h) + '">' + esc(h.statusLabel) + '</span>'
       + (h.statusReason ? '<div class="site-why">' + esc(h.statusReason) + '</div>' : '')
+      + (h.outsidePm2 ? '<div id="sitePortOwner" style="margin:8px 0;font-size:14px" class="dim">Looking up the process on port ' + h.outsidePm2 + '…</div>' : '')
       + '<ul class="site-probe">' + bits.map(b => '<li>' + b + '</li>').join('') + '</ul></div>',
       '<button class="btn small" onclick="siteRecheck(this)">Re-check now</button>');
   }
