@@ -1491,10 +1491,22 @@ async function siteGhAct(what, btn){
   } catch(e){ siteErr(e, 'GitHub'); }
   siteSubReload('github');
 }
+// Same rules as parseRepo in lib/sites/github.js: owner/name from a link, an SSH address or owner/name.
+function siteGhParseRepo(input){
+  let v = String(input || '').trim().replace(/^<|>$/g, '');
+  v = v.replace(/^git\+/, '').replace(/^(?:https?|ssh|git):\/\//i, '').replace(/^[^@\/]+@(?=github\.com[:\/])/i, '');
+  v = v.replace(/^(?:www\.)?github\.com[:\/]/i, '').split(/[?#]/)[0];
+  const parts = v.split('/').filter(Boolean);
+  if (parts.length < 2) return null;
+  const repo = parts[0] + '/' + parts[1].replace(/\.git$/i, '');
+  return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/.test(repo) ? repo : null;
+}
 async function siteGhRepo(){
   const repo = await askModal({ title: 'Connect to an existing GitHub repo', label: 'Repository — owner/name or its github.com URL', hint: 'If the repo has code, you choose next: the site runs the repo\'s code, or the server\'s code is added on top. A repo that does not exist yet is created (private).', placeholder: 'owner/repo or https://github.com/owner/repo', ok: 'Connect' });
   if (!repo || !repo.trim()) return;
-  await siteGhConnect({ repo: repo.trim() });
+  const r = siteGhParseRepo(repo);   // checked before the sign-in, so a typo does not cost one
+  if (!r) { toast('"' + repo.trim() + '" is not a GitHub repository — use owner/name or its github.com link', 'error', { duration: 9000 }); return; }
+  await siteGhConnect({ repo: r });
 }
 // Connect (or move) — when the repo already holds other code, ask which code wins and try again.
 // Every connection is approved in the browser first: Sign in with GitHub gives a one-time ticket
