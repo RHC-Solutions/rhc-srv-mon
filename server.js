@@ -519,6 +519,8 @@ if (NO_JOBS) {
   // pm2 daemons on a node binary an upgrade replaced: restart them onto the new one (one user at a time)
   setInterval(() => require('./lib/sites/hold').enforce().catch((e) => console.error('held-stopped check failed:', e.message)), 2 * 60_000);
   setInterval(() => require('./lib/sites/daemons').refreshStale().catch((e) => console.error('pm2 daemon refresh failed:', e.message)), 5 * 60_000);
+  // the panel's own repo sync: keep both GitHub remotes on the same main (lib/autocommit.js)
+  try { if (require('./lib/autocommit').ensure()) { console.log('rhc-autocommit: script updated'); require('./lib/util').execP('systemctl', ['daemon-reload'], { timeout: 30_000 }); } } catch (e) { console.error('rhc-autocommit install:', e.message); }
   // Node.js: install/refresh the daily newest-LTS updater (nodejs-update.timer, lib/nodejs.js)
   require('./lib/nodejs').ensureUpdater().catch((e) => console.error('nodejs updater:', e.message));
   // site SSH users: `sudo -u <site-user>` without a password (lib/sites/users.js writeSudoers)
