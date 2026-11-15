@@ -86,6 +86,8 @@ function renderSitesList(){
     html += '<span class="badge ' + badgeCls(s) + '">' + s.statusLabel + '</span></div>';
     html += '<div class="meta"><span>Port: <span class="val">' + (portInfo || 'n/a') + '</span></span><span>HTTP: <span class="val">' + healthIcon + '</span></span><span title="' + esc(rt.title) + '">' + rt.text + '</span><span>Disk: <span class="val">' + esc(s.disk || '?') + '</span></span></div>';
     if (s.statusReason) html += '<div class="site-why">' + esc(s.statusReason) + '</div>';
+    { const sec = (d.security || {})[s.domain.toLowerCase()]; const c = sec && sec.counts;   // Dependabot (GitHub tab)
+      if ((c && c.total) || (sec && sec.prs)) html += '<div style="font-size:13.5px;margin:4px 0"><a href="#" onclick="event.preventDefault();event.stopPropagation();siteGo(\'' + esc(s.domain) + '\', \'github\')" style="color:' + (c && (c.critical || c.high) ? 'var(--md-error-bright)' : 'var(--md-warning)') + '">🛡 ' + (c && c.total ? c.total + ' security alert' + (c.total > 1 ? 's' : '') + (c.critical || c.high ? ' (' + (c.critical + c.high) + ' critical/high)' : '') : '') + (c && c.total && sec.prs ? ' · ' : '') + (sec.prs ? sec.prs + ' Dependabot PR' + (sec.prs > 1 ? 's' : '') : '') + '</a></div>'; }
     if (s.pm2 && s.pm2.length) {
       html += '<div class="procs">';
       for (const p of s.pm2) { const pUp = p.status === 'online'; html += '<div class="prow"><span class="pname">' + esc(p.name) + '</span><span class="pstat ' + (pUp?'up':'down') + '">' + (pUp?'🟢':'🔴') + ' ' + esc(p.status) + ' <span class="dim">CPU ' + p.cpu + '% · ' + fmtMem(p.memory) + '</span></span></div>'; }
@@ -1474,6 +1476,8 @@ function siteTabGithub(s){
     h += '<div class="site-actions" style="justify-content:space-between"><span><button class="btn pri" onclick="siteGhAct(\'sync\', this)">⇅ Sync now (pull &amp; push)</button> <button class="btn" onclick="siteGhRepo()">Connect to an existing repo…</button> <button class="btn danger" onclick="armConfirm(this, \'Stop syncing? Click again\', () => siteGhDisconnect(this))">Disconnect</button></span>'
       + '<span><button class="btn" onclick="armConfirm(this, \'Install, build and restart?\', () => siteGhAct(\'rebuild\', this))" title="install dependencies, npm run build, start the app from ecosystem.config.js — from the code already on the server">🔧 Rebuild &amp; restart</button> <button class="btn" onclick="armConfirm(this, \'Pull, build and restart?\', () => siteGhAct(\'update\', this))">⬇ Pull from GitHub</button></span></div>'
       + '<p class="dim" style="font-size:13.5px;margin:8px 0 0">Sync and Pull commit local changes first, pull the branch (rebase), install dependencies when package.json / requirements.txt changed, run <span class="mono">npm run build</span> when the app has a build script, and restart the site\'s apps — a failed install or build leaves the running app alone.</p>' + siteGhAccountsHtml(g);
+    h += '<div id="ghSec" style="margin-top:16px;border-top:1px solid var(--md-outline-variant, rgba(127,127,127,.25));padding-top:12px"><h3 style="margin:0 0 8px;font-size:16px">🛡 Security alerts &amp; Dependabot</h3><div class="dim">Loading from GitHub…</div></div>';
+    setTimeout(() => siteGhSecLoad(s.domain), 0);
     return siteCard('GitHub', h);
   });
 }
@@ -1642,6 +1646,51 @@ async function siteGhLogin(opts){
     return v;
   }
   return null;
+}
+// ---- Security alerts & Dependabot pull requests (GitHub tab)
+let ghSecData = null;
+async function siteGhSecLoad(domain){
+  const el = () => document.getElementById('ghSec');
+  try { ghSecData = await siteApi('GET', 'api/sites/' + encodeURIComponent(domain) + '/github/security'); } catch(e){ ghSecData = { fatal: e.message }; }
+  if (siteView.domain !== domain || !el()) return;
+  el().innerHTML = siteGhSecHtml(ghSecData);
+}
+function siteGhSecHtml(d){
+  const hd = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px"><h3 style="margin:0;font-size:16px">🛡 Security alerts &amp; Dependabot</h3>'
+    + '<span><button class="btn small" onclick="siteGhSecLoad(siteView.domain);this.disabled=true">↻</button></span></div>';
+  if (d.fatal) return hd + '<div style="color:var(--md-error-bright)">' + esc(d.fatal) + '</div>';
+  const sevColor = (v) => v === 'critical' ? 'var(--md-error-bright)' : v === 'high' ? 'var(--md-error-bright)' : (v === 'moderate' || v === 'medium') ? 'var(--md-warning)' : 'var(--md-on-surface-dis)';
+  let h = hd;
+  // alerts
+  if (d.alertsError) {
+    h += '<div class="site-why" style="font-size:14px;margin-bottom:8px">' + esc(d.alertsError) + (d.alertsErrorCode === 'gh-scope' ? ' <a href="#" onclick="event.preventDefault();siteGhLogin()">Sign in with GitHub</a>' : '') + '</div>';
+  } else if (!d.alerts.length) {
+    h += '<div style="font-size:14.5px;margin-bottom:8px">✅ No open security alerts</div>';
+  } else {
+    const c = d.counts;
+    h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px"><span style="font-size:14.5px"><b>' + c.total + '</b> open alert(s): '
+      + ['critical', 'high', 'moderate', 'low'].filter(k => c[k]).map(k => '<span style="color:' + sevColor(k) + ';font-weight:600">' + c[k] + ' ' + k + '</span>').join(' · ') + '</span>'
+      + '<button class="btn update" onclick="armConfirm(this, \'Fix on the server, rebuild, restart?\', () => siteGhSecFix())" title="npm/pnpm audit fix within the versions package.json allows (no major jumps), rebuild if the app has a build, restart, health check — rolls back if the build fails or the site does not stay up — then push to GitHub">🛠 Fix security alerts</button></div>';
+    h += '<table class="upd-table"><tr><th>Severity</th><th>Package</th><th>Fixed in</th><th>File</th><th>Advisory</th></tr>'
+      + d.alerts.slice(0, 40).map(a => '<tr><td style="color:' + sevColor(a.severity) + ';font-weight:600">' + esc(a.severity) + '</td><td class="mono">' + esc(a.package || '') + (a.scope === 'development' ? ' <span class="dim">(dev)</span>' : '') + '</td><td class="mono">' + esc(a.patched || '—') + '</td><td class="mono dim" style="font-size:12.5px">' + esc(a.manifest || '') + '</td><td><a href="' + esc(a.url) + '" target="_blank" rel="noopener">' + esc((a.summary || a.ghsa || '#' + a.number).slice(0, 90)) + '</a></td></tr>').join('') + '</table>'
+      + (d.alerts.length > 40 ? '<div class="dim" style="font-size:13px">… and ' + (d.alerts.length - 40) + ' more on GitHub</div>' : '');
+  }
+  // pull requests
+  if (d.prsError) h += '<div class="dim" style="font-size:13.5px;margin-top:10px">Pull requests: ' + esc(d.prsError) + '</div>';
+  else if (d.prs.length) {
+    h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:14px 0 6px"><span style="font-size:14.5px"><b>' + d.prs.length + '</b> Dependabot pull request(s) open</span>'
+      + '<button class="btn" onclick="armConfirm(this, \'Merge all ' + d.prs.length + ', then sync?\', () => siteGhMerge(null))" title="squash-merge every Dependabot pull request on GitHub, then Sync brings them to the server (install, build, restart; lock-file conflicts are rebuilt)">⇣ Merge all &amp; sync</button></div>'
+      + '<table class="upd-table">' + d.prs.map(p => '<tr><td class="mono dim">#' + p.number + '</td><td><a href="' + esc(p.url) + '" target="_blank" rel="noopener">' + esc(p.title) + '</a>' + (p.security ? ' <span class="upd-badge new">security</span>' : '') + '</td><td class="dim" style="white-space:nowrap">' + esc(new Date(p.created).toLocaleDateString()) + '</td><td style="text-align:right"><button class="btn small" onclick="armConfirm(this, \'Merge #' + p.number + ' and sync?\', () => siteGhMerge(' + p.number + '))">Merge</button></td></tr>').join('') + '</table>';
+  } else if (!d.prsError) h += '<div class="dim" style="font-size:13.5px;margin-top:10px">No open Dependabot pull requests</div>';
+  return h;
+}
+async function siteGhSecFix(){
+  await siteGhRun('security/fix', 'Fixing security alerts', {});
+  siteSubReload('github');
+}
+async function siteGhMerge(number){
+  await siteGhRun('prs/merge', number ? 'Merging #' + number + ' and syncing' : 'Merging Dependabot pull requests and syncing', number ? { number } : {});
+  siteSubReload('github');
 }
 async function siteGhDisconnect(btn){
   if (btn) btn.disabled = true;

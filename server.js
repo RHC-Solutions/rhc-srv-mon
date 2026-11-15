@@ -182,7 +182,8 @@ const server = http.createServer((req, res) => {
   }
   if (url === '/api/sites') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify(Object.assign({ sites: [], generated_at: null }, sites.getCache() || {}, { tunnels: tunnels.get() })));
+    let security = {}; try { security = require('./lib/db').settings.list('site.github.alerts:'); } catch (_) {}   // Dependabot counts, refreshed 6-hourly
+    return res.end(JSON.stringify(Object.assign({ sites: [], generated_at: null }, sites.getCache() || {}, { tunnels: tunnels.get(), security })));
   }
   if (url === '/api/sites/check' && req.method === 'POST') {
     sites.collectSites().then((data) => {
@@ -527,6 +528,9 @@ if (NO_JOBS) {
   require('./lib/sites/users').syncSudoers().catch((e) => console.error('sudoers sync:', e.message));
   // Security: report new fail2ban bans to AbuseIPDB (when switched on), every 5 min
   setInterval(() => require('./lib/security').reportNewBans().catch((e) => console.error('abuse report failed:', e.message)), 5 * 60_000);
+  // Dependabot: refresh security alerts of connected sites every 6 h, notify new critical/high once
+  setTimeout(() => require('./lib/sites/dependabot').tick().catch(() => {}), 10 * 60_000);
+  setInterval(() => require('./lib/sites/dependabot').tick().catch((e) => console.error('dependabot check failed:', e.message)), 6 * 3600_000);
   // GitHub: commit & push every connected site with auto-sync on, every 15 min
   setInterval(() => require('./lib/sites/github').tick().catch((e) => console.error('github sync failed:', e.message)), 15 * 60_000);
   // Cloudflare: the old single main token becomes a connected account (or is dropped if its account is connected)
