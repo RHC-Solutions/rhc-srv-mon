@@ -40,6 +40,7 @@ function renderSecurity(fromLoad){
   h += '<div class="upd-card"><h3>Services</h3><div class="row2">'
     + stField('ipinfo.io token', '<input type="password" id="secIpinfo" autocomplete="new-password" placeholder="' + (c.hasIpinfo ? '•••••••• (stored — leave empty to keep)' : 'optional — free at ipinfo.io/signup') + '">', 'country, city, AS; works without a token at a lower limit')
     + stField('AbuseIPDB API key', '<input type="password" id="secAbuse" autocomplete="new-password" placeholder="' + (c.hasAbuse ? '•••••••• (stored — leave empty to keep)' : 'free at abuseipdb.com/account/api') + '">', 'abuse score; reporting') + '</div>'
+    + (c.hasAbuse && secData.abuseUsage ? '<p class="dim" style="font-size:13px;margin:4px 0">AbuseIPDB checks today: ' + secData.abuseUsage.used + ' / 1000 (Firewall list stops at ' + secData.abuseUsage.bulkCap + ', manual lookups at ' + secData.abuseUsage.cap + '; results cached 24 h)' + (secData.abuseUsage.pausedUntil ? ' · <span style="color:var(--md-warning)">paused until ' + esc(new Date(secData.abuseUsage.pausedUntil).toLocaleString()) + '</span>' : '') + '</p>' : '')
     + '<div class="upd-toggle"><label class="switch"><input type="checkbox" id="secReportBans"' + (c.reportBans ? ' checked' : '') + '><span class="slider"></span></label><label>Report new fail2ban bans to AbuseIPDB (admin IPs never)</label></div>'
     + '<div class="site-actions"><button class="btn pri" onclick="secSaveCfg()">Save</button></div></div></div>';
   // rules
