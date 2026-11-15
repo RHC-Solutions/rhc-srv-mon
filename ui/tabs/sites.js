@@ -1602,7 +1602,7 @@ async function siteGhLogin(opts){
   let alive = true;
   const bg = sshModal('<h3>Sign in with GitHub</h3>'
     + (opts.why ? '<p style="font-size:14px;margin:0 0 10px;color:var(--md-warning)">' + esc(opts.why) + '</p>' : '')
-    + '<div id="ghlBody" style="font-size:14.5px">Asking GitHub for a sign-in code…</div>'
+    + '<div id="ghlBody" style="font-size:14.5px">Asking GitHub for a sign-in code… <span class="dim">(on a server with an old gh, gh is updated first — up to a minute)</span></div>'
     + '<div class="foot"><button class="btn" id="ghlClose">Close</button></div>');
   const close = () => { alive = false; sshModalClose(); };
   bg.querySelector('#ghlClose').onclick = close;
