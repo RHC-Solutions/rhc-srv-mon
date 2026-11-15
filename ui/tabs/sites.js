@@ -828,7 +828,7 @@ function siteCcrcHtml(c){
   else if (c.running) st = '<span class="up">🟢 Running</span> as <b>' + esc(c.user) + '</b> (' + esc(c.email || '') + (c.org ? ' · ' + esc(c.org) : '') + ')' + (c.url ? ' — <a href="' + esc(c.url) + '" target="_blank" rel="noopener">open in claude.ai/code ↗</a>' : '');
   else st = '<span style="color:var(--md-warning)">Not running (' + esc(c.state) + ') as ' + esc(c.user) + '</span>' + ((c.log || []).length ? '<pre class="mono" style="font-size:12px;white-space:pre-wrap;margin:6px 0 0;max-height:180px;overflow:auto">' + esc(c.log.join('\n')) + '</pre>' : '');
   return siteCard('Claude Code Remote Control',
-    '<p class="dim" style="margin:0 0 8px;font-size:14px">Claude Code runs here as <b>' + esc(c.user) + '</b> in <span class="mono">' + esc(c.folder) + '</span>, named after the site — pick it in claude.ai/code or the Claude app and work on the site from anywhere. Restarted automatically if it stops.</p>'
+    '<p class="dim" style="margin:0 0 8px;font-size:14px">Claude Code runs here as <b>' + esc(c.user) + '</b> in <span class="mono">' + esc(c.folder) + '</span>, named after the site — pick it in claude.ai/code or the Claude app and work on the site from anywhere. Restarted automatically if it stops. Switching it on answers Claude Code\'s one-time "trust this folder" and "Enable Remote Control?" questions for that account.</p>'
     + '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px"><label>Remote Control</label>' + sel + '</div>'
     + '<div style="font-size:14.5px" id="siteCcrcState">' + st + '</div><div id="siteCcrcLogin"></div>',
     '<button class="btn small" onclick="siteCcrcLoad(siteView.domain)">↻</button>');
