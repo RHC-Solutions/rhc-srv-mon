@@ -1675,6 +1675,11 @@ function siteGhSecHtml(d){
       + d.alerts.slice(0, 40).map(a => '<tr><td style="color:' + sevColor(a.severity) + ';font-weight:600">' + esc(a.severity) + '</td><td class="mono">' + esc(a.package || '') + (a.scope === 'development' ? ' <span class="dim">(dev)</span>' : '') + '</td><td class="mono">' + esc(a.patched || '—') + '</td><td class="mono dim" style="font-size:12.5px">' + esc(a.manifest || '') + '</td><td><a href="' + esc(a.url) + '" target="_blank" rel="noopener">' + esc((a.summary || a.ghsa || '#' + a.number).slice(0, 90)) + '</a></td></tr>').join('') + '</table>'
       + (d.alerts.length > 40 ? '<div class="dim" style="font-size:13px">… and ' + (d.alerts.length - 40) + ' more on GitHub</div>' : '');
   }
+  // series: the same update opened again and again — merge the newest, close the rest
+  for (const sr of (d.series || [])) {
+    h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:12px 0 4px;padding:8px 12px;border-radius:8px;background:color-mix(in srgb, var(--md-warning) 14%, transparent)"><span style="font-size:14px"><b>' + (sr.older.length + 1) + '</b> open pull requests are versions of the same update — <i>' + esc(sr.title) + '</i>. Each replaces the one before; only <b>#' + sr.newest + '</b> is needed.</span>'
+      + '<button class="btn update" onclick="armConfirm(this, \'Merge #' + sr.newest + ', close ' + sr.older.length + ' older, sync?\', () => siteGhSeries(' + sr.newest + '))" title="merge #' + sr.newest + ' on GitHub, close #' + sr.older.join(', #') + ' with a \'Superseded by #' + sr.newest + '\' comment (nothing is closed if the merge fails), then Sync brings it to the server">Merge newest #' + sr.newest + ', close ' + sr.older.length + ' older</button></div>';
+  }
   // pull requests
   if (d.prsError) h += '<div class="dim" style="font-size:13.5px;margin-top:10px">Pull requests: ' + esc(d.prsError) + '</div>';
   else if (d.prs.length) {
@@ -1690,6 +1695,10 @@ function siteGhSecHtml(d){
 }
 async function siteGhSecFix(){
   await siteGhRun('security/fix', 'Fixing security alerts', {});
+  siteSubReload('github');
+}
+async function siteGhSeries(newest){
+  await siteGhRun('prs/series', 'Merging #' + newest + ', closing the older ones, syncing', { newest });
   siteSubReload('github');
 }
 async function siteGhMerge(number){
