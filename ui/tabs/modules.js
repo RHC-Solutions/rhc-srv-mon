@@ -39,8 +39,11 @@ function renderModules(){
     setStatus([{ level:'warn', icon:'📦', text: totalOutdated + ' outdated dependencies', sub: parts.join(' · ') }]);
   }
 
+  // Live progress: scan, update-all, auto-update pass, and every project update with its output
+  let html = modProgressHtml(d);
+  if (modAnyActive(d)) ensureModulesPoll(true);
   // Summary stats grid (Observe)
-  let html = '<div class="mod-summary">';
+  html += '<div class="mod-summary">';
   html += '<div class="mod-stat"><div class="v">'+(s.projects||0)+'</div><div class="l">Projects</div></div>';
   html += '<div class="mod-stat ok"><div class="v">'+((s.projects||0)-(s.projectsOutdated||0))+'</div><div class="l">Up to date</div></div>';
   html += '<div class="mod-stat major"><div class="v">'+(s.major||0)+'</div><div class="l">Major bumps</div></div>';
@@ -348,6 +351,7 @@ function renderModules(){
   html += '</div>';
 
   view.innerHTML = html;
+  modScrollLogs();
 
   // Wire interactive elements
   const mq = document.getElementById('modQ');
@@ -470,6 +474,30 @@ async function runAutoUpdateNow() {
   } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
 
+// ---- live progress panel
+function modAnyActive(m){ return !!(m && (m.scanInProgress || m.autoUpdateRunning || m.updateAllRunning || (m.activeUpdates && Object.keys(m.activeUpdates).length))); }
+const modDur = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? s + ' s' : Math.floor(s / 60) + ' min ' + (s % 60) + ' s'; };
+const modSince = (iso) => iso ? modDur(Date.now() - Date.parse(iso)) : '';
+function modBar(label, done, total, current, startedAt){
+  const pct = total ? Math.min(100, Math.round(done / total * 100)) : 0;
+  return '<div style="margin:0 0 10px"><div style="display:flex;justify-content:space-between;gap:10px;font-size:14px;margin-bottom:4px"><span><b>' + esc(label) + '</b> ' + (done || 0) + ' / ' + (total || '?') + (current ? ' · <span class="mono">' + esc(String(current).replace(/^\/home\//, '')) + '</span>' : '') + '</span><span class="dim">' + pct + '% · ' + esc(modSince(startedAt)) + '</span></div>'
+    + '<div style="height:8px;border-radius:4px;background:var(--md-surface-container-high, rgba(127,127,127,.18));overflow:hidden"><div style="height:100%;width:' + (total ? pct : 8) + '%;background:var(--md-primary);transition:width .4s' + (total ? '' : ';animation:modIndet 1.2s ease-in-out infinite alternate') + '"></div></div></div>';
+}
+function modProgressHtml(d){
+  if (!modAnyActive(d)) return '';
+  let h = '<style>@keyframes modIndet{from{margin-left:0}to{margin-left:92%}}</style><div class="upd-card" style="margin-bottom:14px;border-top:3px solid var(--md-primary)"><h3 style="margin:0 0 10px">⏳ In progress</h3>';
+  if (d.scanInProgress) { const sp = d.scanProgress || {}; h += modBar('Scanning projects', sp.done, sp.total, sp.current, sp.startedAt); }
+  if (d.updateAllRunning && d.updateAllProgress) { const up = d.updateAllProgress; h += modBar('Update all', up.done, up.total, up.current, up.startedAt) + '<div class="dim" style="font-size:13px;margin:-6px 0 10px">✅ ' + (up.succeeded || 0) + ' · ❌ ' + (up.failed || 0) + (up.heldBack ? ' · held back ' + up.heldBack : '') + '</div>'; }
+  if (d.autoUpdateRunning) { const ap = d.autoUpdateProgress || {}; h += modBar('Auto update', ap.done, ap.total, ap.current, ap.startedAt); }
+  for (const [dir, a] of Object.entries(d.activeUpdates || {})) {
+    h += '<div style="margin:8px 0 12px"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:14px;margin-bottom:4px"><span>📦 <b class="mono">' + esc(dir.replace(/^\/home\//, '')) + '</b> <span class="dim">' + esc(a.user || '') + (a.auto ? ' · auto' : '') + (a.rebuild ? ' · + rebuild' : '') + '</span></span><span class="dim">' + esc(modDur(a.elapsed_ms != null ? a.elapsed_ms : Date.now() - Date.parse(a.startedAt))) + '</span></div>'
+      + '<div style="font-size:13.5px;margin-bottom:4px">' + ((a.packages || []).length ? (a.packages || []).map(p => '<span class="mono" style="padding:1px 6px;border-radius:4px;background:var(--md-surface-container-high, rgba(127,127,127,.15));margin-right:4px">' + esc(p) + '</span>').join('') : '') + (a.phase ? ' <span class="dim">now: ' + esc(a.phase) + '</span>' : '') + '</div>'
+      + '<pre class="mono mod-live-log" style="font-size:12.5px;max-height:220px;overflow:auto;padding:8px 10px;border-radius:6px;background:var(--md-surface-container-high, rgba(127,127,127,.12));white-space:pre-wrap;word-break:break-word;margin:0">' + esc((a.log || 'starting…').slice(-6000)) + '</pre></div>';
+  }
+  return h + '</div>';
+}
+function modScrollLogs(){ document.querySelectorAll('.mod-live-log').forEach(el => { el.scrollTop = el.scrollHeight; }); }
+
 let modulesPollTimer = null;
 function ensureModulesPoll(active) {
   if (active && !modulesPollTimer) {
@@ -478,10 +506,9 @@ function ensureModulesPoll(active) {
         const m = await fetch('api/modules').then(r => r.json());
         lastModules = m;
         if (state.tab === 'modules') renderModules();
-        const stillActive = m.scanInProgress || m.autoUpdateRunning || m.updateAllRunning || (m.activeUpdates && Object.keys(m.activeUpdates).length);
-        if (!stillActive) { clearInterval(modulesPollTimer); modulesPollTimer = null; }
+        if (!modAnyActive(m) || state.tab !== 'modules') { clearInterval(modulesPollTimer); modulesPollTimer = null; }
       } catch(_) {}
-    }, 3000);
+    }, 2000);
   }
 }
 
