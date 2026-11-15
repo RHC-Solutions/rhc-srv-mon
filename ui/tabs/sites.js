@@ -808,7 +808,54 @@ function siteTabSettings(s){
       + siteField('Additional configuration', '<textarea id="stPhpExtra" rows="3">' + esc(s.php.additional_configuration == null ? 'date.timezone=UTC;\ndisplay_errors=off;' : s.php.additional_configuration) + '</textarea>', 'ini lines appended to PHP_VALUE') + '</div>'
       + '<div class="site-actions"><button class="btn pri" onclick="siteSavePhp()">Save</button></div>');
   }
+  html += '<div id="siteCcrc">' + siteCard('Claude Code Remote Control', '<div class="dim">Loading…</div>') + '</div>';
+  setTimeout(() => siteCcrcLoad(s.domain), 0);
   return html;
+}
+// ---- Claude Code Remote Control (lib/sites/claudeRemote.js): on/off, sign-in, status, link
+let siteCcrcData = null, siteCcrcPoll = null;
+async function siteCcrcLoad(domain){
+  try { siteCcrcData = await siteApi('GET', 'api/sites/' + encodeURIComponent(domain) + '/claude-remote'); } catch(e){ siteCcrcData = { error: e.message }; }
+  const el = document.getElementById('siteCcrc'); if (el && siteView.domain === domain) el.innerHTML = siteCcrcHtml(siteCcrcData);
+}
+function siteCcrcHtml(c){
+  if (c.error) return siteCard('Claude Code Remote Control', '<div style="color:var(--md-error-bright)">' + esc(c.error) + '</div>');
+  const sel = '<select onchange="siteCcrcMode(this.value)">' + [['default', 'Default (' + (c.sharedDefault ? 'on' : 'off') + ')'], ['on', 'On'], ['off', 'Off']].map(([v, l]) => '<option value="' + v + '"' + (c.mode === v ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>';
+  let st;
+  if (!c.enabled) st = '<span class="dim">Off for this site.</span>';
+  else if (!c.installed) st = '<span style="color:var(--md-warning)">Claude Code is not installed for ' + esc(c.user) + '.</span>';
+  else if (!c.loggedIn) st = '<span style="color:var(--md-warning)">' + esc(c.user) + ' is not signed in to claude.ai yet — Remote Control starts once it is.</span> <button class="btn small pri" onclick="siteCcrcLogin(this)">Sign in…</button>';
+  else if (c.running) st = '<span class="up">🟢 Running</span> as <b>' + esc(c.user) + '</b> (' + esc(c.email || '') + (c.org ? ' · ' + esc(c.org) : '') + ')' + (c.url ? ' — <a href="' + esc(c.url) + '" target="_blank" rel="noopener">open in claude.ai/code ↗</a>' : '');
+  else st = '<span style="color:var(--md-warning)">Starting… (' + esc(c.state) + ')</span>';
+  return siteCard('Claude Code Remote Control',
+    '<p class="dim" style="margin:0 0 8px;font-size:14px">Claude Code runs here as <b>' + esc(c.user) + '</b> in <span class="mono">' + esc(c.folder) + '</span>, named after the site — pick it in claude.ai/code or the Claude app and work on the site from anywhere. Restarted automatically if it stops.</p>'
+    + '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px"><label>Remote Control</label>' + sel + '</div>'
+    + '<div style="font-size:14.5px" id="siteCcrcState">' + st + '</div><div id="siteCcrcLogin"></div>',
+    '<button class="btn small" onclick="siteCcrcLoad(siteView.domain)">↻</button>');
+}
+async function siteCcrcMode(mode){
+  try { siteCcrcData = await siteApi('PUT', siteUrl('/claude-remote'), { mode }); toast('Remote Control: ' + mode, 'success'); } catch(e){ siteErr(e, 'Remote Control'); }
+  siteCcrcLoad(siteView.domain);
+}
+async function siteCcrcLogin(btn){
+  if (btn) btn.disabled = true;
+  const box = document.getElementById('siteCcrcLogin');
+  let v; try { v = await siteApi('POST', siteUrl('/claude-remote/login'), {}); } catch(e){ siteErr(e, 'Sign in'); if (btn) btn.disabled = false; return; }
+  if (!v || !v.url) { if (box) box.innerHTML = '<div style="color:var(--md-error-bright);margin-top:8px">Claude Code did not give a sign-in link' + (v && v.error ? ': ' + esc(v.error) : '') + '</div>'; return; }
+  if (box) box.innerHTML = '<div style="margin-top:10px;padding:10px 12px;border-radius:8px;background:var(--md-surface-container-high, rgba(127,127,127,.12));font-size:14px"><ol style="margin:0 0 8px;padding-left:20px;line-height:1.7">'
+    + '<li><a href="' + esc(v.url) + '" target="_blank" rel="noopener"><b>Open the claude.ai sign-in</b> ↗</a> and sign in with the account this site should use.</li>'
+    + '<li>Copy the code claude.ai shows and paste it here:</li></ol>'
+    + '<div style="display:flex;gap:8px"><input id="siteCcrcCode" class="mono" placeholder="paste the code" style="flex:1"><button class="btn pri" onclick="siteCcrcCode(this)">Sign in</button></div></div>';
+}
+async function siteCcrcCode(btn){
+  const code = (document.getElementById('siteCcrcCode') || {}).value || '';
+  if (!code.trim()) return toast('Paste the code first', 'warn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  try { const v = await siteApi('POST', siteUrl('/claude-remote/login'), { code: code.trim() });
+    if (v && v.ok) { toast('Signed in — Remote Control is starting', 'success'); setTimeout(() => siteCcrcLoad(siteView.domain), 4000); }
+    else { toast('Sign-in did not complete' + (v && v.error ? ': ' + v.error : ''), 'error', { duration: 10000 }); if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; } }
+  } catch(e){ siteErr(e, 'Sign in'); if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; } }
+  siteCcrcLoad(siteView.domain);
 }
 async function siteSaveDomain(){
   const body = { root_dir: document.getElementById('stRoot').value };

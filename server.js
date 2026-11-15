@@ -531,6 +531,9 @@ if (NO_JOBS) {
   // Dependabot: refresh security alerts of connected sites every 6 h, notify new critical/high once
   setTimeout(() => require('./lib/sites/dependabot').tick().catch(() => {}), 10 * 60_000);
   setInterval(() => require('./lib/sites/dependabot').tick().catch((e) => console.error('dependabot check failed:', e.message)), 6 * 3600_000);
+  // Claude Code Remote Control: each site's unit running / stopped as its setting says, every 5 min
+  setTimeout(() => require('./lib/sites/claudeRemote').ensureAll().catch(() => {}), 60_000);
+  setInterval(() => require('./lib/sites/claudeRemote').ensureAll().catch((e) => console.error('claude remote ensure failed:', e.message)), 5 * 60_000);
   // GitHub: commit & push every connected site with auto-sync on, every 15 min
   setInterval(() => require('./lib/sites/github').tick().catch((e) => console.error('github sync failed:', e.message)), 15 * 60_000);
   // Cloudflare: the old single main token becomes a connected account (or is dropped if its account is connected)
