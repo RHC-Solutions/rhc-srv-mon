@@ -824,7 +824,7 @@ function siteCcrcHtml(c){
   let st;
   if (!c.enabled) st = '<span class="dim">Off for this site.</span>';
   else if (!c.installed) st = '<span style="color:var(--md-warning)">Claude Code is not installed for ' + esc(c.user) + '.</span>';
-  else if (!c.loggedIn) st = '<span style="color:var(--md-warning)">' + esc(c.user) + ' is not signed in to claude.ai yet — Remote Control starts once it is.</span> <button class="btn small pri" onclick="siteCcrcLogin(this)">Sign in…</button>';
+  else if (!c.loggedIn) st = '<span style="color:var(--md-warning)">No account of this site is signed in to claude.ai yet (' + esc((c.accounts || []).map(a => a.user + (a.installed ? '' : ': Claude Code not installed')).join(', ')) + ') — Remote Control starts once one is.</span> <button class="btn small pri" onclick="siteCcrcLogin(this)" title="signs in the site user ' + esc(c.siteUser) + '">Sign in ' + esc(c.siteUser) + '…</button>';
   else if (c.running) st = '<span class="up">🟢 Running</span> as <b>' + esc(c.user) + '</b> (' + esc(c.email || '') + (c.org ? ' · ' + esc(c.org) : '') + ')' + (c.url ? ' — <a href="' + esc(c.url) + '" target="_blank" rel="noopener">open in claude.ai/code ↗</a>' : '');
   else st = '<span style="color:var(--md-warning)">Starting… (' + esc(c.state) + ')</span>';
   return siteCard('Claude Code Remote Control',
