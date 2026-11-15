@@ -1458,15 +1458,15 @@ async function siteOvSave(group){
 function siteGhAccountsHtml(g){
   setTimeout(siteGhJobLine, 0);
   return '<div id="ghJobLine" style="font-size:14px;margin:10px 0 0"></div><div class="dim" style="font-size:13.5px;margin:10px 0 0">GitHub accounts on this server: ' + ((g.accounts || []).length ? g.accounts.map(a => '<b>' + esc(a) + '</b>').join(', ') : '<b>none</b>')
-    + ' · the account that can see a repo is used for it. <a href="#" onclick="event.preventDefault();siteGhLogin()">Sign in with GitHub</a> to add one.</div>';
+    + ' · every connection is approved in the browser and uses that account. <a href="#" onclick="event.preventDefault();siteGhLogin()">Sign in with GitHub</a> to add or refresh one.</div>';
 }
 function siteTabGithub(s){
   return siteSub('github', siteUrl('/github'), (g) => {
-    if (!g.connected) return siteCard('GitHub', '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Not connected. Connecting creates a private repo <b>' + esc(g.defaultOwner) + '/' + esc(s.domain) + '</b> (or uses the repo this code was cloned from), gives the site a deploy key that can only reach that repo, and pushes the code to <b>main</b>. Data folders, databases, keys and .env files are never committed.</p>'
+    if (!g.connected) return siteCard('GitHub', '<p class="dim" style="margin:0 0 8px;font-size:14.5px">Not connected. Connecting creates a private repo <b>' + esc(g.defaultOwner) + '/' + esc(s.domain) + '</b> (or uses the repo this code was cloned from), first asks you to sign in with GitHub in the browser (the approved account is used for this site), gives the site a deploy key that can only reach that repo — or, when that account is not the repo\'s admin, uses the account over HTTPS — and pushes the code to <b>main</b>. Data folders, databases, keys and .env files are never committed.</p>'
       + '<div class="site-actions" style="justify-content:space-between"><button class="btn" onclick="siteGhRepo()">Connect to an existing repo…</button><button class="btn pri" onclick="this.disabled=true;siteGhConnect({})">Connect to ' + esc(g.defaultOwner) + '/' + esc(s.domain) + '</button></div>' + siteGhAccountsHtml(g));
     const l = g.last;
     const when = (t) => t ? esc(new Date(t).toLocaleString()) : '–';
-    let h = '<p style="margin:0 0 6px"><a href="' + esc(g.url) + '" target="_blank" rel="noopener"><b>' + esc(g.repo) + '</b> ↗</a>' + (g.manual ? ' <span class="dim">(set by hand)</span>' : ' <span class="dim">(default owner)</span>') + (g.auth === 'token' ? ' <span class="dim" title="the organisation disables deploy keys on this repo">· over HTTPS with the signed-in GitHub account (deploy keys are disabled for this repo)</span>' : '') + ' · branch <span class="mono">' + esc(g.branch) + '</span>'
+    let h = '<p style="margin:0 0 6px"><a href="' + esc(g.url) + '" target="_blank" rel="noopener"><b>' + esc(g.repo) + '</b> ↗</a>' + (g.manual ? ' <span class="dim">(set by hand)</span>' : ' <span class="dim">(default owner)</span>') + (g.account ? ' <span class="dim">· account <b>' + esc(g.account) + '</b></span>' : ' <span class="dim" title="connected before sign-in was required — reconnect to approve an account">· account not approved (reconnect)</span>') + (g.auth === 'token' ? ' <span class="dim" title="deploy keys are not possible for this repo with this account">· over HTTPS (no deploy key: not repo admin, or disabled by the organisation)</span>' : '') + ' · branch <span class="mono">' + esc(g.branch) + '</span>'
       + (g.upstream ? ' · upstream <span class="mono dim">' + esc(g.upstream) + '</span>' : '') + '</p>'
       + '<div class="upd-toggle"><label class="switch"><input type="checkbox"' + (g.autoSync ? ' checked' : '') + ' onchange="siteGhAuto(this.checked)"><span class="slider"></span></label><label>Auto-sync every 15 min: pull new commits from GitHub (install, build, restart) and commit &amp; push changes made on the server</label></div>'
       + '<div class="' + (l && !l.ok ? 'site-why' : 'dim') + '" style="font-size:14px;margin:6px 0">Last sync ' + (l ? when(l.at) + ': ' + esc(l.summary) : 'not yet') + (g.dirty ? ' · <b>' + g.dirty + ' uncommitted change(s)</b> on the server' : '') + '</div>';
@@ -1497,14 +1497,22 @@ async function siteGhRepo(){
   await siteGhConnect({ repo: repo.trim() });
 }
 // Connect (or move) — when the repo already holds other code, ask which code wins and try again.
+// Every connection is approved in the browser first: Sign in with GitHub gives a one-time ticket
+// naming the approved account, and the connect runs with (and stays pinned to) that account.
 async function siteGhConnect(body){
+  if (!body.ticket) {
+    const v = await siteGhLogin({ why: 'Sign in with the GitHub account this site should use' + (body.repo ? ' for ' + body.repo : '') + '. Every connection is approved here.', auto: true });
+    if (!v || !v.ticket) return;
+    body = Object.assign({}, body, { ticket: v.ticket });
+  }
   const j = await siteGhRun('connect', 'Connecting to ' + (body.repo || 'GitHub'), body);
   if (!j || j.ok) return;
   if (j.code === 'repo-has-code' && !body.mode) {
     const mode = await siteGhChoose(body.repo || j.repo || 'that repo', j.detail);
     if (mode) return siteGhConnect(Object.assign({}, body, { mode }));
-  } else if (j.code === 'gh-no-access') {
-    siteGhLogin({ why: j.error, retry: body });
+  } else if (j.code === 'gh-no-access' || j.code === 'gh-login-required') {
+    const v = await siteGhLogin({ why: j.error + ' — sign in with an account that has access.', auto: true });
+    if (v && v.ticket) return siteGhConnect(Object.assign({}, body, { ticket: v.ticket }));
   }
 }
 // Start a GitHub job (connect / update / disconnect) and follow it in a progress window: every step
@@ -1515,6 +1523,7 @@ async function siteGhRun(kind, title, body){
   try { j = await siteApi('POST', siteUrl('/github/' + kind), body || {}); }
   catch(e){
     if (e.status === 409) { toast(e.message + ' — showing its progress', 'warn'); try { j = await siteApi('GET', siteUrl('/github/job')); } catch(_){} }
+    if (!j && e.code === 'gh-login-required') return { ok: false, code: e.code, error: e.message };
     if (!j) { siteErr(e, 'GitHub'); return null; }
   }
   return siteGhFollow(j, title);
@@ -1586,7 +1595,8 @@ function siteGhChoose(repo, detail){
   });
 }
 // Sign in with GitHub: device flow — the server shows a one-time code, it is approved on github.com,
-// the account is added to the server. opts.retry: the connect to run again once signed in.
+// the account is added to the server. Resolves with the result ({ ok, account, ticket }) or null.
+// opts.auto: part of a connect — the window closes by itself once approved and the connect goes on.
 async function siteGhLogin(opts){
   opts = opts || {};
   let alive = true;
@@ -1599,8 +1609,8 @@ async function siteGhLogin(opts){
   bg.addEventListener('mousedown', (e) => { if (e.target === bg) alive = false; });
   const body = () => document.getElementById('ghlBody');
   let v;
-  try { v = await siteApi('POST', 'api/github/login', {}); } catch(e){ if (body()) body().innerHTML = '<span style="color:var(--md-error-bright)">' + esc(e.message) + '</span>'; return; }
-  if (!v.code) { if (body()) body().innerHTML = '<span style="color:var(--md-error-bright)">GitHub did not give a code' + (v.error ? ': ' + esc(v.error) : '') + '</span>'; return; }
+  try { v = await siteApi('POST', 'api/github/login', {}); } catch(e){ if (body()) body().innerHTML = '<span style="color:var(--md-error-bright)">' + esc(e.message) + '</span>'; return null; }
+  if (!v.code) { if (body()) body().innerHTML = '<span style="color:var(--md-error-bright)">GitHub did not give a code' + (v.error ? ': ' + esc(v.error) : '') + '</span>'; return null; }
   const url = v.url || 'https://github.com/login/device';
   if (body()) body().innerHTML = '<ol style="margin:0 0 10px;padding-left:20px;line-height:1.7">'
     + '<li>Open <a href="' + esc(url) + '" target="_blank" rel="noopener"><b>' + esc(url.replace('https://', '')) + '</b> ↗</a> and sign in with the GitHub account that has access to the repo.</li>'
@@ -1612,16 +1622,14 @@ async function siteGhLogin(opts){
     try { v = await siteApi('GET', 'api/github/login'); } catch(_){ continue; }
     if (!v.done) continue;
     const st = document.getElementById('ghlState');
-    if (!v.ok) { if (st) st.innerHTML = '<span style="color:var(--md-error-bright)">❌ ' + esc(v.error || 'sign-in failed') + '</span>'; return; }
+    if (!v.ok) { if (st) st.innerHTML = '<span style="color:var(--md-error-bright)">❌ ' + esc(v.error || 'sign-in failed') + '</span>'; return null; }
     if (st) st.innerHTML = '<span class="up">✅ Signed in as <b>' + esc(v.account || '?') + '</b></span> · accounts on this server: ' + esc((v.accounts || []).join(', '));
     toast('Signed in to GitHub as ' + (v.account || '?'), 'success');
+    if (opts.auto) { await new Promise(r => setTimeout(r, 900)); if (!alive) return null; close(); return v; }
     if (siteView.domain) siteSubReload('github');
-    if (opts.retry && alive) {
-      const f = bg.querySelector('.foot');
-      if (f) { f.insertAdjacentHTML('beforeend', '<button class="btn pri" id="ghlRetry">Connect ' + esc(opts.retry.repo || '') + ' now</button>'); bg.querySelector('#ghlRetry').onclick = () => { close(); siteGhConnect(opts.retry); }; }
-    }
-    return;
+    return v;
   }
+  return null;
 }
 async function siteGhDisconnect(btn){
   if (btn) btn.disabled = true;
