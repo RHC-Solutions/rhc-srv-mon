@@ -1,5 +1,5 @@
 // ---- App Store: AI agents, runtimes (all PHP / Node / Python versions…), databases, tools.
-let asData = null, asLoading = false, asCat = 'agents', asPoll = null, asOpenJob = null;
+let asData = null, asLoading = false, asCat = 'apps', asPoll = null, asOpenJob = null;
 async function loadAppStore(refresh){
   asLoading = true;
   try { asData = await stApi('GET', 'api/appstore' + (refresh ? '?refresh=1' : '')); } catch(e){ asData = { error: e.message }; }
@@ -30,6 +30,7 @@ function renderAppStore(fromLoad){
   const busy = jobs.some(j => j.state === 'running' || j.state === 'queued');
   h += '<div class="upd-grid">';
   for (const it of asData.items.filter(x => x.category === asCat)) {
+    if (it.app) { h += asAppCard(it, busy); continue; }
     const inst = Object.entries(it.installed).filter(([, v]) => v);
     h += '<div class="upd-card"><div class="site-card-hd"><h3>' + esc(it.name) + '</h3>' + (inst.length ? '<span class="upd-badge ok">installed</span>' : '<span class="upd-badge na">not installed</span>') + '</div>'
       + '<p class="dim" style="margin:0 0 8px;font-size:14px">' + esc(it.desc) + '</p>'
@@ -51,6 +52,53 @@ function renderAppStore(fromLoad){
     h += '</table></div>';
   }
   view.innerHTML = h + '</div>';
+}
+// ---- Web apps (WordPress): its sites, + new site, updates
+function asAppCard(it, busy){
+  const sites = it.sites || [];
+  let h = '<div class="upd-card" style="grid-column:1/-1"><div class="site-card-hd"><h3>' + esc(it.name) + '</h3>' + (it.latest ? '<span class="dim">latest ' + esc(it.latest) + '</span>' : '') + '</div>'
+    + '<p class="dim" style="margin:0 0 10px;font-size:14px">' + esc(it.desc) + '</p>';
+  if (sites.length) {
+    h += '<table class="upd-table"><tr><th>Site</th><th>Version</th><th></th></tr>' + sites.map(x => '<tr><td><a href="https://' + esc(x.domain) + '/wp-admin/" target="_blank" rel="noopener"><b>' + esc(x.domain) + '</b> ↗</a></td><td class="mono">' + esc(x.version || '?') + (it.latest && x.version && x.version !== it.latest ? ' <span class="upd-badge new">⬆ ' + esc(it.latest) + '</span>' : '') + '</td><td style="text-align:right;white-space:nowrap">'
+      + (x.managed ? '<button class="btn small" onclick="asWpLogin(\'' + esc(x.domain) + '\')">🔑 Login</button> ' : '')
+      + '<button class="btn small" ' + (busy ? 'disabled ' : '') + 'onclick="asWpUpdate(\'' + esc(x.domain) + '\', this)" title="core, plugins, themes, languages">⬆ Update</button> <button class="btn small" onclick="siteGo(\'' + esc(x.domain) + '\', \'settings\')">Site ›</button></td></tr>').join('') + '</table>';
+  } else h += '<div class="dim" style="margin-bottom:8px">No WordPress sites on this server yet.</div>';
+  h += '<div class="site-actions" style="justify-content:space-between"><button class="btn pri" ' + (busy ? 'disabled ' : '') + 'onclick="asWpNew()">＋ New WordPress site</button>'
+    + (sites.length > 1 ? '<button class="btn" ' + (busy ? 'disabled ' : '') + 'onclick="armConfirm(this, \'Update all ' + sites.length + '?\', () => asWpUpdate(null, this))">⬆ Update all</button>' : '') + '</div>';
+  // the admin login of a WordPress install that just finished (shown once, kept in the Vault)
+  const fin = (asData.jobs || []).find(j => j.app === 'wordpress' && j.action === 'install' && j.state === 'done' && j.result && j.result.domain && !asWpSeen[j.id]);
+  if (fin) h += '<div style="margin-top:12px;padding:10px 12px;border-radius:8px;background:color-mix(in srgb, var(--md-success, #2e7d32) 14%, transparent);font-size:14.5px">✅ <b>' + esc(fin.result.domain) + '</b> is ready — <a href="' + esc(fin.result.admin) + '" target="_blank" rel="noopener">' + esc(fin.result.admin) + '</a><br>User <span class="mono">' + esc(fin.result.adminUser) + '</span> <button class="btn small" onclick="asWpLogin(\'' + esc(fin.result.domain) + '\')">🔑 Show login</button> <button class="btn small" onclick="asWpSeen[\'' + fin.id + '\']=1;renderAppStore(true)">Hide</button>'
+    + '<div class="dim" style="font-size:13px">Also under 🔑 Login. The site is reachable once its DNS / Cloudflare tunnel points here (Sites → ' + esc(fin.result.domain) + ').</div></div>';
+  return h + '</div>';
+}
+const asWpSeen = {};
+async function asWpNew(){
+  const bg = sshModal('<h3>New WordPress site</h3>'
+    + sshField('Domain', '<input id="wpDom" placeholder="blog.example.com">', 'a new site is created for it — PHP, database, HTTPS')
+    + sshField('Site title', '<input id="wpTitle" placeholder="My blog">')
+    + '<div class="row2">' + sshField('Admin user', '<input id="wpUser" value="admin">') + sshField('Admin e-mail', '<input id="wpMail" type="email" placeholder="you@example.com">', 'password resets go here') + '</div>'
+    + '<div class="row2">' + sshField('Language', '<select id="wpLoc"><option value="en_US">English (US)</option><option value="en_GB">English (UK)</option><option value="de_DE">Deutsch</option><option value="fr_FR">Français</option><option value="es_ES">Español</option><option value="it_IT">Italiano</option><option value="pt_PT">Português</option><option value="nl_NL">Nederlands</option><option value="pl_PL">Polski</option><option value="uk">Українська</option><option value="he_IL">עברית</option><option value="ru_RU">Русский</option></select>')
+    + sshField('Admin password', '<input id="wpPw" type="password" placeholder="generated if empty">', 'at least 12 characters') + '</div>'
+    + '<div class="foot"><button class="btn" id="wpNo">Cancel</button><button class="btn pri" id="wpYes">Install WordPress</button></div>');
+  bg.querySelector('#wpNo').onclick = () => sshModalClose();
+  bg.querySelector('#wpYes').onclick = async () => {
+    const v = (id) => (document.getElementById(id) || {}).value || '';
+    const body = { domain: v('wpDom').trim(), title: v('wpTitle').trim(), adminUser: v('wpUser').trim(), adminEmail: v('wpMail').trim(), locale: v('wpLoc') };
+    if (v('wpPw')) body.adminPassword = v('wpPw');
+    if (!body.domain || !body.adminEmail) { toast('Domain and admin e-mail are needed', 'error'); return; }
+    try { const j = await stApi('POST', 'api/appstore/wordpress/install', body); asOpenJob = j.id; sshModalClose(); toast('Installing WordPress on ' + body.domain + ' — follow it under Jobs', 'success'); loadAppStore(false); }
+    catch(e){ stErr(e, 'WordPress'); }
+  };
+}
+async function asWpUpdate(domain, btn){
+  if (btn) btn.disabled = true;
+  try { const j = await stApi('POST', 'api/appstore/wordpress/update', domain ? { domain } : {}); asOpenJob = j.id; toast('Updating WordPress' + (domain ? ' on ' + domain : ''), 'success'); loadAppStore(false); }
+  catch(e){ stErr(e, 'WordPress'); if (btn) btn.disabled = false; }
+}
+async function asWpLogin(domain){
+  try { const c = await stApi('GET', 'api/appstore/wordpress/' + encodeURIComponent(domain) + '/login');
+    sshModal('<h3>WordPress login — ' + esc(domain) + '</h3><p style="font-size:14.5px"><a href="https://' + esc(domain) + '/wp-admin/" target="_blank" rel="noopener">https://' + esc(domain) + '/wp-admin/</a></p><table class="upd-table"><tr><td>User</td><td class="mono">' + esc(c.adminUser) + '</td></tr><tr><td>Password</td><td class="mono">' + esc(c.password) + '</td></tr><tr><td>E-mail</td><td>' + esc(c.adminEmail) + '</td></tr></table><div class="dim" style="font-size:13px">The password set at install time — if it was changed in WordPress since, this one no longer works.</div><div class="foot"><button class="btn" onclick="sshModalClose()">Close</button></div>');
+  } catch(e){ stErr(e, 'Login'); }
 }
 async function asJobLog(id){
   try { const j = await stApi('GET', 'api/appstore/jobs/' + id); const el = document.getElementById('asLog' + id); if (el) { el.textContent = j.log.join('\n'); el.scrollTop = el.scrollHeight; } } catch(_){}
