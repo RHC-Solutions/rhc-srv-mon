@@ -33,6 +33,9 @@ function renderSettings(){
     + stField('Event log retention (days)', '<input id="stRet" type="number" min="1" max="3650" value="' + esc(g.eventsRetentionDays) + '">') + '</div>'
     + stField('ACME / Let\'s Encrypt e-mail', '<input id="stAcme" type="email" value="' + esc(g.acmeEmail || '') + '" placeholder="admin@example.com">', 'used when certificates are issued from this panel (upcoming)')
     + '<div class="site-actions"><button class="btn pri" onclick="saveGeneralSettings()">Save</button></div></div>';
+  // System updates (apt) + server restart
+  html += '<div class="upd-card" id="system" style="grid-column:1/-1"><div class="site-card-hd"><h3>System updates</h3><span id="sysBtns"></span></div><div id="sysBody">' + sysBodyHtml() + '</div></div>';
+  if (!sysData && !sysLoading) loadSystem();
   // Telegram
   html += '<div class="upd-card"><h3>Telegram</h3>'
     + '<div class="upd-toggle"><label class="switch"><input type="checkbox" id="tgOn"' + (tg.enabled ? ' checked' : '') + '><span class="slider"></span></label><label>Enabled</label></div>'
@@ -604,4 +607,74 @@ async function certStoreDeploy(id, btn){
     toast('Deployed to ' + (r.results.length - bad.length) + ' site(s)' + (bad.length ? ', ' + bad.length + ' failed' : ''), bad.length ? 'warn' : 'success', bad.length ? { detail: bad.map(x => x.domain + ': ' + x.error).join('\n'), duration: 15000 } : {});
   } catch(e){ stErr(e, 'Deploy'); }
   loadCertStore();
+}
+
+// ---- System updates: apt update / upgrade (own systemd unit, log followed here) and server restart.
+let sysData = null, sysLoading = false, sysPoll = null, sysShowAll = false;
+async function loadSystem(){
+  sysLoading = true;
+  try { sysData = await stApi('GET', 'api/settings/system'); } catch(e){ sysData = { error: e.message }; }
+  sysLoading = false; sysRender();
+  const running = sysData && sysData.job && sysData.job.running;
+  if (running && !sysPoll) sysPoll = setInterval(() => { if (state.tab !== 'settings') { clearInterval(sysPoll); sysPoll = null; return; } loadSystem(); }, 3000);
+  if (!running && sysPoll) { clearInterval(sysPoll); sysPoll = null; }
+}
+function sysRender(){
+  const b = document.getElementById('sysBody'); if (b) b.innerHTML = sysBodyHtml();
+  const k = document.getElementById('sysBtns'); if (k) k.innerHTML = sysBtnsHtml();
+  const lg = document.getElementById('sysLog'); if (lg) lg.scrollTop = lg.scrollHeight;
+}
+function sysBtnsHtml(){
+  const d = sysData; if (!d || d.error || !d.apt) return '';
+  const run = d.job && d.job.running;
+  return '<button class="btn small" ' + (run ? 'disabled' : '') + ' onclick="sysCheck(this)" title="apt-get update: refresh the package lists">⟳ Check for updates</button> '
+    + '<button class="btn small update" ' + (run || !(d.packages || []).length ? 'disabled' : '') + ' onclick="armConfirm(this, \'⬆ Upgrade ' + (d.packages || []).length + ' package(s)?\', () => sysUpgrade())" title="apt-get upgrade: installs new dependencies (e.g. kernels), never removes packages, keeps changed config files">⬆ Upgrade' + ((d.packages || []).length ? ' (' + d.packages.length + ')' : '') + '</button>';
+}
+function sysBodyHtml(){
+  const d = sysData;
+  if (!d) return '<div class="dim">Loading…</div>';
+  if (d.error) return '<div style="color:var(--md-error-bright)">⚠ ' + esc(d.error) + '</div>';
+  let h = '';
+  // restart
+  const rb = d.reboot || {};
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 12px;border-radius:8px;margin-bottom:12px;background:' + (rb.required ? 'color-mix(in srgb, var(--md-warning) 16%, transparent)' : 'var(--md-surface-container-high, rgba(127,127,127,.1))') + '">'
+    + '<div style="font-size:14.5px">' + (rb.required ? '🔁 <b>Restart needed</b> — ' + esc((rb.reasons || []).join('; ')) : '✓ No restart needed') + '<div class="dim" style="font-size:13px">kernel ' + esc((rb.kernel || {}).running || '?') + (rb.bootedAt ? ' · up since ' + esc(new Date(rb.bootedAt).toLocaleString()) : '') + '</div></div>'
+    + '<button class="btn' + (rb.required ? ' update' : '') + '" onclick="sysReboot()" ' + (d.job && d.job.running ? 'disabled title="wait for the upgrade to finish"' : '') + '>🔁 Restart server…</button></div>';
+  if (!d.apt) return h + '<div class="dim">This server has no apt — system packages are not managed here.</div>';
+  // job
+  const j = d.job;
+  if (j) {
+    h += '<div style="margin-bottom:10px;font-size:14.5px">' + (j.running ? '⏳ <b>Upgrading…</b> <span class="dim">(runs on its own — closing the page or a panel restart does not stop it)</span>' : j.ok ? '✅ Last upgrade finished' : '❌ Last upgrade failed' + (j.exit != null ? ' (exit ' + j.exit + ')' : '')) + '</div>';
+    if (j.running || !j.ok || sysShowAll) h += '<pre id="sysLog" class="mono" style="font-size:12.5px;max-height:320px;overflow:auto;padding:10px 12px;border-radius:6px;background:var(--md-surface-container-high, rgba(127,127,127,.12));white-space:pre-wrap;word-break:break-word;margin:0 0 12px">' + esc(j.log || '') + '</pre>';
+  }
+  // packages
+  const P = d.packages || [];
+  const sec = P.filter(p => p.security).length;
+  h += '<div style="font-size:14.5px;margin-bottom:6px">' + (P.length ? '<b>' + P.length + '</b> package(s) can be upgraded' + (sec ? ' · <span style="color:var(--md-warning)">' + sec + ' security</span>' : '') : '✓ All system packages are up to date')
+    + ' <span class="dim" style="font-size:13px">· ' + (d.lastCheck ? 'lists refreshed ' + esc(new Date(d.lastCheck.at).toLocaleString()) : 'from the last package-list refresh — Check for updates to refresh') + '</span></div>';
+  if (P.length) {
+    const show = sysShowAll ? P : P.slice(0, 12);
+    h += '<table class="upd-table"><tr><th>Package</th><th>Installed</th><th>New</th><th>From</th></tr>'
+      + show.map(p => '<tr><td class="mono">' + esc(p.name) + '</td><td class="mono dim">' + esc(p.from) + '</td><td class="mono">' + esc(p.to) + '</td><td>' + (p.security ? '<span class="upd-badge new">security</span>' : '<span class="dim">' + esc(p.suite) + '</span>') + '</td></tr>').join('') + '</table>'
+      + (P.length > show.length ? '<a href="#" onclick="event.preventDefault();sysShowAll=true;sysRender()">show all ' + P.length + '</a>' : '');
+  }
+  return h;
+}
+async function sysCheck(btn){
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Checking…'; }
+  try { sysData = await stApi('POST', 'api/settings/system/check'); toast((sysData.packages || []).length ? sysData.packages.length + ' package update(s) available' : 'System packages are up to date', 'success'); } catch(e){ stErr(e, 'Check'); }
+  sysRender();
+}
+async function sysUpgrade(){
+  try { await stApi('POST', 'api/settings/system/upgrade'); toast('Upgrade started', 'success'); } catch(e){ stErr(e, 'Upgrade'); }
+  setTimeout(loadSystem, 800);
+}
+async function sysReboot(){
+  const d = sysData || {}, host = d.hostname || (lastSettings && lastSettings.general.hostname) || '';
+  const rb = d.reboot || {};
+  const v = await askModal({ title: 'Restart the server', label: 'Type the server name to confirm: ' + host,
+    hint: 'Every site and app on ' + host + ' goes down until the server is back (usually 1–3 minutes). ' + (rb.required ? 'Why now: ' + (rb.reasons || []).join('; ') + '.' : 'No restart is required right now.'),
+    placeholder: host, ok: 'Restart now' });
+  if (v == null) return;
+  try { await stApi('POST', 'api/settings/system/reboot', { confirm: v.trim() }); toast('The server restarts in ~10 seconds — this page reconnects when it is back', 'warn', { duration: 15000 }); } catch(e){ stErr(e, 'Restart'); }
 }

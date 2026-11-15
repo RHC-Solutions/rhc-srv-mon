@@ -37,14 +37,15 @@ function renderUpdates(){
       : c.git && c.ahead && !c.behind ? '<span class="upd-badge ok" title="this server has ' + c.ahead + ' commit(s) GitHub gets with the next sync">up to date · ' + c.ahead + ' to push</span>'
       : hasUpdate ? '<span class="upd-badge new">' + (c.git ? c.behind + ' new commit' + (c.behind > 1 ? 's' : '') + ' on GitHub' : 'update available') + '</span>'
       : '<span class="upd-badge ok">up to date</span>';
-    const btnHtml = !c.currentVersion ? ''
+    const btnHtml = !c.currentVersion && c.system && !isRunning ? '<button class="btn update" onclick="triggerUpdate(\'' + c.key + '\')">＋ Install</button>'
+      : !c.currentVersion ? ''
       : isRunning ? '<button class="btn running" disabled>⏳ updating</button>'
       : hasUpdate && c.git ? '<button class="btn update" onclick="armConfirm(this, \'⬆ Pull and restart the panel?\', () => triggerPanelUpdate())" title="git pull from GitHub, check the code, restart the panel (rolls back if it does not come up)">⬆ Update from GitHub</button>'
       : hasUpdate ? '<button class="btn update" onclick="triggerUpdate(\'' + c.key + '\')">⬆ Update</button>'
       : c.git ? '<button class="btn" onclick="checkUpdatesNow(this)" title="fetch from GitHub now; ⬆ Update from GitHub appears when there are new commits">⟳ Check GitHub</button>'
       : '<button class="btn" disabled>✓ latest</button>';
     // Node.js is the runtime everything else here needs, and the panel is this app: neither is removable.
-    const rmHtml = (!c.currentVersion || isRunning || c.key === 'node' || c.git) ? ''
+    const rmHtml = (!c.currentVersion || isRunning || c.key === 'node' || c.git || c.system) ? ''
       : ' <button class="btn danger small upd-remove" data-comp="' + c.key + '" data-label="' + esc(c.label) + '" title="npm rm -g — uninstall ' + esc(c.label) + ' system-wide">🗑 Remove</button>';
     html += '<tr>'
       + '<td><strong>' + esc(c.label) + '</strong></td>'
@@ -58,7 +59,7 @@ function renderUpdates(){
 
   // Per-user versions table
   const userKeys = Object.keys(d.users || {});
-  const userComps = d.components.filter(c => !c.git);
+  const userComps = d.components.filter(c => !c.git && !c.system);
   if (userKeys.length) {
     const allCompKeys = userComps.map(c => c.key);
     let userOutdatedCount = 0;
