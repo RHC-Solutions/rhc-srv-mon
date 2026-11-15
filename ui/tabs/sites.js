@@ -1682,6 +1682,10 @@ function siteGhSecHtml(d){
       + '<button class="btn" onclick="armConfirm(this, \'Merge all ' + d.prs.length + ', then sync?\', () => siteGhMerge(null))" title="squash-merge every Dependabot pull request on GitHub, then Sync brings them to the server (install, build, restart; lock-file conflicts are rebuilt)">⇣ Merge all &amp; sync</button></div>'
       + '<table class="upd-table">' + d.prs.map(p => '<tr><td class="mono dim">#' + p.number + '</td><td><a href="' + esc(p.url) + '" target="_blank" rel="noopener">' + esc(p.title) + '</a>' + (p.security ? ' <span class="upd-badge new">security</span>' : '') + '</td><td class="dim" style="white-space:nowrap">' + esc(new Date(p.created).toLocaleDateString()) + '</td><td style="text-align:right"><button class="btn small" onclick="armConfirm(this, \'Merge #' + p.number + ' and sync?\', () => siteGhMerge(' + p.number + '))">Merge</button></td></tr>').join('') + '</table>';
   } else if (!d.prsError) h += '<div class="dim" style="font-size:13.5px;margin-top:10px">No open Dependabot pull requests</div>';
+  if ((d.otherPrs || []).length) {
+    h += '<div style="font-size:14.5px;margin:14px 0 6px"><b>' + d.otherPrs.length + '</b> other open pull request(s)</div><table class="upd-table">'
+      + d.otherPrs.map(p => '<tr><td class="mono dim">#' + p.number + '</td><td><a href="' + esc(p.url) + '" target="_blank" rel="noopener">' + esc(p.title) + '</a>' + (p.draft ? ' <span class="dim">(draft)</span>' : '') + '</td><td class="dim">' + esc(p.author || '') + '</td><td class="dim" style="white-space:nowrap">' + esc(new Date(p.created).toLocaleDateString()) + '</td><td style="text-align:right">' + (p.draft ? '' : '<button class="btn small" onclick="armConfirm(this, \'Merge #' + p.number + ' and sync?\', () => siteGhMerge(' + p.number + '))">Merge</button>') + '</td></tr>').join('') + '</table>';
+  }
   return h;
 }
 async function siteGhSecFix(){
