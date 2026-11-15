@@ -304,8 +304,14 @@ async function siteNewGo(btn){
   if (body.type === 'reverse-proxy') body.reverse_proxy_url = v('nsProxy');
   if (!body.domain) return toast('Enter a domain', 'warn');
   btn.disabled = true;
+  // GitHub: every connection is approved in the browser. Cancelled → the site is made without it
+  // (or not at all, when a repo was asked for).
+  const gl = await siteGhLogin({ auto: true, why: 'Approve the GitHub account for ' + body.domain + (body.repo ? ' — its code comes from ' + body.repo : ' — a private repo is created for it') + '. Close this to create the site without GitHub.' });
+  if (gl && gl.ticket) body.ghTicket = gl.ticket;
+  else if (body.repo) { toast('Not created — the GitHub sign-in is needed to deploy ' + body.repo, 'warn'); return; }
+  else body.github = false;
+  sshModal('<h3>Creating ' + esc(body.domain) + '</h3><pre id="nsSteps" class="mono" style="font-size:13px;white-space:pre-wrap;max-height:50vh;overflow:auto">Creating…' + (body.repo ? ' (installing and building ' + esc(body.repo) + ' can take a few minutes)' : '') + '</pre><div class="foot"><button class="btn" onclick="sshModalClose()">Close</button></div>');
   const box = document.getElementById('nsSteps');
-  if (box) { box.style.display = 'block'; box.textContent = 'Creating…'; }
   try {
     const r = await siteApi('POST', 'api/sites', body);
     if (box) box.textContent = r.steps.map(s => '✓ ' + s.name + (s.detail ? ' — ' + s.detail : '')).join('\n');

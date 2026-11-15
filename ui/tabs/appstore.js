@@ -23,6 +23,7 @@ function renderAppStore(fromLoad){
     for (const j of jobs.slice(0, 6)) h += '<details' + (j.state === 'running' || asOpenJob === j.id ? ' open' : '') + ' ontoggle="if(this.open){asOpenJob=\'' + j.id + '\'; asJobLog(\'' + j.id + '\')}"><summary>' + ({ running: '⏳', queued: '🕒', done: '✅', failed: '❌' }[j.state] || '') + ' ' + esc(j.action) + ' <b>' + esc(j.name) + '</b>' + (j.version !== 'latest' ? ' ' + esc(j.version) : '') + ' · ' + esc(j.state) + (j.error ? ' — <span style="color:var(--md-error-bright)">' + esc(j.error) + '</span>' : '') + ' <span class="dim">' + esc(new Date(j.started).toLocaleTimeString()) + '</span></summary><pre class="mono" id="asLog' + j.id + '" style="font-size:12px;max-height:260px;overflow:auto;white-space:pre-wrap;margin:6px 0">' + esc(j.log.join('\n')) + '</pre></details>';
     h += '</div>';
   }
+  if (asCat === 'github') { h += asGithubHtml(); view.innerHTML = h; if (!asGh.accounts && !asGh.loading) asGhLoadAccounts(); return; }
   if (asCat === 'agents') {
     h += '<div class="upd-card">' + (typeof agentsCardHtml === 'function' ? agentsCardHtml() : '') + '</div>';
     view.innerHTML = h; return;
@@ -52,6 +53,71 @@ function renderAppStore(fromLoad){
     h += '</table></div>';
   }
   view.innerHTML = h + '</div>';
+}
+// ---- From GitHub: repos of a signed-in account → Deploy as a site (lib/sites/ghrepos.js)
+const asGh = { accounts: null, account: null, repos: null, q: '', loading: false, error: null };
+async function asGhLoadAccounts(){
+  asGh.loading = true;
+  try { const r = await stApi('GET', 'api/github/accounts'); asGh.accounts = r.accounts || []; if (!asGh.account || !asGh.accounts.includes(asGh.account)) asGh.account = asGh.accounts[0] || null; } catch(e){ asGh.accounts = []; asGh.error = e.message; }
+  asGh.loading = false;
+  if (asGh.account) await asGhLoadRepos(false); else if (asCat === 'github') renderAppStore(true);
+}
+async function asGhLoadRepos(fresh){
+  asGh.repos = null; asGh.error = null; if (asCat === 'github') renderAppStore(true);
+  try { const r = await stApi('GET', 'api/github/repos?account=' + encodeURIComponent(asGh.account) + (fresh ? '&fresh=1' : '')); asGh.repos = r.repos; } catch(e){ asGh.error = e.message; asGh.repos = []; }
+  if (asCat === 'github') renderAppStore(true);
+}
+function asGhSetQ(v){ asGh.q = v; const el = document.getElementById('asGhList'); if (el) el.innerHTML = asGhListHtml(); }
+function asGithubHtml(){
+  let h = '<div class="upd-card"><div class="site-card-hd"><h3>Deploy from GitHub</h3><span>'
+    + '<a href="#" onclick="event.preventDefault(); siteGhLogin().then(() => { asGh.accounts = null; renderAppStore(true); })">＋ Sign in with another account</a></span></div>'
+    + '<p class="dim" style="margin:0 0 10px;font-size:14px">The repos of a GitHub account signed in on this server. <b>Deploy</b> creates a site with the repo\'s code: dependencies installed, built when it has a build step, started, published through the tunnel, and kept in sync with the repo (auto-sync, Dependabot alerts on its GitHub tab).</p>';
+  if (asGh.loading || !asGh.accounts) return h + '<div class="dim">Loading accounts…</div></div>';
+  if (!asGh.accounts.length) return h + '<div>No GitHub account is signed in on this server yet — <a href="#" onclick="event.preventDefault(); siteGhLogin().then(() => { asGh.accounts = null; renderAppStore(true); })">Sign in with GitHub</a>.</div></div>';
+  h += '<div class="toolbar" style="margin-bottom:10px;gap:8px;flex-wrap:wrap">' + asGh.accounts.map(a => '<button class="chip' + (a === asGh.account ? ' active' : '') + '" onclick="asGh.account=\'' + esc(a) + '\'; asGhLoadRepos(false)">' + esc(a) + '</button>').join('')
+    + '<input id="asGhQ" placeholder="filter repos…" value="' + esc(asGh.q) + '" oninput="asGhSetQ(this.value)" style="margin-left:auto;max-width:260px"><button class="btn small" onclick="asGhLoadRepos(true)" title="reload from GitHub">↻</button></div>';
+  if (asGh.error) h += '<div style="color:var(--md-error-bright);margin-bottom:8px">' + esc(asGh.error) + '</div>';
+  return h + '<div id="asGhList">' + asGhListHtml() + '</div></div>';
+}
+function asGhListHtml(){
+  if (!asGh.repos) return '<div class="dim">Loading repos of ' + esc(asGh.account || '') + '…</div>';
+  const q = asGh.q.trim().toLowerCase();
+  const list = asGh.repos.filter(r => !r.archived && (!q || (r.repo + ' ' + r.description + ' ' + (r.language || '')).toLowerCase().includes(q)));
+  if (!list.length) return '<div class="dim">No repos' + (q ? ' match "' + esc(q) + '"' : '') + '.</div>';
+  return '<table class="upd-table"><tr><th>Repository</th><th>Language</th><th>Updated</th><th>Site</th><th></th></tr>' + list.slice(0, 150).map(r => '<tr><td><a href="' + esc(r.url) + '" target="_blank" rel="noopener"><b>' + esc(r.repo) + '</b></a>' + (r.private ? ' <span class="upd-badge na">private</span>' : '') + (r.fork ? ' <span class="dim">fork</span>' : '')
+    + (r.description ? '<div class="dim" style="font-size:13px">' + esc(r.description.slice(0, 140)) + '</div>' : '') + '</td><td class="dim">' + esc(r.language || '') + '</td><td class="dim" style="white-space:nowrap">' + esc(r.pushed ? new Date(r.pushed).toLocaleDateString() : '') + '</td>'
+    + '<td>' + (r.sites.length ? r.sites.map(d => '<a href="#" onclick="event.preventDefault();siteGo(\'' + esc(d) + '\', \'github\')">' + esc(d) + '</a>').join('<br>') : '') + '</td>'
+    + '<td style="text-align:right;white-space:nowrap">' + (r.empty ? '<span class="dim">empty</span>' : '<button class="btn small' + (r.sites.length ? '' : ' pri') + '" onclick="asGhDeploy(\'' + esc(r.repo) + '\')">' + (r.sites.length ? 'Deploy again' : '🚀 Deploy') + '</button>') + '</td></tr>').join('') + '</table>'
+    + (list.length > 150 ? '<div class="dim" style="font-size:13px">… ' + (list.length - 150) + ' more — filter to find them</div>' : '');
+}
+async function asGhDeploy(repo){
+  const bg = sshModal('<h3>Deploy ' + esc(repo) + '</h3><div id="ghdBody" class="dim">Looking at the repo…</div>');
+  let d;
+  try { d = await stApi('GET', 'api/github/detect?account=' + encodeURIComponent(asGh.account) + '&repo=' + encodeURIComponent(repo)); }
+  catch(e){ const b = document.getElementById('ghdBody'); if (b) b.innerHTML = '<span style="color:var(--md-error-bright)">' + esc(e.message) + '</span><div class="foot"><button class="btn" onclick="sshModalClose()">Close</button></div>'; return; }
+  const types = [['nodejs', 'Node.js'], ['python', 'Python'], ['php', 'PHP'], ['static', 'Static']];
+  const b = document.getElementById('ghdBody'); if (!b) return;
+  b.className = '';
+  b.innerHTML = '<p style="font-size:14px;margin:0 0 10px">Detected: <b>' + esc((types.find(t => t[0] === d.type) || [])[1] || d.type) + '</b>' + (d.framework ? ' · ' + esc(d.framework) : '') + ' <span class="dim">(' + esc(d.why) + ')</span></p>'
+    + (d.note ? '<p style="font-size:13.5px;color:var(--md-warning);margin:0 0 10px">⚠ ' + esc(d.note) + '</p>' : '')
+    + sshField('Domain', '<input id="ghdDom" value="' + esc(d.suggestDomain || '') + '" placeholder="app.example.com">', 'a new site; published through the Cloudflare tunnel when the domain is on a connected Cloudflare account')
+    + sshField('Type', '<select id="ghdType">' + types.map(t => '<option value="' + t[0] + '"' + (t[0] === d.type ? ' selected' : '') + '>' + t[1] + '</option>').join('') + '</select>')
+    + '<p class="dim" style="font-size:13px;margin:6px 0 0">Next: the GitHub sign-in in the browser approves the account for this site; then the site is created, the code pulled, installed, built and started — a few minutes for a Node.js build.</p>'
+    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" id="ghdGo">Sign in &amp; deploy</button></div>';
+  bg.querySelector('#ghdGo').onclick = async () => {
+    const domain = (document.getElementById('ghdDom').value || '').trim().toLowerCase(), type = document.getElementById('ghdType').value;
+    if (!domain) { toast('Enter a domain', 'warn'); return; }
+    const gl = await siteGhLogin({ auto: true, why: 'Approve the GitHub account that ' + domain + ' uses for ' + repo + '.' });
+    if (!gl || !gl.ticket) { toast('Not deployed — the GitHub sign-in is needed', 'warn'); return; }
+    sshModal('<h3>Deploying ' + esc(repo) + ' → ' + esc(domain) + '</h3><pre id="ghdSteps" class="mono" style="font-size:13px;white-space:pre-wrap;max-height:55vh;overflow:auto">Creating the site, pulling the code, installing and building… (a few minutes)</pre><div class="foot"><button class="btn" onclick="sshModalClose()">Close</button></div>');
+    try {
+      const r = await stApi('POST', 'api/sites', { domain, type, repo, ghTicket: gl.ticket, sqlite: false });
+      const box = document.getElementById('ghdSteps');
+      if (box) box.textContent = r.steps.map(x => '✓ ' + x.name + (x.detail ? ' — ' + x.detail : '')).join('\n') + '\n\nsite user: ' + r.user + '\npassword: ' + r.password;
+      toast('Deployed ' + repo + ' as ' + domain, 'success');
+      asGh.repos = null; asGhLoadRepos(false);
+    } catch(e){ const box = document.getElementById('ghdSteps'); if (box) box.textContent = '✖ ' + e.message + (e.detail ? '\n\n' + e.detail : ''); stErr(e, 'Deploy'); }
+  };
 }
 // ---- Web apps (WordPress): its sites, + new site, updates
 function asAppCard(it, busy){
