@@ -67,7 +67,6 @@ function renderSitesList(){
     + '<div class="site-stats">' + pill('online', online) + pill('degraded', degraded) + pill('down', down) + pill('stopped', stopped) + '<span class="dim" style="font-size:14px;margin-left:4px">' + total + ' sites' + (d.sites.some(s => s.managed_by === 'clp') ? ' · ' + d.sites.filter(s => s.managed_by === 'clp').length + ' owned by CloudPanel' : '') + '</span></div>'
     + '<span style="flex:1"></span>'
     + '<div class="site-viewsw"><button class="chip' + (siteViewMode === 'cards' ? ' active' : '') + '" onclick="siteSetView(\'cards\')" title="Cards">▦</button><button class="chip' + (siteViewMode === 'table' ? ' active' : '') + '" onclick="siteSetView(\'table\')" title="Table">☰</button></div>'
-    + '<button class="btn" onclick="siteSyncClp()" title="Re-read CloudPanel\'s database (sites this panel already manages are left alone)">⟳ Sync from CloudPanel</button>'
     + '<button class="btn" onclick="siteCfBulk()" title="Allow traffic from Cloudflare only — for every site at once">☁ Cloudflare-only…</button>'
     + '<button class="btn pri" onclick="siteNewDialog()">＋ New Site</button></div>';
   const sortOrder = { 'down': 0, 'degraded': 1, 'stopped': 2, 'online': 3 };
@@ -93,7 +92,7 @@ function renderSitesList(){
       for (const p of s.pm2) { const pUp = p.status === 'online'; html += '<div class="prow"><span class="pname">' + esc(p.name) + '</span><span class="pstat ' + (pUp?'up':'down') + '">' + (pUp?'🟢':'🔴') + ' ' + esc(p.status) + ' <span class="dim">CPU ' + p.cpu + '% · ' + fmtMem(p.memory) + '</span></span></div>'; }
       html += '</div>';
     }
-    html += s.canControl ? siteCtlHtml(s.domain, null, null, 'card') : '<div class="site-ctl on-card" onclick="event.stopPropagation()">' + siteCfPurgeBtn(s.domain) + '</div>';
+    html += (s.canControl || s.phpControl) ? siteCtlHtml(s.domain, null, null, 'card', s.phpControl && !s.canControl) : '<div class="site-ctl on-card" onclick="event.stopPropagation()">' + siteCfPurgeBtn(s.domain) + '</div>';
     html += '</div>';
   }
   if (!sorted.length) html += '<div class="upd-card dim">' + (d.sites.length ? 'No sites match.' : 'No nginx sites on this host.') + '</div>';
@@ -131,13 +130,16 @@ async function siteWwwEdge(domain, btn){
 }
 // Start/stop/restart for a site's PM2 apps. Rendered on the list (whole site) and per process in the
 // Processes tab; clicks never bubble into the card/row navigation.
-function siteCtlHtml(domain, app, user, kind){
+function siteCtlHtml(domain, app, user, kind, isPhp){
   const a = (act, label, title, cls) => '<button class="btn small' + (cls ? ' ' + cls : '') + '" title="' + esc(title) + '" onclick="event.stopPropagation(); siteCtl(this, \'' + esc(domain) + '\', \'' + act + '\'' + (app ? ', ' + JSON.stringify(app) : ', null') + (user ? ', ' + JSON.stringify(user) : ', null') + ')">' + label + '</button>';
   const what = app ? 'this process' : 'every PM2 app of this site';
   return '<div class="site-ctl' + (kind === 'card' ? ' on-card' : '') + '" onclick="event.stopPropagation()">'
-    + a('start', '▶', 'Start ' + what + ' (resurrects a pm2 daemon that is down)')
+    + (isPhp ? a('start', '▶', 'Start this site\'s php-fpm pool')
+      + a('restart', '⟳', 'Reload php-fpm gracefully (running requests finish; clears opcache)')
+      + a('stop', '⏹', 'Stop this site\'s php-fpm pool (other PHP sites keep running)', 'danger')
+    : a('start', '▶', 'Start ' + what + ' (resurrects a pm2 daemon that is down)')
     + a('restart', '⟳', 'Restart ' + what)
-    + a('stop', '⏹', 'Stop ' + what, 'danger')
+    + a('stop', '⏹', 'Stop ' + what, 'danger'))
     + (app ? '' : siteCfPurgeBtn(domain))
     + '</div>';
 }
@@ -223,22 +225,17 @@ function siteTableHtml(list, byStatus){
       + '<td>' + pm2 + '</td>'
       + '<td class="mono">' + esc(s.disk || '?') + '</td>'
       + '<td>' + (s.managed_by === 'clp' ? '<span class="badge type">CloudPanel</span>' : '<span class="badge online">this panel</span>') + '</td>'
-      + '<td style="text-align:right;white-space:nowrap">' + (s.canControl ? siteCtlHtml(s.domain, null, null, 'row') : siteCfPurgeBtn(s.domain) + ' ') + '<a class="btn small" href="sites?d=' + esc(encodeURIComponent(s.domain)) + '&t=settings" onclick="event.stopPropagation(); event.preventDefault(); siteGo(\'' + esc(s.domain) + '\', \'settings\')">Open</a> <a class="btn small" href="https://' + esc(s.domain) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">↗</a></td></tr>';
+      + '<td style="text-align:right;white-space:nowrap">' + ((s.canControl || s.phpControl) ? siteCtlHtml(s.domain, null, null, 'row', s.phpControl && !s.canControl) : siteCfPurgeBtn(s.domain) + ' ') + '<a class="btn small" href="sites?d=' + esc(encodeURIComponent(s.domain)) + '&t=settings" onclick="event.stopPropagation(); event.preventDefault(); siteGo(\'' + esc(s.domain) + '\', \'settings\')">Open</a> <a class="btn small" href="https://' + esc(s.domain) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">↗</a></td></tr>';
   }
   if (!rows.length) h += '<tr><td colspan="11" class="dim">No sites match.</td></tr>';
   return h + '</tbody></table></div>';
 }
 function siteDiskBytes(d){ const m = /^([\d.]+)\s*([KMGT]?)/i.exec(String(d || '')); if (!m) return -1; return parseFloat(m[1]) * ({ '': 1, K: 1e3, M: 1e6, G: 1e9, T: 1e12 }[m[2].toUpperCase()] || 1); }
-async function siteSyncClp(){
-  toast('Syncing from CloudPanel…');
-  try { const r = await siteApi('POST', 'api/sites/sync-clp'); toast('Sync: ' + r.sites + ' new, ' + r.updated + ' refreshed, ' + r.skipped + ' managed here' + (r.errors.length ? ' · ' + r.errors.length + ' error(s)' : ''), r.errors.length ? 'warn' : 'success', r.errors.length ? { detail: r.errors.join('\n') } : {}); refresh(); }
-  catch(e){ siteErr(e, 'Sync'); }
-}
 // Create a site: the panel makes the unix user, document root, vhost, php pool and a self-signed
 // certificate. A failure rolls all of it back, so a retry does not trip over leftovers.
 function siteNewDialog(){
   const bg = sshModal('<h3>＋ New site</h3>'
-    + '<div class="row2">' + siteField('Domain *', '<input id="nsDomain" placeholder="app.example.com" autocomplete="off" oninput="siteNewSuggest()">', '<span id="nsHint" class="dim">without www — that is added as an alias automatically for an apex domain</span>')
+    + '<div class="row2">' + siteField('Domain *', '<input id="nsDomain" placeholder="app.example.com" autocomplete="off" oninput="siteNewSuggest()">', '<span id="nsHint" class="dim">without www — for an apex domain, www becomes a CNAME + 301 redirect at Cloudflare when the site is published</span>')
     + siteField('Type *', '<select id="nsType" onchange="siteNewType()"><option value="php">PHP</option><option value="nodejs">Node.js</option><option value="static">Static</option><option value="reverse-proxy">Reverse proxy</option></select>') + '</div>'
     + '<div class="row2">' + siteField('Template', '<select id="nsTpl"></select>', 'sets the document root subdirectory and the default PHP version')
     + siteField('Site user *', '<input id="nsUser" autocomplete="off">', '<span id="nsUserHint" class="dim">owns /home/&lt;user&gt;; php-fpm runs as this account</span>') + '</div>'
@@ -1547,7 +1544,7 @@ function siteTabOverrides(s){
       '<p class="dim" style="margin:0 0 8px;font-size:14.5px">API token: <b>' + esc(e.cloudflareToken === 'site' ? 'this site\'s own' : e.cloudflareToken === 'account' ? 'the shared one' : 'none') + '</b> — set an own token on the <a href="#" onclick="siteGo(\'' + esc(s.domain) + '\', \'cloudflare\');return false">Cloudflare</a> tab.'
       + (t ? '<br>Published through ' + (t.shared ? 'the <b>shared host tunnel</b>' : 'its <b>own tunnel</b> (' + esc(t.unit || '') + ')') + ': ' + esc((t.hosts || []).join(', '))
         + (t.wwwEdge ? '<br>www.' + esc(s.domain) + ': on Cloudflare — CNAME → ' + esc(s.domain) + ', 301 redirect at the edge (never reaches this server)' : '') : '<br>Not published through a tunnel.') + '</p>'
-      + (t && !t.wwwEdge && (t.hosts || []).includes('www.' + s.domain) ? '<div class="site-why" style="margin-bottom:10px">www.' + esc(s.domain) + ' is a tunnel route of its own. <button class="btn small" onclick="siteWwwEdge(\'' + esc(s.domain) + '\', this)">Move www to Cloudflare</button> <span class="dim" style="font-size:13px">CNAME www → ' + esc(s.domain) + ' + a 301 redirect rule at Cloudflare; needs the token permission Zone → Single Redirect → Edit</span></div>' : '')
+      + (t && !t.wwwEdge && ((t.hosts || []).includes('www.' + s.domain) || s.domain.split('.').length === 2) ? '<div class="site-why" style="margin-bottom:10px">www.' + esc(s.domain) + ' is not on Cloudflare yet. <button class="btn small" onclick="siteWwwEdge(\'' + esc(s.domain) + '\', this)">Move www to Cloudflare</button> <span class="dim" style="font-size:13px">CNAME www → ' + esc(s.domain) + ' + a 301 redirect rule at Cloudflare; needs the token permission Zone → Single Redirect → Edit</span></div>' : '')
       + siteField('Tunnel', sel('ovTunnel', o.cloudflare.tunnel, [['default', 'Shared default (' + (sh.tunnel === 'shared' ? 'shared host tunnel' : 'own tunnel') + ')'], ['own', 'Own tunnel'], ['shared', 'Route on the shared host tunnel']]), t ? 'changing this moves the site at once: its routes and DNS switch tunnels (a few seconds)' : 'applies when the site is published')
       + '<div class="site-actions"><button class="btn pri" onclick="siteOvSave(\'cloudflare\')">Save</button></div>');
     const b = o.backups, w = b.wasabi;
