@@ -540,6 +540,8 @@ if (NO_JOBS) {
   require('./lib/cloudflare').migrateMain().then((r) => { if (r) console.log('cloudflare: main token folded into accounts — added: ' + (r.added.join(', ') || 'none') + '; already connected: ' + (r.kept.join(', ') || 'none')); }).catch((e) => console.error('cloudflare main-token migration postponed:', e.message));
   // self-repair: the OODA loop (observe → orient → decide → act) once a minute
   require('./lib/ooda').start();
+  // resource watchdog: CPU / memory / disk every 15 s from /proc; frees resources under pressure
+  require('./lib/resguard').start();
   // backups: tick every minute for the daily scheduled run
   setInterval(backups.backupTick, 60_000);
   // events: prune beyond the retention window once a day
