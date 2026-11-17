@@ -69,8 +69,10 @@ function renderSecurity(fromLoad){
     + '<a href="firewall" onclick="event.preventDefault();setTab(\'firewall\')">Manage jails and bans on the Firewall page →</a></p></div>';
   h += '<div class="upd-card" style="margin-top:14px" id="secScan">' + secScanHtml() + '</div>';
   h += '<div class="upd-card" style="margin-top:14px" id="secSweep">' + secSweepHtml() + '</div>';
+  h += '<div class="upd-card" style="margin-top:14px" id="secLeak">' + secLeakHtml() + '</div>';
   view.innerHTML = h;
   if (!secSweep && !secSweepLoading) secSweepLoad();
+  if (!secLeak && !secLeakLoading) secLeakLoad();
   if (!secScan && !secScanLoading) secScanLoad();
 }
 // ---- Code scan of every site on this server (Semgrep, npm audit, pip-audit — lib/codescan.js)
@@ -101,6 +103,27 @@ async function secScanRun(domain, btn){
   try { const r = await stApi('POST', 'api/codescan/run', domain ? { domain } : {}); toast((r.queued.length || 'No') + ' site(s) queued for a code scan', 'success'); }
   catch(e){ stErr(e, 'Code scan'); }
   secScanLoad();
+}
+// ---- GitHub secret scanning on the panel's own repo (read through the signed-in account)
+let secLeak = null, secLeakLoading = false;
+async function secLeakLoad(){
+  secLeakLoading = true;
+  try { secLeak = await stApi('GET', 'api/panelrepo/secret-alerts'); } catch(e){ secLeak = { error: e.message }; }
+  secLeakLoading = false;
+  const el = document.getElementById('secLeak'); if (el) el.innerHTML = secLeakHtml();
+}
+function secLeakHtml(){
+  let h = '<h3>🔑 Leaked secrets — panel repo</h3><p class="dim" style="margin:0 0 8px;font-size:14px">GitHub secret-scanning alerts on ' + esc((secLeak && secLeak.repo) || 'the panel repo') + '. A leaked secret stays in git history: revoke it at its provider, then close the alert on GitHub.</p>';
+  if (!secLeak) return h + '<div class="dim">Loading…</div>';
+  if (secLeak.error) return h + '<div style="color:var(--md-error-bright)">' + esc(secLeak.error) + '</div>';
+  const A = secLeak.alerts || [], open = A.filter(a => a.state === 'open');
+  if (!open.length) return h + '<div>🟢 No open alerts' + (A.length ? ' (' + A.length + ' closed)' : '') + '.</div>';
+  h += '<table class="upd-table"><tr><th>Secret</th><th>Found in</th><th>Status</th><th></th></tr>' + open.map(a => '<tr><td><b>' + esc(a.type) + '</b>' + (a.botName ? ' <span class="mono">' + esc(a.botName) + '</span>' : a.botId ? ' <span class="mono dim">bot ' + esc(a.botId) + '</span>' : '') + (a.publicly_leaked ? ' <span style="color:var(--md-error-bright)">public</span>' : '') + '</td>'
+    + '<td class="mono dim" style="font-size:13px">' + (a.locations || []).map(l => esc(l.path + ':' + l.line + ' @' + l.commit)).join('<br>') + '</td><td>'
+    + (a.live === true ? '<span style="color:var(--md-error-bright)">still works — revoke it</span>' : a.live === false ? '<span class="dim">no longer works — close the alert</span>' : '<span class="dim">' + esc(a.validity || 'unknown') + '</span>')
+    + (a.panelBot ? '<div class="dim" style="font-size:12.5px">panel notifications: ' + esc(a.panelBot) + '</div>' : '') + '</td>'
+    + '<td style="text-align:right"><a class="btn small" href="' + esc(a.url) + '" target="_blank" rel="noopener">GitHub ↗</a></td></tr>').join('') + '</table>';
+  return h + '<div class="site-actions"><button class="btn" onclick="secLeak=null;secLeakLoad()">↻</button></div>';
 }
 // ---- Code scanning: HCL AppScan CodeSweep (pull-request GitHub Action) on every site's repo
 let secSweep = null, secSweepLoading = false;
