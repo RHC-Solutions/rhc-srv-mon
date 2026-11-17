@@ -3,12 +3,43 @@ let lastBackup = null;
 function bkBytes(n){ if(!n) return '0 B'; const u=['B','KB','MB','GB','TB']; let i=0; n=Number(n); while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(i?1:0)+' '+u[i]; }
 function scopeChk(id,label,on){ return '<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="'+id+'" '+(on?'checked':'')+'> '+label+'</label>'; }
 
+// Live progress of a running backup (lib/backups.js setProgress): step, n/N, current item, upload stats.
+function bkDur(ms){ const s=Math.max(0,Math.round(ms/1000)); return s>=3600?Math.floor(s/3600)+'h '+Math.floor(s%3600/60)+'m':s>=60?Math.floor(s/60)+'m '+(s%60)+'s':s+'s'; }
+function bkBar(pct){ return '<div style="height:8px;border-radius:4px;background:var(--md-divider);overflow:hidden;margin:6px 0"><div style="height:100%;width:'+Math.max(0,Math.min(100,pct))+'%;background:var(--md-primary);transition:width .5s"></div></div>'; }
+function bkProgressHtml(d){
+  const p = d.progress || {}, up = p.upload;
+  let h = '<div id="bkProgress" style="margin-top:12px;padding:10px 12px;border:1px solid var(--md-divider);border-radius:8px">';
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:baseline"><b>⏳ '+esc(p.step || d.phase || 'starting')+(d.runningSite?' · '+esc(d.runningSite):'')+'</b>';
+  h += '<span style="margin-left:auto;color:var(--md-on-surface-med);font-size:13px">running '+(d.runningSince?bkDur(Date.now()-new Date(d.runningSince).getTime()):'')+'</span></div>';
+  if (up) {
+    const pct = up.pct != null ? up.pct : (up.total ? Math.round(up.bytes*100/up.total) : 0);
+    h += bkBar(pct);
+    h += '<div style="font-size:13px;color:var(--md-on-surface-med)">'+pct+'% · '+bkBytes(up.bytes)+' of '+bkBytes(up.total)+(up.speed?' · '+bkBytes(up.speed)+'/s':'')+(up.eta?' · ETA '+esc(up.eta):'')+'</div>';
+  } else if (p.total) {
+    h += bkBar(Math.round(p.done*100/p.total));
+    h += '<div style="font-size:13px;color:var(--md-on-surface-med)">'+Math.min(p.done+1,p.total)+' of '+p.total+(p.item?' · <span style="font-family:var(--md-font-mono)">'+esc(p.item)+'</span>':'')+'</div>';
+  } else if (p.item) h += '<div style="font-size:13px;color:var(--md-on-surface-med)">'+esc(p.item)+'</div>';
+  return h + '</div>';
+}
+// While a backup runs, poll just /api/backup every 2 s (the global refresh is every 10 s).
+let bkPollTimer = null;
+function bkPoll(){
+  if (bkPollTimer) return;
+  bkPollTimer = setInterval(async () => {
+    if (!document.getElementById('backupview') || !lastBackup || !lastBackup.running) { clearInterval(bkPollTimer); bkPollTimer = null; return; }
+    try { const j = await (await fetch('api/backup')).json(); lastBackup = j;
+      const el = document.getElementById('bkProgress');
+      if (j.running && el) el.outerHTML = bkProgressHtml(j); else renderBackup();
+    } catch(_) {}
+  }, 2000);
+}
 function renderBackup(){
   const view = document.getElementById('backupview');
   if (!lastBackup){ view.innerHTML = '<div class="upd-card">Loading…</div>'; return; }
   // don't clobber a field the user is mid-edit on during the 10s auto-refresh
   if (view.contains(document.activeElement) && ['INPUT','SELECT','TEXTAREA'].includes((document.activeElement.tagName||''))) return;
   const d = lastBackup, sc = d.scope||{}, sch = d.schedule||{}, lr = d.lastRun;
+  if (d.running) bkPoll();
   document.getElementById('host').textContent = '';
   document.getElementById('updated').textContent = (d.target ? 'Wasabi · ' : 'Wasabi not configured · ') + (sch.enabled ? 'daily at ' + String(sch.hour).padStart(2,'0') + ':' + String(sch.minute).padStart(2,'0') + ' · ' + bkModeText(sch) : 'schedule off') + ' · keep ' + (d.retentionDays||14) + ' days, ≥' + (d.keepFulls||4) + ' fulls';
   showBanner(null);
@@ -27,6 +58,7 @@ function renderBackup(){
   else html += '<button class="btn update" id="bkRun" title="Everything in scope, complete; becomes the base for later diffs">▶ Full backup</button><button class="btn" id="bkRunDiff" title="Databases and configs complete; site files only what changed since the last full backup">▶ Diff backup</button>';
   html += '<button class="btn" id="bkList">↻ List remote</button>';
   html += '</div></div>';
+  if (d.running) html += bkProgressHtml(d);
   if (lr){
     html += '<div style="margin-top:10px;font-size:15px">';
     html += '<span class="upd-badge '+(lr.success?'ok':'na')+'">'+(lr.success?'✓ last backup ok':'⚠ last backup had errors')+'</span> ';
