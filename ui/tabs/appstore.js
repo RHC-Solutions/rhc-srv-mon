@@ -29,11 +29,16 @@ function renderAppStore(fromLoad){
     view.innerHTML = h; return;
   }
   const busy = jobs.some(j => j.state === 'running' || j.state === 'queued');
+  // ⬆ Update all: every installed version of every updatable item in this category (queued one by one)
+  const catTargets = asUpdTargets(asData.items.filter(x => x.category === asCat && !x.app));
+  if (catTargets.length > 1) h += '<div class="toolbar" style="margin-bottom:12px;justify-content:flex-end"><button class="btn" ' + (busy ? 'disabled ' : '') + 'onclick="armConfirm(this, \'Update all ' + catTargets.length + ' in this category?\', () => asUpdateAll(\'' + asCat + '\', null, this))">⬆ Update all (' + catTargets.length + ')</button></div>';
   h += '<div class="upd-grid">';
   for (const it of asData.items.filter(x => x.category === asCat)) {
     if (it.app) { h += asAppCard(it, busy); continue; }
     const inst = Object.entries(it.installed).filter(([, v]) => v);
-    h += '<div class="upd-card"><div class="site-card-hd"><h3>' + esc(it.name) + '</h3>' + (inst.length ? '<span class="upd-badge ok">installed</span>' : '<span class="upd-badge na">not installed</span>') + '</div>'
+    const itTargets = asUpdTargets([it]);
+    h += '<div class="upd-card"><div class="site-card-hd"><h3>' + esc(it.name) + '</h3><span style="display:flex;align-items:center;gap:8px">' + (inst.length ? '<span class="upd-badge ok">installed</span>' : '<span class="upd-badge na">not installed</span>')
+      + (itTargets.length > 1 ? '<button class="btn small" ' + (busy ? 'disabled ' : '') + 'onclick="armConfirm(this, \'Update all ' + itTargets.length + ' versions?\', () => asUpdateAll(null, \'' + it.id + '\', this))">⬆ Update all</button>' : '') + '</span></div>'
       + '<p class="dim" style="margin:0 0 8px;font-size:14px">' + esc(it.desc) + '</p>'
       + (it.risky ? '<p style="margin:0 0 8px;font-size:13.5px;color:var(--md-warning)">⚠ ' + esc(it.risky) + '</p>' : '')
       + '<table class="upd-table">';
@@ -168,6 +173,24 @@ async function asWpLogin(domain){
 }
 async function asJobLog(id){
   try { const j = await stApi('GET', 'api/appstore/jobs/' + id); const el = document.getElementById('asLog' + id); if (el) { el.textContent = j.log.join('\n'); el.scrollTop = el.scrollHeight; } } catch(_){}
+}
+// [{id, version}] of every installed version that can be updated
+function asUpdTargets(items){
+  const out = [];
+  for (const it of items) if (it.canUpdate && !it.app) for (const v of it.versions) if (it.installed[v]) out.push({ id: it.id, version: v, name: it.name });
+  return out;
+}
+async function asUpdateAll(cat, id, btn){
+  const items = (asData.items || []).filter(x => id ? x.id === id : x.category === cat);
+  const targets = asUpdTargets(items);
+  if (btn) btn.disabled = true;
+  let ok = 0, fail = 0;
+  for (const t of targets) {   // the server runs its jobs one at a time; this only queues them
+    try { const j = await stApi('POST', 'api/appstore/' + t.id + '/update', { version: t.version }); ok++; if (!asOpenJob) asOpenJob = j.id; }
+    catch(e){ fail++; stErr(e, t.name + (t.version !== 'latest' ? ' ' + t.version : '')); }
+  }
+  toast(ok + ' update' + (ok === 1 ? '' : 's') + ' queued' + (fail ? ', ' + fail + ' failed to start' : '') + ' — follow them under Jobs', fail ? 'warn' : 'success');
+  loadAppStore(false);
 }
 async function asRun(id, action, version, btn){
   if (btn) btn.disabled = true;
