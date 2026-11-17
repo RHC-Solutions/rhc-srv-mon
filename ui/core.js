@@ -337,6 +337,10 @@ async function refresh(){
   lastData = take(st, 'status') || lastData;
   lastDb = take(db, 'db') || lastDb;
   lastUpdates = take(up, 'updates') || lastUpdates;
+  // menu footer: the panel's version (Updates › panel row), and the newer one when GitHub has it
+  try { const pc = lastUpdates && (lastUpdates.components || []).find(c => c.key === 'panel'); const ft = document.getElementById('side-ft');
+    if (ft) ft.innerHTML = 'auto-refresh 10s' + (pc && pc.currentVersion ? ' · <a href="updates" onclick="event.preventDefault();setTab(\'updates\')" title="' + esc('commit ' + (pc.currentHash || '')) + '" style="color:inherit">v' + esc(pc.currentVersion) + '</a>'
+      + (pc.updateAvailable && pc.latestVersion ? ' <span style="color:var(--md-warning)" title="newer on GitHub">→ v' + esc(pc.latestVersion) + '</span>' : '') : ''); } catch(_) {}
   lastSites = take(si, 'sites', (v) => v && Array.isArray(v.sites)) || lastSites;
   lastModules = take(mo, 'modules') || lastModules;
   lastBackup = take(bk, 'backup') || lastBackup;

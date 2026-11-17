@@ -47,7 +47,7 @@
       <button type="button" class="side-act danger" onclick="armConfirm(this.querySelector('span'), 'Click again to stop', () => panelCtl('stop'))"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg><span>Stop panel</span></button>
       <div class="side-hint" title="Run as root on the server">start: <code>sbctl start</code></div>
     </div>
-    <div class="side-ft">auto-refresh 10s</div>
+    <div class="side-ft" id="side-ft">auto-refresh 10s</div>
   </nav>
   <main class="content">
   <header class="hdr-row"><h1><span id="pagetitle">Sites</span> <span id="host" class="sub"></span></h1><div class="statuses" id="statuses"></div></header>

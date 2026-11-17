@@ -173,6 +173,12 @@ half a site becomes unmanageable: the bad row re-renders on every later change a
   scanned by it. All sites at once: **Security › Code scanning** (`lib/sites/codesweep.js`, `/api/codesweep`,
   `/api/sites/:domain/codesweep`).
 
+- **Code scan** (site › Security, all sites: **Security › Code scan**): Semgrep CE (`p/default`), `npm audit` /
+  `pnpm audit` per lock file and `pip-audit` (the site's `.venv`, else `requirements.txt`), run as the site user in
+  `htdocs/<domain>` — daily per site, one at a time, or on demand. Results in settings kv `codescan:<domain>`; an event
+  (warn) when critical/high findings grow. Scanners: App Store › Tools › Code scanners (`/opt/codescan` venv)
+  (`lib/codescan.js`, `/api/codescan`, `/api/codescan/run`, `/api/sites/:domain/codescan`).
+
 ## App Store
 
 Install / update / remove server software from the vendors' repos (`lib/appstore.js`, jobs run one at a time). Each category

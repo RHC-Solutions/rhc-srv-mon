@@ -67,9 +67,40 @@ function renderSecurity(fromLoad){
   const nBanned = (f.jails || []).reduce((a, j) => a + (j.banned || []).length, 0);
   h += '<div class="upd-card" style="margin-top:14px"><h3>fail2ban</h3><p style="margin:0">' + (f.installed ? (f.jails || []).length + ' jail(s) running, ' + nBanned + ' IP(s) banned. ' : 'fail2ban is not running. ')
     + '<a href="firewall" onclick="event.preventDefault();setTab(\'firewall\')">Manage jails and bans on the Firewall page →</a></p></div>';
+  h += '<div class="upd-card" style="margin-top:14px" id="secScan">' + secScanHtml() + '</div>';
   h += '<div class="upd-card" style="margin-top:14px" id="secSweep">' + secSweepHtml() + '</div>';
   view.innerHTML = h;
   if (!secSweep && !secSweepLoading) secSweepLoad();
+  if (!secScan && !secScanLoading) secScanLoad();
+}
+// ---- Code scan of every site on this server (Semgrep, npm audit, pip-audit — lib/codescan.js)
+let secScan = null, secScanLoading = false, secScanPoll = null;
+async function secScanLoad(){
+  clearTimeout(secScanPoll); secScanLoading = true;
+  try { secScan = await stApi('GET', 'api/codescan'); } catch(e){ secScan = { error: e.message }; }
+  secScanLoading = false;
+  const el = document.getElementById('secScan'); if (!el) return;
+  el.innerHTML = secScanHtml();
+  if (secScan.running || (secScan.queue || []).length) secScanPoll = setTimeout(() => { if (state.tab === 'security') secScanLoad(); }, 5000);
+}
+function secScanHtml(){
+  let h = '<h3>🔍 Code scan — Semgrep · npm audit · pip-audit</h3><p class="dim" style="margin:0 0 8px;font-size:14px">Every site\'s code on this server, scanned as its own user, daily (one site at a time). Details on each site\'s Security tab.</p>';
+  if (!secScan) return h + '<div class="dim">Loading…</div>';
+  if (secScan.error) return h + '<div style="color:var(--md-error-bright)">' + esc(secScan.error) + '</div>';
+  if (!secScan.installed.semgrep) h += '<div class="banner bad" style="margin-bottom:10px"><span class="ico">⚠</span> Semgrep is not installed — only dependency audits run. <a href="appstore" onclick="event.preventDefault();asCat=\'tools\';setTab(\'appstore\')">Install it: App Store › Tools › Code scanners</a></div>';
+  const q = secScan.queue || [], run = secScan.running;
+  h += '<table class="upd-table"><tr><th>Site</th><th>Findings</th><th>Last scan</th><th></th></tr>' + secScan.sites.map(x => {
+    const st = run && run.domain === x.domain ? '⏳ ' + esc(run.step) + '…' : q.includes(x.domain) ? '🕒 queued' : '';
+    return '<tr><td><a href="sites?d=' + esc(encodeURIComponent(x.domain)) + '&t=security" onclick="event.preventDefault();siteGo(\'' + esc(x.domain) + '\', \'security\')"><b>' + esc(x.domain) + '</b></a></td><td>' + (x.last && x.last.error ? '<span style="color:var(--md-error-bright)">' + esc(x.last.error) + '</span>' : scanCountsHtml(x.last && x.last.counts)) + '</td>'
+      + '<td class="dim" style="font-size:13px">' + (st || (x.last ? esc(new Date(x.last.at).toLocaleString()) : '–')) + '</td><td style="text-align:right"><button class="btn small" ' + (st ? 'disabled ' : '') + 'onclick="secScanRun(\'' + esc(x.domain) + '\', this)">Scan</button></td></tr>'; }).join('') + '</table>';
+  h += '<div class="site-actions"><button class="btn pri" ' + (run ? 'disabled ' : '') + 'onclick="secScanRun(null, this)">Scan all now</button> <button class="btn" onclick="secScanLoad()">↻</button></div>';
+  return h;
+}
+async function secScanRun(domain, btn){
+  if (btn) btn.disabled = true;
+  try { const r = await stApi('POST', 'api/codescan/run', domain ? { domain } : {}); toast((r.queued.length || 'No') + ' site(s) queued for a code scan', 'success'); }
+  catch(e){ stErr(e, 'Code scan'); }
+  secScanLoad();
 }
 // ---- Code scanning: HCL AppScan CodeSweep (pull-request GitHub Action) on every site's repo
 let secSweep = null, secSweepLoading = false;

@@ -1244,6 +1244,59 @@ async function siteCertDelete(id){
 
 /* ---- Security ---- */
 function siteTabSecurity(s){
+  setTimeout(() => siteScanLoad(s.domain), 0);
+  return '<div id="siteScan">' + siteCard('🔍 Code scan', '<div class="dim">Loading…</div>') + '</div>' + siteTabSecurityNginx(s);
+}
+// ---- Code scan (lib/codescan.js): Semgrep + npm audit + pip-audit on the server, as the site user
+let siteScanPoll = null;
+async function siteScanLoad(domain){
+  clearTimeout(siteScanPoll);
+  let d; try { d = await siteApi('GET', 'api/sites/' + encodeURIComponent(domain) + '/codescan'); } catch(e){ d = { error: e.message }; }
+  const el = document.getElementById('siteScan'); if (!el || siteView.domain !== domain) return;
+  el.innerHTML = siteScanHtml(d);
+  if (d.running || d.queued) siteScanPoll = setTimeout(() => siteScanLoad(domain), 5000);
+}
+const scanSevColor = (v) => v === 'critical' || v === 'high' ? 'var(--md-error-bright)' : (v === 'moderate' || v === 'medium') ? 'var(--md-warning)' : 'var(--md-on-surface-dis)';
+function scanCountsHtml(c){
+  if (!c) return '<span class="dim">not scanned yet</span>';
+  const parts = ['critical', 'high', 'medium', 'low'].filter(k => c[k]).map(k => '<span style="color:' + scanSevColor(k) + ';font-weight:600">' + c[k] + ' ' + k + '</span>');
+  return parts.length ? parts.join(' · ') : '✅ nothing found';
+}
+function siteScanHtml(d){
+  const busy = d.running ? '⏳ scanning — ' + esc(d.running.step) + '…' : d.queued ? '🕒 queued' : '';
+  const btn = '<button class="btn small pri" ' + (busy ? 'disabled ' : '') + 'onclick="siteScanRun(this)">Scan now</button> <button class="btn small" onclick="siteScanLoad(siteView.domain)">↻</button>';
+  if (d.error) return siteCard('🔍 Code scan', '<div style="color:var(--md-error-bright)">' + esc(d.error) + '</div>', btn);
+  let h = '<p class="dim" style="margin:0 0 8px;font-size:14px">Semgrep (rules <span class="mono">p/default</span>), <span class="mono">npm audit</span> and <span class="mono">pip-audit</span> on the code in <span class="mono">htdocs/' + esc(siteView.domain) + '</span>, run as the site user — daily, or now.'
+    + (!d.installed.semgrep ? ' <span style="color:var(--md-warning)">Semgrep is not installed: <a href="appstore" onclick="event.preventDefault();asCat=\'tools\';setTab(\'appstore\')">App Store › Tools › Code scanners</a>.</span>' : '') + '</p>';
+  if (busy) h += '<div style="font-size:14.5px;margin-bottom:8px">' + busy + '</div>';
+  const r = d.result;
+  if (!r) return siteCard('🔍 Code scan', h + (busy ? '' : '<div class="dim">Not scanned yet.</div>'), btn);
+  h += '<div style="font-size:14.5px;margin-bottom:10px">' + scanCountsHtml(r.counts) + ' <span class="dim">· ' + esc(new Date(r.at).toLocaleString()) + ' · ' + Math.round((r.duration_ms || 0) / 1000) + ' s</span></div>';
+  if (r.error) h += '<div style="color:var(--md-error-bright)">' + esc(r.error) + '</div>';
+  // Semgrep
+  const sg = r.semgrep || {};
+  h += '<h4 style="margin:10px 0 6px">Semgrep</h4>';
+  if (sg.skipped || sg.error) h += '<div class="' + (sg.error ? 'site-why' : 'dim') + '" style="font-size:14px">' + esc(sg.skipped || sg.error) + '</div>';
+  else if (!sg.findings.length) h += '<div style="font-size:14px">✅ No findings</div>';
+  else h += '<table class="upd-table"><tr><th>Severity</th><th>File</th><th>Finding</th></tr>' + sg.findings.slice(0, 100).map(f => '<tr><td style="color:' + scanSevColor(f.severity) + ';font-weight:600">' + esc(f.severity) + '</td><td class="mono" style="font-size:13px;white-space:nowrap">' + esc(f.path) + ':' + f.line + '</td><td style="font-size:13.5px">' + esc(f.message) + '<div class="dim mono" style="font-size:12px">' + (f.url ? '<a href="' + esc(f.url) + '" target="_blank" rel="noopener">' + esc(f.rule) + '</a>' : esc(f.rule)) + (f.cwe ? ' · ' + esc(f.cwe) : '') + '</div></td></tr>').join('') + '</table>'
+    + (sg.total > 100 ? '<div class="dim" style="font-size:13px">… ' + (sg.total - 100) + ' more</div>' : '');
+  // dependencies
+  const deps = [].concat(r.npm || [], r.pip || []);
+  h += '<h4 style="margin:14px 0 6px">Dependencies</h4>';
+  if (!deps.length) h += '<div class="dim" style="font-size:14px">No package-lock.json / pnpm-lock.yaml, .venv or requirements.txt found.</div>';
+  for (const a of deps) {
+    h += '<div style="font-size:14px;margin:8px 0 4px"><b class="mono">' + esc(a.dir) + '</b> <span class="dim">' + esc(a.tool) + '</span> — ' + (a.error ? '<span style="color:var(--md-error-bright)">' + esc(a.error) + '</span>' : a.total ? a.total + ' vulnerable package(s)' + (a.unrated ? ' <span class="dim">(pip-audit gives no severity; counted as high)</span>' : '') : '✅ none') + '</div>';
+    if (a.vulns && a.vulns.length) h += '<table class="upd-table"><tr><th>Severity</th><th>Package</th><th>Advisory</th><th>Fix</th></tr>' + a.vulns.slice(0, 40).map(v => '<tr><td style="color:' + scanSevColor(v.severity) + ';font-weight:600">' + esc(v.severity) + '</td><td class="mono">' + esc(v.name) + '</td><td style="font-size:13.5px">' + (v.url ? '<a href="' + esc(v.url) + '" target="_blank" rel="noopener">' + esc(v.title || v.id || '') + '</a>' : esc(v.title || '')) + '</td><td class="mono dim" style="font-size:13px">' + esc(v.fix || '–') + '</td></tr>').join('') + '</table>';
+  }
+  return siteCard('🔍 Code scan', h, btn);
+}
+async function siteScanRun(btn){
+  if (btn) btn.disabled = true;
+  try { await siteApi('POST', 'api/codescan/run', { domain: siteView.domain }); toast('Code scan queued — Semgrep can take a few minutes', 'success'); }
+  catch(e){ siteErr(e, 'Code scan'); }
+  siteScanLoad(siteView.domain);
+}
+function siteTabSecurityNginx(s){
   return siteSub('security', siteUrl('/security'), (v) => {
     const ba = v.basic_auth || {};
     const noPh = !v.has_settings_placeholder ? '<div class="banner bad" style="margin-bottom:12px"><span class="ico">⚠</span> This vhost template has no <code>{{settings}}</code> placeholder, so these settings would not reach nginx. <button class="btn small" onclick="siteSecuritySave(true)" style="margin-left:8px">Insert {{settings}} after the .well-known block</button></div>' : '';
