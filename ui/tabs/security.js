@@ -67,7 +67,44 @@ function renderSecurity(fromLoad){
   const nBanned = (f.jails || []).reduce((a, j) => a + (j.banned || []).length, 0);
   h += '<div class="upd-card" style="margin-top:14px"><h3>fail2ban</h3><p style="margin:0">' + (f.installed ? (f.jails || []).length + ' jail(s) running, ' + nBanned + ' IP(s) banned. ' : 'fail2ban is not running. ')
     + '<a href="firewall" onclick="event.preventDefault();setTab(\'firewall\')">Manage jails and bans on the Firewall page →</a></p></div>';
+  h += '<div class="upd-card" style="margin-top:14px" id="secSweep">' + secSweepHtml() + '</div>';
   view.innerHTML = h;
+  if (!secSweep && !secSweepLoading) secSweepLoad();
+}
+// ---- Code scanning: HCL AppScan CodeSweep (pull-request GitHub Action) on every site's repo
+let secSweep = null, secSweepLoading = false;
+async function secSweepLoad(){
+  secSweepLoading = true;
+  try { secSweep = await stApi('GET', 'api/codesweep'); } catch(e){ secSweep = { error: e.message }; }
+  secSweepLoading = false;
+  const el = document.getElementById('secSweep'); if (el) el.innerHTML = secSweepHtml();
+}
+function secSweepHtml(){
+  let h = '<h3>🔎 Code scanning — HCL AppScan CodeSweep</h3><p class="dim" style="margin:0 0 8px;font-size:14px">A GitHub Action on each site\'s repo that scans the code every <b>pull request</b> changes (annotations + check run on the PR). Switch it per site here or on the site\'s GitHub tab.</p>';
+  if (!secSweep) return h + '<div class="dim">Loading…</div>';
+  if (secSweep.error) return h + '<div style="color:var(--md-error-bright)">' + esc(secSweep.error) + '</div>';
+  const S = secSweep.sites || [], conn = S.filter(x => x.connected), on = conn.filter(x => x.enabled);
+  h += '<table class="upd-table"><tr><th>Site</th><th>Repo</th><th>CodeSweep</th><th></th></tr>' + S.map(x => '<tr><td><a href="sites?d=' + esc(encodeURIComponent(x.domain)) + '&t=github" onclick="event.preventDefault();siteGo(\'' + esc(x.domain) + '\', \'github\')"><b>' + esc(x.domain) + '</b></a></td><td class="mono dim" style="font-size:13px">' + esc(x.repo || 'not connected') + '</td><td>'
+    + (x.error ? '<span style="color:var(--md-error-bright)">' + esc(x.error) + '</span>' : !x.connected ? '<span class="dim">–</span>' : x.enabled ? '🟢 on' + (x.managed ? '' : ' <span class="dim">(repo\'s own)</span>') : '<span class="dim">off</span>') + '</td><td style="text-align:right">'
+    + (x.connected && !x.error ? (x.enabled ? (x.managed ? '<button class="btn small" onclick="secSweepSite(\'' + esc(x.domain) + '\', false, this)">Switch off</button>' : '') : '<button class="btn small pri" onclick="secSweepSite(\'' + esc(x.domain) + '\', true, this)">Switch on</button>') : '') + '</td></tr>').join('') + '</table>';
+  h += '<div class="site-actions" style="justify-content:space-between"><span class="dim" style="font-size:13.5px">' + on.length + ' of ' + conn.length + ' connected site(s) on</span><span>'
+    + (on.length < conn.length ? '<button class="btn pri" onclick="armConfirm(this, \'Add the workflow to ' + (conn.length - on.length) + ' repo(s) and push?\', () => secSweepAll(true, this))">Switch on for all</button> ' : '')
+    + (on.length ? '<button class="btn danger" onclick="armConfirm(this, \'Remove it from every repo?\', () => secSweepAll(false, this))">Switch off for all</button>' : '') + '</span></div>';
+  return h;
+}
+async function secSweepSite(domain, on, btn){
+  if (btn) btn.disabled = true;
+  try { const r = await stApi('PUT', 'api/sites/' + encodeURIComponent(domain) + '/codesweep', { on }); toast(domain + ': CodeSweep ' + (on ? 'on' : 'off') + ' — ' + r.push.summary, 'success', { duration: 8000 }); }
+  catch(e){ stErr(e, 'CodeSweep'); }
+  secSweepLoad();
+}
+async function secSweepAll(on, btn){
+  if (btn) btn.disabled = true;
+  toast((on ? 'Adding' : 'Removing') + ' CodeSweep on every connected site…');
+  try { const r = await stApi('POST', 'api/codesweep/all', { on }); const bad = r.results.filter(x => !x.ok);
+    toast(r.results.length - bad.length + ' site(s) done' + (bad.length ? ', ' + bad.length + ' failed: ' + bad.map(x => x.domain + ' (' + x.summary + ')').join('; ') : ''), bad.length ? 'warn' : 'success', { duration: 12000 }); }
+  catch(e){ stErr(e, 'CodeSweep'); }
+  secSweepLoad();
 }
 async function secDoLookup(){ const ip = (document.getElementById('secIp') || {}).value.trim(); if (!ip) return; secLookupIp(ip); }
 async function secLookupIp(ip){

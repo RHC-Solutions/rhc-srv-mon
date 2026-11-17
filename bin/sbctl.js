@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// sbctl — command line for the SB SRV Manager panel (run as root on the server).
+// sbctl — command line for the RHC SRV MAN panel (run as root on the server).
 //
 //   panel:  status | start | stop | restart | logs | check
 //   login:  users | passwd <user> | 2fa-reset <user> | logout <user>|--all
@@ -29,7 +29,7 @@ const green = (s) => c('32', s), red = (s) => c('31', s), yellow = (s) => c('33'
 function die(msg, code) { console.error(red('✗ ') + msg); process.exit(code == null ? 1 : code); }
 function done(code) { process.exit(code || 0); }   // lib modules may leave timers behind
 
-const HELP = `${bold('sbctl')} — SB SRV Manager from the command line (run as root)
+const HELP = `${bold('sbctl')} — RHC SRV MAN from the command line (run as root)
 
 ${bold('Panel')}
   sbctl status                 is the panel running, where it listens, pm2 state

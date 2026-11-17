@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * sb-srv-mon (RHC SRV Manager) — server entry point.
+ * RHC SRV MAN (sb-srv-mon) — server entry point.
  *
  * Feature code lives in lib/ (one module per tab/section), the browser UI in ui/ (assembled by
  * lib/page.js). This file wires the HTTP dispatcher, the WebSocket upgrade for the SSH terminal,
@@ -521,6 +521,7 @@ if (NO_JOBS) {
   setInterval(() => require('./lib/sites/hold').enforce().catch((e) => console.error('held-stopped check failed:', e.message)), 2 * 60_000);
   setInterval(() => require('./lib/sites/daemons').refreshStale().catch((e) => console.error('pm2 daemon refresh failed:', e.message)), 5 * 60_000);
   // the panel's own repo sync: keep both GitHub remotes on the same main (lib/autocommit.js)
+  try { const ch = require('./lib/panelrepo').ensure(); if (ch.length) console.log('panel repo: ' + ch.join('; ')); } catch (e) { console.error('panel repo:', e.message); }
   try { if (require('./lib/autocommit').ensure()) { console.log('rhc-autocommit: script updated'); require('./lib/util').execP('systemctl', ['daemon-reload'], { timeout: 30_000 }); } } catch (e) { console.error('rhc-autocommit install:', e.message); }
   // Node.js: install/refresh the daily newest-LTS updater (nodejs-update.timer, lib/nodejs.js)
   require('./lib/nodejs').ensureUpdater().catch((e) => console.error('nodejs updater:', e.message));
@@ -553,5 +554,5 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 
 server.listen(PORT, HOST, () => {
   selfReload.start();                      // code changes in lib/, ui/, server.js apply themselves
-  console.log(`sb-srv-mon (RHC SRV Manager) listening on http://${HOST}:${PORT}`);
+  console.log(`RHC SRV MAN (sb-srv-mon) listening on http://${HOST}:${PORT}`);
 });

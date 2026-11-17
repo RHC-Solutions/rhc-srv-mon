@@ -1,15 +1,13 @@
 #!/bin/bash
 # Managed by sb-srv-mon (resources/rhc-autocommit.sh → /usr/local/sbin/rhc-autocommit, installed by the
-# panel at start). Every 15 min (rhc-autocommit.timer): commit the panel's own changes and keep EVERY
-# GitHub remote of /opt/sb-srv-mon identical — roman-synergybeam/sbsrvman and RHC-Solutions/rhc-srv-mon
-# must always hold the same main.
+# panel at start). Every 15 min (rhc-autocommit.timer): commit the panel's own changes and sync them with
+# the panel's one repo, RHC-Solutions/rhc-srv-mon (lib/panelrepo.js) — no other remote is used.
 #
 #   1. commit local changes ("auto: <host> <time> UTC")
-#   2. fetch every remote; commits a remote has that this server does not (pushed from another server)
-#      are merged in — only when the merge is clean and every changed .js file passes `node --check`;
-#      otherwise the merge is undone, NOTHING is pushed anywhere (the remotes stay as they are) and it is
-#      logged for a deliberate fix
-#   3. push the same HEAD to every remote, so they all end up on one commit
+#   2. fetch rhc-srv-mon; commits it has that this server does not (pushed from another server) are
+#      merged in — only when the merge is clean and every changed .js file passes `node --check`;
+#      otherwise the merge is undone, NOTHING is pushed and it is logged for a deliberate fix
+#   3. push HEAD to rhc-srv-mon main
 # Serialised with panel landings/self-updates via /var/lock/rhc-autocommit. Secrets stay out through .gitignore.
 set -uo pipefail
 D=/opt/sb-srv-mon
@@ -19,8 +17,9 @@ cd "$D" || exit 1
 [ -d .git ] || exit 0
 export GIT_TERMINAL_PROMPT=0
 rc=0
-REMOTES=$(git remote)
-[ -n "$REMOTES" ] || { echo "no remotes"; exit 0; }
+# the remote that points at RHC-Solutions/rhc-srv-mon (the panel sets it up at start); nothing else
+REMOTES=$(git remote -v | awk '$3=="(fetch)" && tolower($2) ~ /[:\/]rhc-solutions\/rhc-srv-mon(\.git)?\/?$/ {print $1; exit}')
+[ -n "$REMOTES" ] || { echo "no remote for RHC-Solutions/rhc-srv-mon — not syncing"; exit 1; }
 
 # 1. local changes
 if [ -n "$(git status --porcelain)" ]; then

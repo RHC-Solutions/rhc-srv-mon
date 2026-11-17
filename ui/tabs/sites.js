@@ -805,9 +805,59 @@ function siteTabSettings(s){
       + siteField('Additional configuration', '<textarea id="stPhpExtra" rows="3">' + esc(s.php.additional_configuration == null ? 'date.timezone=UTC;\ndisplay_errors=off;' : s.php.additional_configuration) + '</textarea>', 'ini lines appended to PHP_VALUE') + '</div>'
       + '<div class="site-actions"><button class="btn pri" onclick="siteSavePhp()">Save</button></div>');
   }
+  if (s.type !== 'php') {
+    html += '<div id="sitePm2">' + siteCard('PM2', '<div class="dim">Loading…</div>') + '</div>';
+    setTimeout(() => sitePm2Load(s.domain), 0);
+  }
   html += '<div id="siteCcrc">' + siteCard('Claude Code Remote Control', '<div class="dim">Loading…</div>') + '</div>';
   setTimeout(() => siteCcrcLoad(s.domain), 0);
   return html;
+}
+// ---- PM2 (lib/sites/pm2conf.js): the site's processes + its ecosystem.config.js, editable
+let sitePm2Data = null;
+async function sitePm2Load(domain){
+  const [cfg, pr] = await Promise.all([
+    siteApi('GET', 'api/sites/' + encodeURIComponent(domain) + '/pm2-config').catch(e => ({ loadError: e.message })),
+    siteApi('GET', 'api/sites/' + encodeURIComponent(domain) + '/processes').catch(() => null)]);
+  sitePm2Data = { domain, cfg, procs: pr };
+  const el = document.getElementById('sitePm2'); if (el && siteView.domain === domain) el.innerHTML = sitePm2Html(sitePm2Data);
+}
+function sitePm2Html(d){
+  const s = siteView.data, c = d.cfg || {};
+  if (c.loadError) return siteCard('PM2', '<div style="color:var(--md-error-bright)">' + esc(c.loadError) + '</div>');
+  let h = '';
+  // processes, live
+  const ps = (d.procs && d.procs.processes) || [];
+  h += ps.length ? '<table class="upd-table" style="margin-bottom:10px"><tr><th>Process</th><th>Status</th><th>Memory</th><th>Restarts</th><th>Runs as</th><th></th></tr>' + ps.map(p => { const up = p.status === 'online';
+      return '<tr><td class="mono"><b>' + esc(p.name) + '</b></td><td><span class="' + (up ? 'up' : 'down') + '">' + (up ? '🟢' : '🔴') + ' ' + esc(p.status) + '</span></td><td>' + (p.fromDump ? '–' : fmtMem(p.memory)) + '</td><td>' + (p.fromDump ? '–' : p.restarts) + '</td><td class="mono dim">' + esc(p.pm2User) + '</td><td style="text-align:right;white-space:nowrap">' + siteCtlHtml(s.domain, p.name, p.pm2User, 'row') + '</td></tr>'; }).join('') + '</table>'
+    : '<p class="dim" style="margin:0 0 10px">No pm2 processes for this site.</p>';
+  // the definition
+  if (!c.exists) h += '<p class="dim" style="margin:0 0 8px;font-size:14px">No <span class="mono">' + esc(c.path || 'ecosystem.config.js') + '</span> yet — write one below and Save &amp; apply to run the app under pm2.</p>';
+  else if (c.error) h += '<p style="margin:0 0 8px;font-size:14px;color:var(--md-error-bright)">⚠ <span class="mono">ecosystem.config.js</span> does not load: ' + esc(c.error) + '</p>';
+  else h += '<table class="upd-table" style="margin-bottom:8px"><tr><th>App (ecosystem.config.js)</th><th>Runs</th><th>Instances</th><th>Max memory</th><th>Env</th></tr>' + c.apps.map(a => '<tr><td class="mono"><b>' + esc(a.name) + '</b></td><td class="mono" style="font-size:13px">' + esc((a.interpreter ? a.interpreter + ' ' : '') + a.script + (a.args ? ' ' + a.args : '')) + '</td><td>' + esc(String(a.instances)) + ' · ' + esc(a.exec_mode) + '</td><td>' + esc(a.max_memory_restart || '–') + '</td><td class="dim" style="font-size:13px">' + (a.env.length ? esc(a.env.join(', ')) : '–') + '</td></tr>').join('') + '</table>';
+  const tpl = c.exists ? c.content : '// pm2 process definition for ' + s.domain + '. `pm2 start ecosystem.config.js` from this directory.\nmodule.exports = {\n  apps: [{\n    name: ' + JSON.stringify(s.domain) + ',\n    script: \'app.js\',\n    cwd: ' + JSON.stringify('/home/' + s.user + '/htdocs/' + s.domain) + ',\n    instances: 1,\n    exec_mode: \'fork\',\n    max_memory_restart: \'512M\',\n    env: { NODE_ENV: \'production\'' + (s.nodejs && s.nodejs.port ? ', PORT: ' + s.nodejs.port : '') + ' },\n  }],\n};\n';
+  h += '<details' + (c.exists ? '' : ' open') + '><summary style="cursor:pointer;font-size:14.5px">Edit <span class="mono">' + esc(c.path || 'ecosystem.config.js') + '</span></summary>'
+    + '<textarea id="sitePm2Src" class="mono" rows="18" spellcheck="false" style="width:100%;margin-top:8px;font-size:13px">' + esc(tpl) + '</textarea>'
+    + '<div class="dim" style="font-size:13px;margin-top:4px">Checked by loading it with node as ' + esc(s.user) + ' before it replaces the current file (kept as <span class="mono">ecosystem.config.js.bak</span>). <b>Save &amp; apply</b> runs <span class="mono">pm2 startOrRestart ecosystem.config.js --update-env</span> and <span class="mono">pm2 save</span>.</div>'
+    + '<div class="site-actions"><button class="btn" onclick="sitePm2Save(false, this)">Save</button><button class="btn pri" onclick="sitePm2Save(true, this)">Save &amp; apply</button></div></details>'
+    + '<div id="sitePm2Out"></div>';
+  const ctl = ps.length ? '<button class="btn small" onclick="siteCtl(this, \'' + esc(s.domain) + '\', \'start\')">▶ Start all</button><button class="btn small" onclick="siteCtl(this, \'' + esc(s.domain) + '\', \'restart\')">⟳ Restart all</button><button class="btn small danger" onclick="siteCtl(this, \'' + esc(s.domain) + '\', \'stop\')">⏹ Stop all</button>' : '';
+  return siteCard('PM2', h, '<div class="site-ctl">' + ctl + '<button class="btn small" onclick="sitePm2Load(siteView.domain)">↻</button></div>');
+}
+async function sitePm2Save(apply, btn){
+  const src = document.getElementById('sitePm2Src'); if (!src) return;
+  const out = document.getElementById('sitePm2Out');
+  if (btn) btn.disabled = true;
+  if (apply) toast('Saving and restarting with pm2…');
+  try {
+    const r = await siteApi('PUT', siteUrl('/pm2-config'), { content: src.value, apply, mtime: sitePm2Data && sitePm2Data.cfg && sitePm2Data.cfg.mtime || null });
+    const ok = !r.applied || r.apply.ok;
+    toast(ok ? 'ecosystem.config.js saved' + (r.applied ? ' and applied' : '') : 'Saved, but pm2 failed to start it', ok ? 'success' : 'error', { duration: ok ? 5000 : 10000 });
+    await sitePm2Load(siteView.domain);
+    const o = document.getElementById('sitePm2Out');
+    if (o && r.applied) o.innerHTML = (r.leftover && r.leftover.length ? '<div style="margin-top:10px;font-size:14px;color:var(--md-warning)">⚠ Still in pm2 but no longer in the file: <b class="mono">' + esc(r.leftover.join(', ')) + '</b> — stop it above (it may hold the port).</div>' : '')
+      + '<pre class="mono" style="font-size:12px;white-space:pre-wrap;margin:8px 0 0;max-height:220px;overflow:auto">' + esc(r.apply.output || '') + '</pre>';
+  } catch(e){ siteErr(e, 'PM2'); if (btn) btn.disabled = false; if (out && e.detail) out.innerHTML = '<pre class="mono" style="font-size:12px;white-space:pre-wrap;margin:8px 0 0;max-height:220px;overflow:auto">' + esc(e.detail) + '</pre>'; }
 }
 // ---- Claude Code Remote Control (lib/sites/claudeRemote.js): on/off, sign-in, status, link
 let siteCcrcData = null, siteCcrcPoll = null;
@@ -1604,6 +1654,8 @@ function siteTabGithub(s){
       + '<p class="dim" style="font-size:13.5px;margin:8px 0 0">Sync and Pull commit local changes first, pull the branch (rebase), install dependencies when package.json / requirements.txt changed, run <span class="mono">npm run build</span> when the app has a build script, and restart the site\'s apps — a failed install or build leaves the running app alone.</p>' + siteGhAccountsHtml(g);
     h += '<div id="ghSec" style="margin-top:16px;border-top:1px solid var(--md-outline-variant, rgba(127,127,127,.25));padding-top:12px"><h3 style="margin:0 0 8px;font-size:16px">🛡 Security alerts &amp; Dependabot</h3><div class="dim">Loading from GitHub…</div></div>';
     setTimeout(() => siteGhSecLoad(s.domain), 0);
+    h += '<div id="ghSweep" style="margin-top:16px;border-top:1px solid var(--md-outline-variant, rgba(127,127,127,.25));padding-top:12px"><h3 style="margin:0 0 8px;font-size:16px">🔎 HCL AppScan CodeSweep</h3><div class="dim">Loading…</div></div>';
+    setTimeout(() => siteSweepLoad(s.domain), 0);
     return siteCard('GitHub', h);
   });
 }
@@ -1772,6 +1824,30 @@ async function siteGhLogin(opts){
     return v;
   }
   return null;
+}
+// ---- HCL AppScan CodeSweep (GitHub tab): the pull-request scan workflow on the site's repo
+async function siteSweepLoad(domain){
+  let d; try { d = await siteApi('GET', 'api/sites/' + encodeURIComponent(domain) + '/codesweep'); } catch(e){ d = { error: e.message }; }
+  const el = document.getElementById('ghSweep'); if (el && siteView.domain === domain) el.innerHTML = siteSweepHtml(d);
+}
+function siteSweepHtml(d){
+  let h = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px"><h3 style="margin:0;font-size:16px">🔎 HCL AppScan CodeSweep</h3><span>'
+    + (d.error ? '' : d.enabled ? (d.managed ? '<button class="btn small danger" onclick="armConfirm(this, \'Remove the workflow from the repo?\', () => siteSweepSet(false, this))">Switch off</button> ' : '') : '<button class="btn small pri" onclick="armConfirm(this, \'Add the workflow and push it?\', () => siteSweepSet(true, this))">Switch on</button> ')
+    + '<button class="btn small" onclick="siteSweepLoad(siteView.domain);this.disabled=true">↻</button></span></div>';
+  if (d.error) return h + '<div style="color:var(--md-error-bright)">' + esc(d.error) + '</div>';
+  h += '<p class="dim" style="margin:0 0 8px;font-size:14px">Scans the code each <b>pull request</b> changes (GitHub Action, <span class="mono">.github/workflows/codesweep.yml</span>); findings appear as annotations on the PR and in its check run. Pushes straight to main — the panel\'s own sync — are not scanned by it.</p>';
+  if (!d.enabled) return h + '<div style="font-size:14.5px">Off for this site.</div>';
+  h += '<div style="font-size:14.5px;margin-bottom:6px">' + (d.managed ? '🟢 On' : '🟢 On <span class="dim">(workflow file not written by the panel — managed in the repo)</span>') + '</div>';
+  if (d.runsError) h += '<div class="dim" style="font-size:13.5px">Runs: ' + esc(d.runsError) + '</div>';
+  else if (!d.runs.length) h += '<div class="dim" style="font-size:13.5px">No runs yet — the next pull request starts one.</div>';
+  else h += '<table class="upd-table"><tr><th>Result</th><th>Pull request</th><th>When</th></tr>' + d.runs.map(r => '<tr><td>' + (r.status !== 'completed' ? '⏳ ' + esc(r.status) : r.conclusion === 'success' ? '✅ success' : r.conclusion === 'neutral' ? '⚪ neutral' : '❌ ' + esc(r.conclusion || '')) + '</td><td><a href="' + esc(r.url) + '" target="_blank" rel="noopener">' + esc(r.displayTitle) + '</a> <span class="dim mono">' + esc(r.headBranch || '') + '</span></td><td class="dim">' + esc(new Date(r.createdAt).toLocaleString()) + '</td></tr>').join('') + '</table>';
+  return h;
+}
+async function siteSweepSet(on, btn){
+  if (btn) btn.disabled = true;
+  try { const r = await siteApi('PUT', siteUrl('/codesweep'), { on }); toast('CodeSweep ' + (on ? 'on' : 'off') + ' — ' + r.push.summary, 'success', { duration: 8000 }); }
+  catch(e){ siteErr(e, 'CodeSweep'); }
+  siteSweepLoad(siteView.domain);
 }
 // ---- Security alerts & Dependabot pull requests (GitHub tab)
 let ghSecData = null;

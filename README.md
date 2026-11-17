@@ -1,7 +1,23 @@
-# sb-srv-mon
+# RHC SRV MAN
 
 Zero-dependency Node.js (>= 22) server-management panel, on the road to replacing CloudPanel on this host.
 Runs as root under pm2 (`sb-srv-mon`, cwd `/root`), binds 127.0.0.1:8899, exposed by nginx at `/rhc-admin/`.
+The product name is **RHC SRV MAN** (per-host override: Settings → General → Panel name); the folder
+`/opt/sb-srv-mon`, the pm2 name `sb-srv-mon` and the `rhc-*` systemd units keep their technical names.
+
+## The panel's repo and updates
+
+**One repo: [RHC-Solutions/rhc-srv-mon](https://github.com/RHC-Solutions/rhc-srv-mon), branch `main`.** Every server that
+runs the panel takes its updates from it and commits/syncs only with it:
+
+- `lib/panelrepo.js` runs at start and before every update check: a remote pointing at the repo (`origin`, added or
+  re-pointed if missing), `main` tracking it, and remotes of retired repos (`roman-synergybeam/sbsrvman`) removed.
+- Updates → **⬆ Update from GitHub** fast-forwards to `origin/main`, syntax-checks, restarts, rolls back if the panel does
+  not come up (`lib/updates.js`).
+- `rhc-autocommit.timer` (every 15 min, `resources/rhc-autocommit.sh` → `/usr/local/sbin/rhc-autocommit`) commits local
+  changes, merges what other servers pushed (only if clean and `node --check` passes) and pushes to that repo — no other remote.
+- Edits on disk apply themselves (`lib/selfreload.js`): UI rebuilt in place, backend checked then restarted.
+- Old branches are kept as tags only: `archive/v2`, `archive/rhc-main-before-overwrite-20261107`.
 
 ## Layout
 
@@ -144,6 +160,23 @@ validated nginx write:
 Every rule is validated for `;` `{` `}` and newlines before it can reach a directive, and a rule nginx
 refuses is **discarded whole** — the file is restored *and* the row is removed. Without that second
 half a site becomes unmanageable: the bad row re-renders on every later change and fails again.
+
+### PM2 and code scanning per site
+
+- **Settings › PM2** (non-PHP sites): the site's pm2 processes with start/restart/stop, and its
+  `htdocs/<domain>/ecosystem.config.js` — editable; a save is first loaded with node as the site user (refused if it does not
+  load or an app lacks `name`/`script`), the old file kept as `ecosystem.config.js.bak`; **Save & apply** runs
+  `pm2 startOrRestart ecosystem.config.js --update-env && pm2 save` and lists apps still in pm2 that the file no longer
+  defines (`lib/sites/pm2conf.js`, `GET/PUT /api/sites/:domain/pm2-config`).
+- **GitHub › HCL AppScan CodeSweep**: switches `.github/workflows/codesweep.yml` (CodeSweep action v2.1) on/off in the site's
+  repo — only that file is committed and pushed. It scans **pull requests** only; the panel's direct pushes to `main` are not
+  scanned by it. All sites at once: **Security › Code scanning** (`lib/sites/codesweep.js`, `/api/codesweep`,
+  `/api/sites/:domain/codesweep`).
+
+## App Store
+
+Install / update / remove server software from the vendors' repos (`lib/appstore.js`, jobs run one at a time). Each category
+has **⬆ Update all** (every installed, updatable version in it), and each card with several installed versions its own.
 
 ## Creating and deleting a site
 
@@ -307,18 +340,19 @@ failure restores the previous file and reloads. Warns when bans go through ufw w
 
 ## Development
 
-Work in the `v2` worktree, never in the live checkout (an auto-commit cron pushes `main` every 15 minutes):
+Bigger changes: work in a worktree, not the live checkout (the auto-commit pushes `main` every 15 minutes and
+`lib/selfreload.js` applies every saved edit to the running panel):
 
 ```sh
-git worktree add /opt/sb-srv-mon-v2 v2          # once
-cd /root && PORT=8898 RHC_NO_JOBS=1 RHC_DEV=1 node /opt/sb-srv-mon-v2/server.js
+git worktree add -b dev /opt/sb-srv-mon-dev main    # once; delete the branch after landing
+cd /root && PORT=8898 RHC_NO_JOBS=1 RHC_DEV=1 node /opt/sb-srv-mon-dev/server.js
 ```
 
 `RHC_NO_JOBS=1` disables every scheduler (update checks, module scans, auto-update, cleanup, backups) — request-triggered
 actions still run against the real box. `RHC_DEV=1` rebuilds the page from `ui/` on every request. Landing:
 
 ```sh
-flock /var/lock/rhc-autocommit sh -c 'git merge --no-edit v2 && pm2 restart sb-srv-mon'
+flock /var/lock/rhc-autocommit sh -c 'git merge --no-edit dev && pm2 restart sb-srv-mon'
 pm2 logs sb-srv-mon --lines 30      # expect "re-adopted" lines for open SSH sessions
 ```
 

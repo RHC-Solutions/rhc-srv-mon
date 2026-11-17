@@ -47,7 +47,7 @@ function render(){
   const d = lastData;
   document.getElementById('host').textContent = d.hostname;
   document.getElementById('ivl').textContent = d.sample_interval_s;
-  document.title = (d.summary.down ? '🔴 ' : '🟢 ') + d.summary.online + '/' + d.summary.total + ' · RHC SRV Manager · ' + d.hostname;
+  document.title = (d.summary.down ? '🔴 ' : '🟢 ') + d.summary.online + '/' + d.summary.total + ' · RHC SRV MAN · ' + d.hostname;
   document.getElementById('updated').textContent = 'Last updated: ' + new Date(d.generated_at).toLocaleString();
   if (state.tab !== 'pm2') return;
   if (d.summary.down === 0) {

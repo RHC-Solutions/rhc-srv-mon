@@ -1,4 +1,4 @@
-// ---- Transfer: move sites from this server to another SB SRV Manager (or receive them). Not
+// ---- Transfer: move sites from this server to another RHC SRV MAN (or receive them). Not
 // clustering: the connection is made with a one-time transfer code and forgotten afterwards.
 let trData = null, trLoading = false, trCode = null, trPoll = null;
 async function loadTransfer(){
