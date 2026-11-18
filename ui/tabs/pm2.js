@@ -141,7 +141,7 @@ async function pm2Action(action, user, app) {
 // ---- Uptime Kuma section of the Monitor page: every service, port and public hostname Kuma watches
 // (kuma-sync adds new ones automatically). Data is cached 30 s on the server; fetched at most every 30 s here.
 let kumaData = null, kumaAt = 0, kumaLoading = false;
-const KUMA_SECTIONS = [['public', 'Public hostnames'], ['services', 'Services'], ['ports', 'Ports'], ['other', 'Added in Kuma']];
+const KUMA_SECTIONS = [['public', 'Public hostnames'], ['origin', 'Origins (without Cloudflare)'], ['services', 'Services'], ['ports', 'Ports'], ['other', 'Added in Kuma']];
 async function loadKuma(force){
   if (kumaLoading) return; kumaLoading = true;
   try { kumaData = await fetch('api/kuma' + (force ? '?refresh=1' : '')).then(r => r.json()); kumaAt = Date.now(); } catch(e){ kumaData = { error: e.message, monitors: [] }; }
