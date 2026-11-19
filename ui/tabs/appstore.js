@@ -41,6 +41,7 @@ function renderAppStore(fromLoad){
       + (itTargets.length > 1 ? '<button class="btn small" ' + (busy ? 'disabled ' : '') + 'onclick="armConfirm(this, \'Update all ' + itTargets.length + ' versions?\', () => asUpdateAll(null, \'' + it.id + '\', this))">⬆ Update all</button>' : '') + '</span></div>'
       + '<p class="dim" style="margin:0 0 8px;font-size:14px">' + esc(it.desc) + '</p>'
       + (it.risky ? '<p style="margin:0 0 8px;font-size:13.5px;color:var(--md-warning)">⚠ ' + esc(it.risky) + '</p>' : '')
+      + (it.publishable && inst.length ? '<p style="margin:0 0 8px;font-size:14px">' + (it.publicUrl ? '🌐 <a href="' + esc(it.publicUrl) + '" target="_blank" rel="noopener">' + esc(it.publicUrl) + '</a> <span class="dim">(a site under Sites)</span>' : '<span class="dim">Only reachable on this server (127.0.0.1) —</span> <button class="btn small" ' + (busy ? 'disabled ' : '') + 'onclick="asPublishDialog(\'' + it.id + '\', \'' + esc(it.name) + '\', \'publish\')">🌐 Publish…</button>') + '</p>' : '')
       + '<table class="upd-table">';
     for (const v of it.versions) {
       const iv = it.installed[v];
@@ -51,6 +52,7 @@ function renderAppStore(fromLoad){
         if (it.canRemove) btns += '<button class="btn small danger" ' + (busy ? 'disabled ' : '') + 'onclick="armConfirm(this, \'Remove ' + esc(it.name) + ' ' + label + '?\', () => asRun(\'' + it.id + '\',\'remove\',\'' + v + '\',this))">🗑 Remove</button>';
       } else {
         const other = !it.multi && inst.length;
+        if (it.publishable && !other) { btns += '<button class="btn small pri" ' + (busy ? 'disabled ' : '') + 'onclick="asPublishDialog(\'' + it.id + '\', \'' + esc(it.name) + '\', \'install\')">＋ Install</button>'; h += '<tr><td><b>' + esc(label) + '</b></td><td class="mono dim" style="font-size:13px"></td><td style="text-align:right;white-space:nowrap">' + btns + '</td></tr>'; continue; }
         btns += '<button class="btn small ' + (other ? '' : 'pri') + '" ' + (busy ? 'disabled ' : '') + 'onclick="' + (other || it.risky ? 'armConfirm(this, \'' + (other ? 'Switch to ' + label + '?' : 'Install?') + '\', () => asRun(\'' + it.id + '\',\'install\',\'' + v + '\',this))' : 'asRun(\'' + it.id + '\',\'install\',\'' + v + '\',this)') + '">' + (other ? '⇄ Switch to ' + esc(label) : '＋ Install') + '</button>';
       }
       h += '<tr><td><b>' + esc(label) + '</b></td><td class="mono dim" style="font-size:13px">' + esc(iv || '') + '</td><td style="text-align:right;white-space:nowrap">' + btns + '</td></tr>';
@@ -191,6 +193,27 @@ async function asUpdateAll(cat, id, btn){
   }
   toast(ok + ' update' + (ok === 1 ? '' : 's') + ' queued' + (fail ? ', ' + fail + ' failed to start' : '') + ' — follow them under Jobs', fail ? 'warn' : 'success');
   loadAppStore(false);
+}
+// Install (or publish) an app that gets its own hostname: a reverse-proxy site under Sites, reached
+// through its own Cloudflare Tunnel or a proxied A record (lib/app-publish.js). Empty name on install =
+// stays on 127.0.0.1 (publish later).
+function asPublishDialog(id, name, mode){
+  const it = (asData.items || []).find(x => x.id === id) || {};
+  sshModal('<h3>' + (mode === 'install' ? '＋ Install ' : '🌐 Publish ') + esc(name) + '</h3>'
+    + (mode === 'install' && it.risky ? '<p style="margin:0 0 10px;font-size:13.5px;color:var(--md-warning)">⚠ ' + esc(it.risky) + '</p>' : '')
+    + sshField('Hostname' + (mode === 'install' ? '' : ' *'), '<input id="apHost" placeholder="' + (id === 'portainer' ? 'docker' : 'status') + '.example.com" autocomplete="off">', 'becomes a site under Sites (reverse proxy to the app, HTTPS, Cloudflare only)' + (mode === 'install' ? ' — leave empty to keep it on 127.0.0.1 and publish later' : ''))
+    + sshField('Reach it through', '<select id="apHow"><option value="tunnel" selected>its own Cloudflare Tunnel (no open port; DNS made automatically)</option><option value="a">an A record → this server (proxied, orange cloud)</option></select>', 'the domain\'s zone has to be in a connected Cloudflare account; otherwise set the DNS record yourself')
+    + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" id="apGo">' + (mode === 'install' ? 'Install' : 'Publish') + '</button></div>');
+  document.getElementById('apGo').onclick = async () => {
+    const host = document.getElementById('apHost').value.trim(), how = document.getElementById('apHow').value;
+    if (mode === 'publish' && !host) return toast('Enter a hostname', 'warn');
+    sshModalClose();
+    try {
+      const j = mode === 'install' ? await stApi('POST', 'api/appstore/' + id + '/install', host ? { version: 'latest', host, how } : { version: 'latest' })
+        : await stApi('POST', 'api/appstore/' + id + '/publish', { host, how });
+      asOpenJob = j.id; toast((mode === 'install' ? 'Installing ' : 'Publishing ') + name + (host ? ' as ' + host : ''), 'success'); loadAppStore(false);
+    } catch(e){ stErr(e, 'App Store'); }
+  };
 }
 async function asRun(id, action, version, btn){
   if (btn) btn.disabled = true;
