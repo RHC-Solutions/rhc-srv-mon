@@ -644,6 +644,16 @@ function sysBodyHtml(){
     + '<div style="font-size:14.5px">' + (rb.required ? '🔁 <b>Restart needed</b> — ' + esc((rb.reasons || []).join('; ')) : '✓ No restart needed') + '<div class="dim" style="font-size:13px">kernel ' + esc((rb.kernel || {}).running || '?') + (rb.bootedAt ? ' · up since ' + esc(new Date(rb.bootedAt).toLocaleString()) : '') + '</div></div>'
     + '<button class="btn' + (rb.required ? ' update' : '') + '" onclick="sysReboot()" ' + (d.job && d.job.running ? 'disabled title="wait for the upgrade to finish"' : '') + '>🔁 Restart server…</button></div>';
   if (!d.apt) return h + '<div class="dim">This server has no apt — system packages are not managed here.</div>';
+  // schedule: manual (daily apt-get update only) or automatic upgrade, at a server time
+  const sc = d.schedule || { mode: 'manual', hour: 4, minute: 30, reboot: false }, lr = d.lastRun;
+  const p2 = (n) => String(n).padStart(2, '0');
+  h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border-radius:8px;margin-bottom:12px;background:var(--md-surface-container-high, rgba(127,127,127,.1))">'
+    + '<b style="font-size:14.5px">Schedule</b>'
+    + '<select id="sysSchedMode" onchange="sysSaveSchedule()"><option value="manual"' + (sc.mode === 'manual' ? ' selected' : '') + '>Manual — check daily, upgrade by hand</option><option value="auto"' + (sc.mode === 'auto' ? ' selected' : '') + '>Automatic — upgrade daily</option></select>'
+    + '<span>at</span><input id="sysSchedTime" type="time" value="' + p2(sc.hour) + ':' + p2(sc.minute) + '" onchange="sysSaveSchedule()" style="width:110px">'
+    + (sc.mode === 'auto' ? '<label style="display:flex;align-items:center;gap:6px;font-size:14px" title="Only when the upgrade needs it (new kernel, libc …) — every site is down for 1–3 minutes"><input type="checkbox" id="sysSchedReboot"' + (sc.reboot ? ' checked' : '') + ' onchange="sysSaveSchedule()"> restart the server afterwards if needed</label>' : '')
+    + '<span class="dim" style="font-size:13px;flex-basis:100%">' + (sc.mode === 'auto' ? 'apt-get update + upgrade every day at ' : 'apt-get update every day at ') + p2(sc.hour) + ':' + p2(sc.minute) + ' server time' + (sc.mode === 'manual' ? ' — Telegram/Slack get the list when there is something to upgrade' : '')
+    + (lr ? ' · last run ' + esc(new Date(lr.at).toLocaleString()) + (lr.ok ? ' ✓' : ' ❌ ' + esc(lr.error || '')) : '') + '</span></div>';
   // job
   const j = d.job;
   if (j) {
@@ -662,6 +672,13 @@ function sysBodyHtml(){
       + (P.length > show.length ? '<a href="#" onclick="event.preventDefault();sysShowAll=true;sysRender()">show all ' + P.length + '</a>' : '');
   }
   return h;
+}
+async function sysSaveSchedule(){
+  const t = (document.getElementById('sysSchedTime').value || '04:30').split(':'), rb = document.getElementById('sysSchedReboot');
+  const body = { mode: document.getElementById('sysSchedMode').value, hour: parseInt(t[0], 10), minute: parseInt(t[1], 10) };
+  if (rb) body.reboot = rb.checked;
+  try { const sc = await stApi('PUT', 'api/settings/system/schedule', body); if (sysData) sysData.schedule = sc; toast('Schedule saved: ' + (sc.mode === 'auto' ? 'automatic upgrade' : 'manual') + ' at ' + String(sc.hour).padStart(2, '0') + ':' + String(sc.minute).padStart(2, '0'), 'success'); } catch(e){ stErr(e, 'Schedule'); }
+  sysRender();
 }
 async function sysCheck(btn){
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Checking…'; }
