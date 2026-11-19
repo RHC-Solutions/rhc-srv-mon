@@ -631,6 +631,7 @@ function sysBtnsHtml(){
   const d = sysData; if (!d || d.error || !d.apt) return '';
   const run = d.job && d.job.running;
   return '<button class="btn small" ' + (run ? 'disabled' : '') + ' onclick="sysCheck(this)" title="apt-get update: refresh the package lists">⟳ Check for updates</button> '
+    + (() => { const n = (d.packages || []).filter(p => p.security).length; return '<button class="btn small" ' + (run || !n ? 'disabled' : '') + ' onclick="armConfirm(this, \'🛡 Install ' + n + ' security update(s)?\', () => sysUpgrade(true))" title="only the packages from the security repository (plus what they need)">🛡 Security only' + (n ? ' (' + n + ')' : '') + '</button> '; })()
     + '<button class="btn small update" ' + (run || !(d.packages || []).length ? 'disabled' : '') + ' onclick="armConfirm(this, \'⬆ Upgrade ' + (d.packages || []).length + ' package(s)?\', () => sysUpgrade())" title="apt-get upgrade: installs new dependencies (e.g. kernels), never removes packages, keeps changed config files">⬆ Upgrade' + ((d.packages || []).length ? ' (' + d.packages.length + ')' : '') + '</button>';
 }
 function sysBodyHtml(){
@@ -649,10 +650,11 @@ function sysBodyHtml(){
   const p2 = (n) => String(n).padStart(2, '0');
   h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border-radius:8px;margin-bottom:12px;background:var(--md-surface-container-high, rgba(127,127,127,.1))">'
     + '<b style="font-size:14.5px">Schedule</b>'
-    + '<select id="sysSchedMode" onchange="sysSaveSchedule()"><option value="manual"' + (sc.mode === 'manual' ? ' selected' : '') + '>Manual — check daily, upgrade by hand</option><option value="auto"' + (sc.mode === 'auto' ? ' selected' : '') + '>Automatic — upgrade daily</option></select>'
-    + '<span>at</span><input id="sysSchedTime" type="time" value="' + p2(sc.hour) + ':' + p2(sc.minute) + '" onchange="sysSaveSchedule()" style="width:110px">'
-    + (sc.mode === 'auto' ? '<label style="display:flex;align-items:center;gap:6px;font-size:14px" title="Only when the upgrade needs it (new kernel, libc …) — every site is down for 1–3 minutes"><input type="checkbox" id="sysSchedReboot"' + (sc.reboot ? ' checked' : '') + ' onchange="sysSaveSchedule()"> restart the server afterwards if needed</label>' : '')
-    + '<span class="dim" style="font-size:13px;flex-basis:100%">' + (sc.mode === 'auto' ? 'apt-get update + upgrade every day at ' : 'apt-get update every day at ') + p2(sc.hour) + ':' + p2(sc.minute) + ' server time' + (sc.mode === 'manual' ? ' — Telegram/Slack get the list when there is something to upgrade' : '')
+    + '<label style="display:flex;align-items:center;gap:6px;font-size:14px">All updates <select id="sysSchedMode" onchange="sysSaveSchedule()"><option value="manual"' + (sc.mode === 'manual' ? ' selected' : '') + '>Manual</option><option value="auto"' + (sc.mode === 'auto' ? ' selected' : '') + '>Automatic</option></select></label>'
+    + '<label style="display:flex;align-items:center;gap:6px;font-size:14px">🛡 Security updates <select id="sysSchedSec" onchange="sysSaveSchedule()"' + (sc.mode === 'auto' ? ' disabled title="included in the automatic upgrade of all updates"' : '') + '><option value="manual"' + ((sc.security || 'manual') === 'manual' && sc.mode !== 'auto' ? ' selected' : '') + '>Manual</option><option value="auto"' + (sc.security === 'auto' || sc.mode === 'auto' ? ' selected' : '') + '>Automatic</option></select></label>'
+    + '<span>daily at</span><input id="sysSchedTime" type="time" value="' + p2(sc.hour) + ':' + p2(sc.minute) + '" onchange="sysSaveSchedule()" style="width:110px">'
+    + (sc.mode === 'auto' || sc.security === 'auto' ? '<label style="display:flex;align-items:center;gap:6px;font-size:14px" title="Only when the upgrade needs it (new kernel, libc …) — every site is down for 1–3 minutes"><input type="checkbox" id="sysSchedReboot"' + (sc.reboot ? ' checked' : '') + ' onchange="sysSaveSchedule()"> restart the server afterwards if needed</label>' : '')
+    + '<span class="dim" style="font-size:13px;flex-basis:100%">Every day at ' + p2(sc.hour) + ':' + p2(sc.minute) + ' server time: ' + (sc.mode === 'auto' ? 'apt-get update + upgrade of everything' : sc.security === 'auto' ? 'apt-get update, security updates installed, the rest listed in Telegram/Slack for you to upgrade' : 'apt-get update, the list goes to Telegram/Slack — nothing is installed')
     + (lr ? ' · last run ' + esc(new Date(lr.at).toLocaleString()) + (lr.ok ? ' ✓' : ' ❌ ' + esc(lr.error || '')) : '') + '</span></div>';
   // job
   const j = d.job;
@@ -676,8 +678,9 @@ function sysBodyHtml(){
 async function sysSaveSchedule(){
   const t = (document.getElementById('sysSchedTime').value || '04:30').split(':'), rb = document.getElementById('sysSchedReboot');
   const body = { mode: document.getElementById('sysSchedMode').value, hour: parseInt(t[0], 10), minute: parseInt(t[1], 10) };
+  const secSel = document.getElementById('sysSchedSec'); if (secSel && !secSel.disabled) body.security = secSel.value;
   if (rb) body.reboot = rb.checked;
-  try { const sc = await stApi('PUT', 'api/settings/system/schedule', body); if (sysData) sysData.schedule = sc; toast('Schedule saved: ' + (sc.mode === 'auto' ? 'automatic upgrade' : 'manual') + ' at ' + String(sc.hour).padStart(2, '0') + ':' + String(sc.minute).padStart(2, '0'), 'success'); } catch(e){ stErr(e, 'Schedule'); }
+  try { const sc = await stApi('PUT', 'api/settings/system/schedule', body); if (sysData) sysData.schedule = sc; toast('Schedule saved: all updates ' + (sc.mode === 'auto' ? 'automatic' : 'manual') + ', security ' + (sc.mode === 'auto' || sc.security === 'auto' ? 'automatic' : 'manual') + ' at ' + String(sc.hour).padStart(2, '0') + ':' + String(sc.minute).padStart(2, '0'), 'success'); } catch(e){ stErr(e, 'Schedule'); }
   sysRender();
 }
 async function sysCheck(btn){
@@ -685,8 +688,8 @@ async function sysCheck(btn){
   try { sysData = await stApi('POST', 'api/settings/system/check'); toast((sysData.packages || []).length ? sysData.packages.length + ' package update(s) available' : 'System packages are up to date', 'success'); } catch(e){ stErr(e, 'Check'); }
   sysRender();
 }
-async function sysUpgrade(){
-  try { await stApi('POST', 'api/settings/system/upgrade'); toast('Upgrade started', 'success'); } catch(e){ stErr(e, 'Upgrade'); }
+async function sysUpgrade(security){
+  try { await stApi('POST', 'api/settings/system/upgrade', security ? { security: true } : {}); toast(security ? 'Security upgrade started' : 'Upgrade started', 'success'); } catch(e){ stErr(e, 'Upgrade'); }
   setTimeout(loadSystem, 800);
 }
 async function sysReboot(){
