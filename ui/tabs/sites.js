@@ -207,28 +207,38 @@ function siteSetView(m){ siteViewMode = m; state.siteViewMode = m; saveState(); 
 function siteSetSort(col){ if (siteSort === col) siteSortDir = -siteSortDir; else { siteSort = col; siteSortDir = 1; } state.siteSort = siteSort; state.siteSortDir = siteSortDir; saveState(); renderSitesList(); }
 // Compact table: one row per site, sortable columns, whole row opens the site.
 function siteTableHtml(list, byStatus){
-  const cols = [['status', 'Status'], ['domain', 'Domain'], ['type', 'Type'], ['user', 'Site user'], ['port', 'Port'], ['http', 'HTTP'], ['runtime', 'Runtime'], ['pm2', 'PM2'], ['disk', 'Disk'], ['owner', 'Owner']];
+  const cols = [['status', 'Status'], ['domain', 'Domain'], ['type', 'Type'], ['user', 'Site user'], ['port', 'Port'], ['runtime', 'Runtime'], ['pm2', 'PM2'], ['disk', 'Disk'], ['owner', 'Owner']];
   const val = (s, c) => c === 'port' ? Number(s.nodePort || s.poolPort || 0) : c === 'http' ? (s.httpUp ? 1 : 0) : c === 'runtime' ? (s.nodeActual || s.pyActual || s.phpActual || s.nodeVersion || s.phpVersion || '') : c === 'pm2' ? (s.pm2 ? s.pm2.filter(p => p.status === 'online').length : -1) : c === 'disk' ? siteDiskBytes(s.disk) : c === 'owner' ? s.managed_by : (s[c] || '');
   const rows = list.slice().sort((a, b) => { if (siteSort === 'status') return byStatus(a, b) * siteSortDir; const x = val(a, siteSort), y = val(b, siteSort); const r = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y)); return (r || a.domain.localeCompare(b.domain)) * siteSortDir; });
   let h = '<div class="upd-card" style="padding:6px 16px 10px"><table class="upd-table site-table"><thead><tr>' + cols.map(([k, l]) => '<th onclick="siteSetSort(\'' + k + '\')" class="sortable' + (siteSort === k ? ' on' : '') + '">' + l + (siteSort === k ? (siteSortDir > 0 ? ' ▲' : ' ▼') : '') + '</th>').join('') + '<th></th></tr></thead><tbody>';
   for (const s of rows) {
     const port = s.nodePort || s.poolPort || '';
-    const pm2 = s.pm2 && s.pm2.length ? '<span class="' + (s.pm2.every(p => p.status === 'online') ? 'up' : 'down') + '">' + s.pm2.filter(p => p.status === 'online').length + '/' + s.pm2.length + '</span> <span class="dim" title="' + esc(s.pm2.map(p => p.name + ' ' + p.status).join('\n')) + '">' + esc(s.pm2.map(p => p.name).join(', ')).slice(0, 60) + '</span>' : '<span class="dim">–</span>';
+    // Count only; the names made every row wrap. Clicking the count lists the processes.
+    const pm2 = s.pm2 && s.pm2.length ? '<button class="site-pm2-count ' + (s.pm2.every(p => p.status === 'online') ? 'up' : 'down') + '" title="' + esc(s.pm2.map(p => p.name + ' ' + p.status).join('\n')) + '" onclick="event.stopPropagation(); sitePm2Popup(\'' + esc(s.domain) + '\')">' + s.pm2.filter(p => p.status === 'online').length + '/' + s.pm2.length + '</button>' : '<span class="dim">–</span>';
     h += '<tr class="site-row" onclick="siteGo(\'' + esc(s.domain) + '\', state.siteTab || \'settings\')">'
       + '<td><span class="badge ' + badgeCls(s) + '"' + (s.statusReason ? ' title="' + esc(s.statusReason) + '"' : '') + '>' + esc(s.statusLabel) + '</span></td>'
       + '<td class="site-td-domain"><b>' + esc(s.domain) + '</b></td>'
       + '<td>' + esc(siteTypeLabel(s.type)) + (s.application && !['Nodejs','Static','ReverseProxy','Python','Generic'].includes(s.application) ? ' <span class="dim">' + esc(s.application) + '</span>' : '') + '</td>'
       + '<td class="mono">' + esc(s.user || '') + '</td>'
       + '<td class="mono">' + (port ? ':' + esc(port) : '<span class="dim">–</span>') + '</td>'
-      + '<td>' + (s.httpUp ? '✅' : s.httpUp === false ? '❌' : '—') + '</td>'
       + '<td title="' + esc(siteRuntime(s).title) + '">' + siteRuntime(s).text + '</td>'
       + '<td>' + pm2 + '</td>'
       + '<td class="mono">' + esc(s.disk || '?') + '</td>'
       + '<td>' + (s.managed_by === 'clp' ? '<span class="badge type">CloudPanel</span>' : '<span class="badge online">this panel</span>') + '</td>'
       + '<td style="text-align:right;white-space:nowrap">' + ((s.canControl || s.phpControl) ? siteCtlHtml(s.domain, null, null, 'row', s.phpControl && !s.canControl) : siteCfPurgeBtn(s.domain) + ' ') + '<a class="btn small" href="sites?d=' + esc(encodeURIComponent(s.domain)) + '&t=settings" onclick="event.stopPropagation(); event.preventDefault(); siteGo(\'' + esc(s.domain) + '\', \'settings\')">Open</a> <a class="btn small" href="https://' + esc(s.domain) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">↗</a></td></tr>';
   }
-  if (!rows.length) h += '<tr><td colspan="11" class="dim">No sites match.</td></tr>';
+  if (!rows.length) h += '<tr><td colspan="10" class="dim">No sites match.</td></tr>';
   return h + '</tbody></table></div>';
+}
+// The pm2 processes behind a row's count: name, state, owner, memory, uptime, restarts.
+function sitePm2Popup(domain){
+  const s = ((lastSites || {}).sites || []).find(x => x.domain === domain);
+  const list = (s && s.pm2) || [];
+  const up = (ms) => { if (!ms) return '–'; const m = Math.floor(ms / 60000); return m < 60 ? m + 'm' : m < 1440 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : Math.floor(m / 1440) + 'd ' + Math.floor(m % 1440 / 60) + 'h'; };
+  const mem = (b) => b ? (b / 1048576).toFixed(0) + ' MB' : '–';
+  sshModal('<h3>PM2 · ' + esc(domain) + '</h3><table class="upd-table site-table"><thead><tr><th>Process</th><th>Status</th><th>User</th><th>CPU</th><th>Memory</th><th>Uptime</th><th>Restarts</th></tr></thead><tbody>'
+    + (list.length ? list.map(p => '<tr><td class="mono">' + esc(p.name) + (p.oneShot ? ' <span class="dim">one-shot</span>' : '') + '</td><td class="' + (p.status === 'online' ? 'up' : 'down') + '">' + esc(p.status) + '</td><td class="mono">' + esc(p.pm2User || '') + '</td><td>' + (p.cpu != null ? p.cpu + '%' : '–') + '</td><td>' + mem(p.memory) + '</td><td>' + (p.status === 'online' ? up(p.uptime_ms) : '–') + '</td><td>' + (p.restarts != null ? p.restarts : '–') + '</td></tr>').join('') : '<tr><td colspan="7" class="dim">No pm2 processes.</td></tr>')
+    + '</tbody></table><div class="foot"><button class="btn" onclick="sshModalClose()">Close</button><button class="btn pri" onclick="sshModalClose(); siteGo(\'' + esc(domain) + '\', \'procs\')">Manage processes</button></div>');
 }
 function siteDiskBytes(d){ const m = /^([\d.]+)\s*([KMGT]?)/i.exec(String(d || '')); if (!m) return -1; return parseFloat(m[1]) * ({ '': 1, K: 1e3, M: 1e6, G: 1e9, T: 1e12 }[m[2].toUpperCase()] || 1); }
 // Create a site: the panel makes the unix user, document root, vhost, php pool and a self-signed

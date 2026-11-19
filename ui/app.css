@@ -707,7 +707,9 @@
   .site-stats { display:flex; gap:8px; align-items:center; }
   .site-stats .chip { height:28px; padding:0 12px; font-size:12px; }
   .site-viewsw { display:flex; gap:4px; } .site-viewsw .chip { height:32px; padding:0 12px; }
-  .site-table td { white-space:nowrap; } .site-table .site-td-domain { white-space:normal; word-break:break-all; }
+  .site-table td { white-space:nowrap; }
+  .site-table .site-pm2-count { background:none; border:1px solid var(--md-outline-variant, #444); border-radius:6px; padding:1px 8px; font:inherit; cursor:pointer; }
+  .site-table .site-pm2-count:hover { background:var(--md-state-hover); }
   .site-table .site-row { cursor:pointer; }
   .site-table .site-row:hover .site-td-domain { color:var(--md-primary); text-decoration:underline; }
   .site-table .up { color:var(--md-ok-text); font-weight:600; } .site-table .down { color:var(--md-error-bright); font-weight:600; }
