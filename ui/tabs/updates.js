@@ -159,6 +159,10 @@ function renderUpdates(){
 
   html += '<div class="upd-card"><h3>Notifications</h3><p class="dim" style="margin:0">Telegram and Slack settings moved to the <a href="settings" onclick="event.preventDefault(); setTab(\'settings\', { fromBar: true })">⚙️ Settings</a> tab.</p></div>';
 
+  // System updates: apt update (⟳ Check) / apt upgrade and server restart (lib/sysupdate.js; UI in tabs/settings.js)
+  html += sysCardHtml('System updates');
+  if (!sysData && !sysLoading) loadSystem();
+
   // AI agents
   html += '<div class="upd-card" style="grid-column:1/-1" id="agentsCard">' + agentsCardHtml() + '</div>';
 

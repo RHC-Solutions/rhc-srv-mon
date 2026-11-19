@@ -33,9 +33,7 @@ function renderSettings(){
     + stField('Event log retention (days)', '<input id="stRet" type="number" min="1" max="3650" value="' + esc(g.eventsRetentionDays) + '">') + '</div>'
     + stField('ACME / Let\'s Encrypt e-mail', '<input id="stAcme" type="email" value="' + esc(g.acmeEmail || '') + '" placeholder="admin@example.com">', 'used when certificates are issued from this panel (upcoming)')
     + '<div class="site-actions"><button class="btn pri" onclick="saveGeneralSettings()">Save</button></div></div>';
-  // System updates (apt) + server restart
-  html += '<div class="upd-card" id="system" style="grid-column:1/-1"><div class="site-card-hd"><h3>System updates</h3><span id="sysBtns"></span></div><div id="sysBody">' + sysBodyHtml() + '</div></div>';
-  if (!sysData && !sysLoading) loadSystem();
+  // System updates (apt) + server restart: on the Updates page (sysCardHtml below)
   // Telegram
   html += '<div class="upd-card"><h3>Telegram</h3>'
     + '<div class="upd-toggle"><label class="switch"><input type="checkbox" id="tgOn"' + (tg.enabled ? ' checked' : '') + '><span class="slider"></span></label><label>Enabled</label></div>'
@@ -610,20 +608,24 @@ async function certStoreDeploy(id, btn){
   loadCertStore();
 }
 
-// ---- System updates: apt update / upgrade (own systemd unit, log followed here) and server restart.
+// ---- System updates (shown on the Updates page): apt update / upgrade (own systemd unit, log followed here) and server restart.
 let sysData = null, sysLoading = false, sysPoll = null, sysShowAll = false;
 async function loadSystem(){
   sysLoading = true;
   try { sysData = await stApi('GET', 'api/settings/system'); } catch(e){ sysData = { error: e.message }; }
   sysLoading = false; sysRender();
   const running = sysData && sysData.job && sysData.job.running;
-  if (running && !sysPoll) sysPoll = setInterval(() => { if (state.tab !== 'settings') { clearInterval(sysPoll); sysPoll = null; return; } loadSystem(); }, 3000);
+  if (running && !sysPoll) sysPoll = setInterval(() => { if (state.tab !== 'settings' && state.tab !== 'updates') { clearInterval(sysPoll); sysPoll = null; return; } loadSystem(); }, 3000);
   if (!running && sysPoll) { clearInterval(sysPoll); sysPoll = null; }
 }
+// Renders every copy of the card (by class, not id).
 function sysRender(){
-  const b = document.getElementById('sysBody'); if (b) b.innerHTML = sysBodyHtml();
-  const k = document.getElementById('sysBtns'); if (k) k.innerHTML = sysBtnsHtml();
-  const lg = document.getElementById('sysLog'); if (lg) lg.scrollTop = lg.scrollHeight;
+  document.querySelectorAll('.sys-body').forEach(b => { b.innerHTML = sysBodyHtml(); });
+  document.querySelectorAll('.sys-btns').forEach(k => { k.innerHTML = sysBtnsHtml(); });
+  document.querySelectorAll('.sys-log').forEach(lg => { lg.scrollTop = lg.scrollHeight; });
+}
+function sysCardHtml(title){
+  return '<div class="upd-card" id="system" style="grid-column:1/-1"><div class="site-card-hd"><h3>' + esc(title) + '</h3><span class="sys-btns">' + sysBtnsHtml() + '</span></div><div class="sys-body">' + sysBodyHtml() + '</div></div>';
 }
 function sysBtnsHtml(){
   const d = sysData; if (!d || d.error || !d.apt) return '';
@@ -646,7 +648,7 @@ function sysBodyHtml(){
   const j = d.job;
   if (j) {
     h += '<div style="margin-bottom:10px;font-size:14.5px">' + (j.running ? '⏳ <b>Upgrading…</b> <span class="dim">(runs on its own — closing the page or a panel restart does not stop it)</span>' : j.ok ? '✅ Last upgrade finished' : '❌ Last upgrade failed' + (j.exit != null ? ' (exit ' + j.exit + ')' : '')) + '</div>';
-    if (j.running || !j.ok || sysShowAll) h += '<pre id="sysLog" class="mono" style="font-size:12.5px;max-height:320px;overflow:auto;padding:10px 12px;border-radius:6px;background:var(--md-surface-container-high, rgba(127,127,127,.12));white-space:pre-wrap;word-break:break-word;margin:0 0 12px">' + esc(j.log || '') + '</pre>';
+    if (j.running || !j.ok || sysShowAll) h += '<pre class="mono sys-log" style="font-size:12.5px;max-height:320px;overflow:auto;padding:10px 12px;border-radius:6px;background:var(--md-surface-container-high, rgba(127,127,127,.12));white-space:pre-wrap;word-break:break-word;margin:0 0 12px">' + esc(j.log || '') + '</pre>';
   }
   // packages
   const P = d.packages || [];
