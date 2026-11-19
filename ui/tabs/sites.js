@@ -236,7 +236,7 @@ function siteDiskBytes(d){ const m = /^([\d.]+)\s*([KMGT]?)/i.exec(String(d || '
 function siteNewDialog(){
   const bg = sshModal('<h3>＋ New site</h3>'
     + '<div class="row2">' + siteField('Domain *', '<input id="nsDomain" placeholder="app.example.com" autocomplete="off" oninput="siteNewSuggest()">', '<span id="nsHint" class="dim">without www — for an apex domain, www becomes a CNAME + 301 redirect at Cloudflare when the site is published</span>')
-    + siteField('Type *', '<select id="nsType" onchange="siteNewType()"><option value="php">PHP</option><option value="nodejs">Node.js</option><option value="static">Static</option><option value="reverse-proxy">Reverse proxy</option></select>') + '</div>'
+    + siteField('Type *', '<select id="nsType" onchange="siteNewType()"><option value="nodejs" selected>Node.js</option><option value="php">PHP</option><option value="static">Static</option><option value="reverse-proxy">Reverse proxy</option></select>') + '</div>'
     + '<div class="row2">' + siteField('Template', '<select id="nsTpl"></select>', 'sets the document root subdirectory and the default PHP version')
     + siteField('Site user *', '<input id="nsUser" autocomplete="off">', '<span id="nsUserHint" class="dim">owns /home/&lt;user&gt;; php-fpm runs as this account</span>') + '</div>'
     + '<div class="row2" id="nsTypeFields"></div>'
@@ -254,16 +254,24 @@ function siteNewDialog(){
   siteApi('GET', 'api/sites/templates').then(t => { siteView.sub.nsTemplates = { data: t }; siteNewType(); }).catch(() => {});
 }
 function siteNewType(){
-  const t = (document.getElementById('nsType') || {}).value || 'php';
+  const t = (document.getElementById('nsType') || {}).value || 'nodejs';
   const tpls = ((siteView.sub.nsTemplates || {}).data || []).filter(x => x.type === t);
   const sel = document.getElementById('nsTpl');
   if (sel) sel.innerHTML = tpls.length ? tpls.map(x => '<option value="' + esc(x.name) + '"' + (x.name === 'Generic' || x.name === 'Nodejs' || x.name === 'Static' ? ' selected' : '') + '>' + esc(x.name) + (x.php_version ? ' · php ' + x.php_version : '') + (x.root_dir ? ' · /' + esc(x.root_dir) : '') + '</option>').join('') : '<option value="">(loading…)</option>';
   const f = document.getElementById('nsTypeFields');
   if (!f) return;
-  f.innerHTML = t === 'nodejs' ? siteField('App port *', '<input id="nsPort" type="number" min="1024" max="65535">', 'nginx proxies / to 127.0.0.1:&lt;port&gt;; the app itself is yours to start')
+  f.innerHTML = t === 'nodejs' ? siteField('Stack', '<select id="nsStack" onchange="siteNewStack()"><option value="nextjs" selected>Next.js + TypeScript + Tailwind/shadcn + PostgreSQL/Drizzle (recommended)</option><option value="plain">Plain Node.js (placeholder app.js — bring your own)</option></select>', 'Next.js: generated, built and started under pm2 with its own PostgreSQL database (DATABASE_URL in .env) — a few minutes. A GitHub repo with code replaces it.')
+      + siteField('App port *', '<input id="nsPort" type="number" min="1024" max="65535">', 'nginx proxies / to 127.0.0.1:&lt;port&gt;; pm2 runs the app on it')
     : t === 'reverse-proxy' ? siteField('Proxy target *', '<input id="nsProxy" placeholder="http://127.0.0.1:8080">')
     : t === 'php' ? '<div class="dim" style="font-size:13px;padding-top:6px">A php-fpm pool is created on the next free port, running as the site user.</div>' : '';
+  siteNewStack();
   siteNewSuggest();
+}
+// The Next.js stack gets PostgreSQL, so the SQLite default is off for it (and back on otherwise).
+function siteNewStack(){
+  const st = document.getElementById('nsStack'), sq = document.getElementById('nsSqlite');
+  const next = !!st && st.value === 'nextjs' && (document.getElementById('nsType') || {}).value === 'nodejs';
+  if (sq) { sq.checked = !next; sq.disabled = next; sq.parentElement.title = next ? 'the Next.js stack uses PostgreSQL' : ''; }
 }
 let nsSuggestT = null;
 function siteNewSuggest(){
@@ -298,6 +306,7 @@ async function siteNewGo(btn){
   if (v('nsPw')) body.password = v('nsPw');
   if (v('nsRepo')) body.repo = v('nsRepo');
   if (body.type === 'nodejs' && v('nsPort')) body.port = Number(v('nsPort'));
+  if (body.type === 'nodejs' && v('nsStack') === 'nextjs') body.stack = 'nextjs';
   if (body.type === 'reverse-proxy') body.reverse_proxy_url = v('nsProxy');
   if (!body.domain) return toast('Enter a domain', 'warn');
   btn.disabled = true;
@@ -307,7 +316,7 @@ async function siteNewGo(btn){
   if (gl && gl.ticket) body.ghTicket = gl.ticket;
   else if (body.repo) { toast('Not created — the GitHub sign-in is needed to deploy ' + body.repo, 'warn'); return; }
   else body.github = false;
-  sshModal('<h3>Creating ' + esc(body.domain) + '</h3><pre id="nsSteps" class="mono" style="font-size:13px;white-space:pre-wrap;max-height:50vh;overflow:auto">Creating…' + (body.repo ? ' (installing and building ' + esc(body.repo) + ' can take a few minutes)' : '') + '</pre><div class="foot"><button class="btn" onclick="sshModalClose()">Close</button></div>');
+  sshModal('<h3>Creating ' + esc(body.domain) + '</h3><pre id="nsSteps" class="mono" style="font-size:13px;white-space:pre-wrap;max-height:50vh;overflow:auto">Creating…' + (body.repo ? ' (installing and building ' + esc(body.repo) + ' can take a few minutes)' : body.stack === 'nextjs' ? ' (generating and building the Next.js app takes a few minutes)' : '') + '</pre><div class="foot"><button class="btn" onclick="sshModalClose()">Close</button></div>');
   const box = document.getElementById('nsSteps');
   try {
     const r = await siteApi('POST', 'api/sites', body);
