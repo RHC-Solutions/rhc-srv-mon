@@ -62,6 +62,7 @@
   }
   tick(); setInterval(tick, 5000);
 })();
-setTab(tabFromPath() || state.tab, { replace: true });
-window.addEventListener('popstate', () => setTab(tabFromPath() || state.tab, { noHistory: true }));
+// No page in the URL (…/rhc-admin/) → the top item of the left menu.
+setTab(tabFromPath() || navFirst(), { replace: true });
+window.addEventListener('popstate', () => setTab(tabFromPath() || navFirst(), { noHistory: true }));
 refresh(); setInterval(refresh, 10000);

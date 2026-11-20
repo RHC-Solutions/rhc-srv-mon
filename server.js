@@ -57,6 +57,7 @@ const server = http.createServer((req, res) => {
   const url = (req.url || '/').split('?')[0];
   if (!auth.authGate(req, res, url)) return;
   if (url === '/brand-logo') return brand.serve(req, res);
+  if (url.startsWith('/flag/')) return require('./lib/flags').serve(req, res, url);
   if (url === '/login' || url.startsWith('/api/auth/')) { if (auth.handleAuthRoute(req, res, url)) return; }
   if (url.startsWith('/ws/')) return auth.wsNotUpgraded(req, res, url);   // upgrade was not forwarded by the proxy
   if (url === '/' || url === '/index.html' || auth.TAB_ROUTES.has(url.slice(1).toLowerCase())) {
@@ -522,6 +523,8 @@ if (NO_JOBS) {
   setInterval(() => require('./lib/sites/daemons').refreshStale().catch((e) => console.error('pm2 daemon refresh failed:', e.message)), 5 * 60_000);
   // code scan of every site's code (Semgrep, npm audit, pip-audit), daily, one site at a time (lib/codescan.js)
   require('./lib/codescan').start();
+  // CloudPanel's daily cron drops the loopback lines from /etc/nginx/cloudflare/ips — put them back (tunnel sites)
+  require('./lib/sites/tunnel').watchLoopback();
   // the panel's own repo sync with RHC-Solutions/rhc-srv-mon (lib/panelrepo.js, lib/autocommit.js)
   try { const ch = require('./lib/panelrepo').ensure(); if (ch.length) console.log('panel repo: ' + ch.join('; ')); } catch (e) { console.error('panel repo:', e.message); }
   try { if (require('./lib/autocommit').ensure()) { console.log('rhc-autocommit: script updated'); require('./lib/util').execP('systemctl', ['daemon-reload'], { timeout: 30_000 }); } } catch (e) { console.error('rhc-autocommit install:', e.message); }

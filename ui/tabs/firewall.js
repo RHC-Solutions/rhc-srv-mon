@@ -6,9 +6,15 @@ async function loadFirewall(){
   try { fwData = await stApi('GET', 'api/firewall'); } catch(e){ fwData = { error: e.message }; }
   fwLoading = false;
   if (state.tab === 'firewall') renderFirewall(true);
-  // who the banned IPs are (shared cache with the Security tab)
-  const ips = [...new Set(((fwData && fwData.fail2ban && fwData.fail2ban.jails) || []).flatMap(j => j.banned || []))].filter(ip => !secIntel[ip]).slice(0, 40);
-  if (ips.length) { try { Object.assign(secIntel, await stApi('POST', 'api/security/intel', { ips })); } catch(_){} if (state.tab === 'firewall') renderFirewall(true); }
+  fwIntel();
+}
+// who the banned IPs are (shared cache with the Security tab) — only those on the pages being shown
+async function fwIntel(){
+  const ips = [...new Set(((fwData && fwData.fail2ban && fwData.fail2ban.jails) || []).flatMap(j => fwPageOf(j).rows))].filter(ip => !secIntel[ip]);
+  for (let k = 0; k < ips.length; k += 60) {   // the API takes 60 per call
+    try { Object.assign(secIntel, await stApi('POST', 'api/security/intel', { ips: ips.slice(k, k + 60) })); } catch(_){}
+    if (state.tab === 'firewall') renderFirewall(true);
+  }
 }
 const fwPill = (text, kind) => '<span style="display:inline-block;padding:1px 9px;border-radius:10px;font-size:12.5px;font-weight:600;color:#fff;background:' + ({ ok: 'var(--md-success, #2e7d32)', bad: 'var(--md-error-bright)', warn: 'var(--md-warning)', dim: 'var(--md-on-surface-dis)' }[kind] || 'var(--md-on-surface-dis)') + '">' + esc(text) + '</span>';
 const fwSel = (id, opts, cur, extra) => '<select id="' + id + '"' + (extra || '') + '>' + opts.map(o => { const [v, l] = Array.isArray(o) ? o : [o, o]; return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(l) + '</option>'; }).join('') + '</select>';
@@ -150,14 +156,33 @@ function fwJail(j, i){
   if (j.state === 'running') {
     h += '<div style="display:flex;gap:8px;margin:6px 0"><input id="fwBan' + i + '" class="mono" placeholder="ban an IP by hand" style="max-width:240px"><button class="btn small" onclick="fwBan(this,' + i + ')">Ban</button></div>';
     if ((j.banned || []).length) {
+      const pg = fwPageOf(j);
       h += '<table class="upd-table"><tr><th>IP</th><th>Who</th><th></th></tr>';
-      j.banned.forEach((ip) => { h += '<tr><td class="mono">' + esc(ip) + '</td><td style="font-size:13.5px">' + secIntelLine(secIntel[ip]) + '</td><td style="text-align:right;white-space:nowrap"><button class="btn small" data-ip="' + esc(ip) + '" onclick="fwUnban(this,' + i + ')">Unban</button></td></tr>'; });
-      h += '</table>';
+      pg.rows.forEach((ip) => { h += '<tr><td class="mono">' + esc(ip) + '</td><td style="font-size:13.5px">' + secIntelLine(secIntel[ip]) + '</td><td style="text-align:right;white-space:nowrap"><button class="btn small" data-ip="' + esc(ip) + '" onclick="fwUnban(this,' + i + ')">Unban</button></td></tr>'; });
+      h += '</table>' + fwPager(j, pg);
     } else h += '<p class="dim" style="margin:0">Nobody banned right now.</p>';
   }
   return h + '</div>';
 }
 const fwJ = (i) => fwData.fail2ban.jails[i];
+// Banned-IP lists are paginated per jail (page size kept per browser in state.fwPageSize).
+const fwPages = {};
+function fwPageOf(j){
+  const size = state.fwPageSize || 25, all = j.banned || [], pages = Math.max(1, Math.ceil(all.length / size));
+  const p = Math.min(Math.max(1, fwPages[j.name] || 1), pages);
+  return { p, pages, size, total: all.length, rows: all.slice((p - 1) * size, p * size) };
+}
+function fwPager(j, pg){
+  if (pg.total <= 10) return '';
+  const n = esc(JSON.stringify(j.name)), b = (p, label, dis) => '<button class="btn small"' + (dis ? ' disabled' : '') + ' onclick="fwGo(' + n + ',' + p + ')">' + label + '</button>';
+  return '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:13.5px">'
+    + b(1, '«', pg.p === 1) + b(pg.p - 1, '‹ Prev', pg.p === 1)
+    + '<span class="dim">page ' + pg.p + ' of ' + pg.pages + ' · ' + ((pg.p - 1) * pg.size + 1) + '–' + Math.min(pg.p * pg.size, pg.total) + ' of ' + pg.total + '</span>'
+    + b(pg.p + 1, 'Next ›', pg.p === pg.pages) + b(pg.pages, '»', pg.p === pg.pages)
+    + '<select onchange="state.fwPageSize = Number(this.value); saveState(); fwRepaint()" title="Rows per page">' + [10, 25, 50, 100].map(s => '<option' + (s === pg.size ? ' selected' : '') + '>' + s + '</option>').join('') + '</select><span class="dim">per page</span></div>';
+}
+function fwGo(name, p){ fwPages[name] = p; fwRepaint(); }
+function fwRepaint(){ renderFirewall(true); fwIntel(); }
 function fwJailSave(btn, i){
   const j = fwJ(i), g = (id) => document.getElementById(id).value.trim();
   fwRun(btn, () => stApi('PUT', 'api/firewall/fail2ban/jails/' + encodeURIComponent(j.name), { bantime: g('fwJb' + i), findtime: g('fwJf' + i), maxretry: g('fwJm' + i) }), j.name + ' saved');

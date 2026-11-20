@@ -6,7 +6,8 @@ async function loadSecurity(){
   secLoading = false;
   if (state.tab === 'security') renderSecurity(true);
 }
-const secFlag = (cc) => cc && /^[A-Z]{2}$/.test(cc) ? String.fromCodePoint(...[...cc].map(c => 0x1F1E6 + c.charCodeAt(0) - 65)) : '';
+// a flag image (served and cached by the panel, lib/flags.js) — Windows shows flag emoji as two letters
+const secFlag = (cc) => cc && /^[A-Z]{2}$/i.test(cc) ? '<img class="flag" src="flag/' + cc.toLowerCase() + '" alt="' + cc.toUpperCase() + '" title="' + cc.toUpperCase() + '" width="20" height="15" loading="lazy" style="vertical-align:-2px;border-radius:2px" onerror="this.replaceWith(this.alt)">' : '';
 function secIntelLine(i){
   if (!i) return '<span class="dim">…</span>';
   if (i.error) return '<span class="dim">' + esc(i.error) + '</span>';
@@ -86,17 +87,47 @@ async function secScanLoad(){
   if (secScan.running || (secScan.queue || []).length) secScanPoll = setTimeout(() => { if (state.tab === 'security') secScanLoad(); }, 5000);
 }
 function secScanHtml(){
-  let h = '<h3>🔍 Code scan — Semgrep · npm audit · pip-audit</h3><p class="dim" style="margin:0 0 8px;font-size:14px">Every site\'s code on this server, scanned as its own user, daily (one site at a time). Details on each site\'s Security tab.</p>';
+  let h = '<h3>🔍 Code scan — Semgrep · npm audit · pip-audit</h3><p class="dim" style="margin:0 0 8px;font-size:14px">Every site\'s code on this server, scanned as its own user (one site at a time), on the schedule below — then a detailed report goes to Telegram and e-mail. Details on each site\'s Security tab.</p>';
   if (!secScan) return h + '<div class="dim">Loading…</div>';
   if (secScan.error) return h + '<div style="color:var(--md-error-bright)">' + esc(secScan.error) + '</div>';
   if (!secScan.installed.semgrep) h += '<div class="banner bad" style="margin-bottom:10px"><span class="ico">⚠</span> Semgrep is not installed — only dependency audits run. <a href="appstore" onclick="event.preventDefault();asCat=\'tools\';setTab(\'appstore\')">Install it: App Store › Tools › Code scanners</a></div>';
+  h += secScanSchedHtml(secScan.schedule, secScan.round);
   const q = secScan.queue || [], run = secScan.running;
   h += '<table class="upd-table"><tr><th>Site</th><th>Findings</th><th>Last scan</th><th></th></tr>' + secScan.sites.map(x => {
     const st = run && run.domain === x.domain ? '⏳ ' + esc(run.step) + '…' : q.includes(x.domain) ? '🕒 queued' : '';
     return '<tr><td><a href="sites?d=' + esc(encodeURIComponent(x.domain)) + '&t=security" onclick="event.preventDefault();siteGo(\'' + esc(x.domain) + '\', \'security\')"><b>' + esc(x.domain) + '</b></a></td><td>' + (x.last && x.last.error ? '<span style="color:var(--md-error-bright)">' + esc(x.last.error) + '</span>' : scanCountsHtml(x.last && x.last.counts)) + '</td>'
       + '<td class="dim" style="font-size:13px">' + (st || (x.last ? esc(new Date(x.last.at).toLocaleString()) : '–')) + '</td><td style="text-align:right"><button class="btn small" ' + (st ? 'disabled ' : '') + 'onclick="secScanRun(\'' + esc(x.domain) + '\', this)">Scan</button></td></tr>'; }).join('') + '</table>';
-  h += '<div class="site-actions"><button class="btn pri" ' + (run ? 'disabled ' : '') + 'onclick="secScanRun(null, this)">Scan all now</button> <button class="btn" onclick="secScanLoad()">↻</button></div>';
+  h += '<div class="site-actions"><button class="btn pri" ' + (run ? 'disabled ' : '') + 'onclick="secScanRun(null, this)" title="scans every site, then sends the report">Scan all now</button> <button class="btn" onclick="secScanReport(this)" title="send the report of the latest results now">Send report now</button> <button class="btn" onclick="secScanLoad()">↻</button></div>';
   return h;
+}
+const SEC_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function secScanSchedHtml(s, round){
+  if (!s) return '';
+  const chk = (id, on, label) => '<label class="chip" style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="' + id + '"' + (on ? ' checked' : '') + '> ' + label + '</label>';
+  const lr = s.lastReport;
+  const sentTxt = lr ? Object.entries(lr.sent || {}).map(([k, v]) => (v.ok ? '✅ ' : v.skipped ? '⏭ ' : '❌ ') + k + (v.ok ? '' : ' (' + esc(v.error || 'skipped') + ')')).join(' · ') : '';
+  return '<div style="border:1px solid var(--md-divider);border-radius:10px;padding:10px 12px;margin:0 0 12px">'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'
+    + chk('csOn', s.enabled, '<b>Scheduled scan</b>')
+    + '<label>at <input id="csTime" type="time" value="' + esc(s.time) + '" style="width:110px"></label> <span class="dim" style="font-size:13px">' + esc(s.tz || '') + '</span>'
+    + '<span style="display:inline-flex;gap:4px;flex-wrap:wrap">' + SEC_DAYS.map((d, i) => chk('csDay' + i, s.days.includes(i), d)).join('') + '</span></div>'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:8px"><span>Report to</span>' + chk('csTg', s.report.telegram, 'Telegram') + chk('csMail', s.report.email, 'E-mail') + '<span class="dim" style="font-size:13px">(channels from Settings › Notifications)</span>'
+    + '<button class="btn small pri" onclick="secScanSchedSave(this)">Save</button></div>'
+    + '<div class="dim" style="font-size:13px;margin-top:6px">' + (s.enabled ? 'Next run: <b>' + (s.next ? esc(new Date(s.next).toLocaleString()) : '–') + '</b>' : 'Off — scans run only when started here') + (round ? ' · round in progress: ' + round.done + ' of ' + round.domains + ' sites' : '')
+    + (lr ? ' · last report ' + esc(new Date(lr.at).toLocaleString()) + ': ' + sentTxt : '') + '</div></div>';
+}
+async function secScanSchedSave(btn){
+  const g = (id) => document.getElementById(id);
+  const b = { enabled: g('csOn').checked, time: g('csTime').value, days: SEC_DAYS.map((_, i) => i).filter(i => g('csDay' + i).checked), report: { telegram: g('csTg').checked, email: g('csMail').checked } };
+  btn.disabled = true;
+  try { const r = await stApi('PUT', 'api/codescan/schedule', b); toast(r.enabled ? 'Code scan scheduled — next ' + (r.next ? new Date(r.next).toLocaleString() : '–') : 'Scheduled code scan off', 'success'); secScanLoad(); }
+  catch(e){ stErr(e, 'Code scan schedule'); btn.disabled = false; }
+}
+async function secScanReport(btn){
+  btn.disabled = true;
+  try { const r = await stApi('POST', 'api/codescan/report', {}); const s = Object.entries(r.sent || {}); toast('Report: ' + (s.map(([k, v]) => k + (v.ok ? ' sent' : ' — ' + (v.error || 'skipped'))).join(' · ') || 'no channel'), r.ok ? 'success' : 'warn', { duration: 10000 }); }
+  catch(e){ stErr(e, 'Code scan report'); }
+  btn.disabled = false; secScanLoad();
 }
 async function secScanRun(domain, btn){
   if (btn) btn.disabled = true;

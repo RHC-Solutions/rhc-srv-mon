@@ -52,7 +52,7 @@ function armConfirm(btn, armedLabel, onConfirm){
 
 let lastData = null, lastDb = null;
 const state = Object.assign({
-  q:'', f:'all', sort:'group', tab:'sites',
+  q:'', f:'all', sort:'group', tab:'pm2', kumaQ:'', kumaF:'all', kumaSort:'status',
   sharedOnly:false,
   modSort:'severity', modFilter:'all', modQ:'', modShowDetailLog:false
 }, JSON.parse(localStorage.getItem('pm2ui') || '{}'));
@@ -117,7 +117,8 @@ function showBanner(html){ const b = document.getElementById('banner'); if (html
 // while the tab is active — omitted for tabs that fetch their own data on their own schedule).
 const TABS = {
   sites:   { slug:'sites',    label:'Sites',      view:'sitesview',   render: () => renderSites(),   onRefresh: () => { if (!siteView.domain) renderSitesList(); } },
-  pm2:     { slug:'monitor',  label:'Monitor',    view:'pm2view',     render: () => { render(); renderKuma(); }, onRefresh: () => { render(); renderKuma(); } },
+  pm2:     { slug:'monitor',  label:'Monitor',    view:'pm2view',     render: () => render(), onRefresh: () => render() },
+  kuma:    { slug:'kuma',     label:'Uptime Kuma', view:'kumaview',   render: () => renderKuma(), onRefresh: () => renderKuma() },
   db:      { slug:'Databases', label:'Databases', view:'dbview',      render: () => renderDb(),      onRefresh: () => renderDb() },
   updates: { slug:'updates',  label:'Updates',    view:'updatesview', render: () => renderUpdates(), onRefresh: () => renderUpdates() },
   modules: { slug:'modules',  label:'Modules',    view:'modulesview', render: () => renderModules(), onRefresh: () => renderModules() },
@@ -140,7 +141,7 @@ const SLUG_TAB = Object.assign(Object.fromEntries(Object.entries(TAB_SLUG).map((
 function tabFromPath(){ const seg = (location.pathname.split('/').filter(Boolean).pop() || '').toLowerCase(); return SLUG_TAB[seg] || null; }
 function setTab(tab, opts){
   opts = opts || {};
-  if (!TABS[tab]) tab = 'sites';
+  if (!TABS[tab]) tab = navFirst();
   state.tab = tab; saveState();
   if (!opts.noHistory && tabFromPath() !== tab) {
     try { history[opts.replace ? 'replaceState' : 'pushState']({ tab }, '', TAB_SLUG[tab] + location.search); } catch(e){}
@@ -222,13 +223,18 @@ async function panelCtl(action, force){
   setTimeout(() => location.reload(), 600);
 }
 
+// The landing page: the top item of the left menu (in this browser's saved order).
+function navFirst(){ const t = document.querySelector('.sidenav .tab'); return (t && TABS[t.dataset.tab]) ? t.dataset.tab : 'pm2'; }
+
 // Menu order: the ⇅ button next to "Server" switches the sidebar into reorder mode — drag an item
 // (mouse or touch) or move the focused one with ↑/↓. Saved per browser in state.navOrder.
 const NAV_DEFAULT = [...document.querySelectorAll('.sidenav .tab')].map(t => t.dataset.tab);
 function navApply(order){
   const box = document.querySelector('.sidenav .tabs'); if (!box) return;
   const by = {}; box.querySelectorAll('.tab').forEach(t => { by[t.dataset.tab] = t; });
-  const seq = (order || []).filter(k => by[k]).concat(NAV_DEFAULT.filter(k => !(order || []).includes(k)));
+  const seq = (order || []).filter(k => by[k]);
+  // a page added since the order was saved goes where the default has it (after its predecessor)
+  NAV_DEFAULT.forEach((k, i) => { if (seq.includes(k)) return; const prev = NAV_DEFAULT.slice(0, i).reverse().find(p => seq.includes(p)); seq.splice(prev ? seq.indexOf(prev) + 1 : 0, 0, k); });
   seq.forEach(k => box.appendChild(by[k]));
 }
 function navSave(){
