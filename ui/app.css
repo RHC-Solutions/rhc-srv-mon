@@ -512,6 +512,7 @@
           font-size:12px; font-weight:600; line-height:18px; }
   .pill.up   { background:var(--md-ok); color:#ffffff; }
   .pill.down { background:var(--md-error); color:#ffffff; }
+  .pill.done { background:var(--md-surface-variant, rgba(127,127,127,.2)); color:var(--md-on-surface-variant, inherit); }
   .badge, .upd-badge, .sev, .ev-level, .site-card .badge {
     display:inline-block; padding:2px 10px; border-radius:var(--md-shape-pill);
     font-size:12px; font-weight:600; line-height:18px; white-space:nowrap; }

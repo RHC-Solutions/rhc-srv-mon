@@ -1,7 +1,9 @@
 /* ---------------------------------------------------------------- pm2 (Monitor) */
+// a one-off job (pm2 --no-autorestart) that has exited is finished, not down (lib/history.js finished())
+const pm2Done = (p) => !!p.oneShot && p.status !== 'online';
 function matches(p, user){
   if (state.f === 'up' && p.status !== 'online') return false;
-  if (state.f === 'down' && p.status === 'online') return false;
+  if (state.f === 'down' && (p.status === 'online' || pm2Done(p))) return false;
   if (state.q){
     const q = state.q.toLowerCase();
     if (!p.name.toLowerCase().includes(q) && !user.toLowerCase().includes(q)) return false;
@@ -30,9 +32,9 @@ function rowHtml(p, userLabel){
     ? '<button class="btn small" onclick="pm2Action(\'stop\', \''+userLabel+'\', \''+esc(p.name)+'\')">⏹</button>'
     : '<button class="btn small" onclick="pm2Action(\'start\', \''+userLabel+'\', \''+esc(p.name)+'\')">▶</button>';
   return '<div class="row">'
-    + '<div class="stat"><span class="pill '+(up?'up':'down')+'">'+(up?'Up':'Down')+'</span></div>'
+    + '<div class="stat"><span class="pill '+(up?'up':pm2Done(p)?'done':'down')+'">'+(up?'Up':pm2Done(p)?'Done':'Down')+'</span></div>'
     + '<div class="meta"><div class="name">'+esc(p.name)+'</div>'
-    + '<div class="info">up '+fmtUp(p.uptime_ms)+(userLabel?' · '+esc(userLabel):'')+'</div></div>'
+    + '<div class="info">'+(pm2Done(p)?'one-off job, finished':'up '+fmtUp(p.uptime_ms))+(userLabel?' · '+esc(userLabel):'')+'</div></div>'
     + '<div class="beats">'+beats+'</div>'
     + '<div class="col '+cpuCls+'">'+p.cpu+'%</div>'
     + '<div class="col '+memCls+'">'+fmtMem(p.memory)+'</div>'
@@ -80,13 +82,15 @@ function render(){
     for (const g of d.groups) {
       const procs = g.processes.filter(p => matches(p, g.user))
         .filter(p => !state.sharedOnly || isShared(p.name))
-        .sort((a,b) => (a.status==='online') - (b.status==='online'));   // down first
+        .sort((a,b) => (a.status==='online' || pm2Done(a)) - (b.status==='online' || pm2Done(b)));   // down first
       if (!procs.length && !g.error) continue;
       const up = g.processes.filter(p => p.status==='online').length;
-      const down = g.processes.length - up;
+      const done = g.processes.filter(pm2Done).length;
+      const down = g.processes.length - up - done;
       const counts = '<span class="pcounts">'
         + '<span class="up">'+up+' up</span>'
         + (down ? ' · <span class="down">'+down+' down</span>' : '')
+        + (done ? ' · <span class="dim">'+done+' done</span>' : '')
         + ' · '+g.processes.length+' service'+(g.processes.length===1?'':'s')
         + '</span>';
       html += '<div class="group"><h2>'+esc(g.user)+counts+'<span class="dim">'+esc(g.pm2_home)+'</span></h2>';
