@@ -62,9 +62,10 @@ for (const id of ['host', 'pagetitle', 'updated', 'banner', 'userbar', 'q', 'sor
 
 const storage = new Map();
 const sandbox = {
-  console, document, setTimeout: (f) => 0, setInterval: () => 0, clearInterval() {}, clearTimeout() {}, requestAnimationFrame: () => 0,
+  // zero-delay timeouts run (UI code defers card loaders with setTimeout(fn, 0)); real delays (polls) never fire
+  console, document, setTimeout: (f, ms) => { if (!ms && typeof f === 'function') setImmediate(() => { try { f(); } catch (e) { errors.push('setTimeout callback: ' + (e && e.stack || e)); } }); return 0; }, setInterval: () => 0, clearInterval() {}, clearTimeout() {}, requestAnimationFrame: () => 0,
   localStorage: { getItem: (k) => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => storage.set(k, String(v)), removeItem: (k) => storage.delete(k) },
-  location: { pathname: '/sites', search: '', href: BASE + '/sites', replace() {} },
+  location: { pathname: '/sites', search: '', hash: '', href: BASE + '/sites', replace() {} },
   history: { pushState(s, t, url) { const q = url.indexOf('?'); sandbox.location.search = q >= 0 ? url.slice(q) : ''; sandbox.location.pathname = '/' + (q >= 0 ? url.slice(0, q) : url); }, replaceState(s, t, url) { this.pushState(s, t, url); } },
   navigator: { clipboard: { writeText: async () => {} } },
   TextEncoder, URLSearchParams, URL, Promise, JSON, Math, Date, Object, Array, String, Number, Boolean, RegExp, Error, Map, Set, WeakMap, Symbol, parseInt, parseFloat, isNaN, encodeURIComponent, decodeURIComponent,
@@ -106,7 +107,14 @@ const call = (label, fn) => { try { const r = fn(); log('  ok  ' + label); retur
       call('siteGo(' + domain + ', ' + t + ')', () => sandbox.siteGo(domain, t));
       for (let i = 0; i < 25; i++) { await sleep(200); const subs = Object.values(G('siteView').sub).filter((x) => x && x.loading); if (!subs.length) break; }
       call('renderSiteDetail() [' + t + ']', () => sandbox.renderSiteDetail());
-      const html = byId.get('sitesview')._html;
+      // Cards like PM2 / Code scan / CodeSweep render a "Loading…" placeholder inside <div id="X"> and
+      // fill it later with getElementById('X').innerHTML, which the stub keeps on that child element,
+      // not in the parent's HTML. Give those loaders time, then drop the placeholder of every filled child.
+      const view = byId.get('sitesview');
+      const kids = () => view.children.filter((c) => c.id && new RegExp('\\sid="' + c.id + '"[^>]*>[^]*?Loading…').test(view._html));
+      for (let i = 0; i < 25 && kids().some((c) => !c._html); i++) await sleep(200);
+      let html = view._html;
+      for (const c of kids()) if (c._html && !/Loading…/.test(c._html)) html = html.replace(new RegExp('(\\sid="' + c.id + '"[^>]*>[^]*?)Loading…'), '$1');
       const errs = Object.entries(G('siteView').sub).filter(([, x]) => x && x.error).map(([k, x]) => k + ': ' + x.error);
       log('       ' + t + ': ' + html.length + ' chars' + (errs.length ? ' · sub errors: ' + errs.join('; ') : '') + (/Loading…/.test(html) ? ' · STILL LOADING' : ''));
       if (/Loading…/.test(html) && !errs.length) errors.push(t + ': still loading after wait');
