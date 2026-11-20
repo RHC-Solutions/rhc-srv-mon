@@ -1,9 +1,32 @@
 # RHC SRV MAN
 
 Zero-dependency Node.js (>= 22) server-management panel, on the road to replacing CloudPanel on this host.
-Runs as root under pm2 (`sb-srv-mon`, cwd `/root`), binds 127.0.0.1:8899, exposed by nginx at `/rhc-admin/`.
-The product name is **RHC SRV MAN** (per-host override: Settings → General → Panel name); the folder
-`/opt/sb-srv-mon`, the pm2 name `sb-srv-mon` and the `rhc-*` systemd units keep their technical names.
+Runs as root under pm2 (cwd `/root`), binds 127.0.0.1:8899, exposed by nginx at `/rhc-admin/`.
+The product name is **RHC SRV MAN** (per-host override: Settings → General → Panel name).
+
+**Folder and pm2 name differ per server.** web01 runs `/opt/rhc-srv-mon` as pm2 `rhc-srv-mon`; older servers still
+run `/opt/sb-srv-mon` as pm2 `sb-srv-mon`. The code resolves its own folder (`APP_ROOT`, `lib/config.js`) and its own
+pm2 name (`process.env.name`, `lib/api/panel.js`, `lib/updates.js`), so neither needs to be renamed. The `rhc-*` systemd
+units and the system paths `/var/lib/sb-srv-mon/`, `/etc/sb-srv-mon/`, `jail.d/zz-sb-srv-mon.local` keep their names
+on every server. `bin/sbctl.js` and `scripts/land.sh` find the pm2 app that runs their checkout's `server.js`.
+
+## Stack
+
+Deliberately minimal, because this is a root control plane that must keep working when the box around it is broken:
+
+- **Node.js only, zero npm dependencies** (>= 22; web01 runs 26). Built-ins only: `http`, `node:sqlite`, `child_process`, `crypto`.
+- **Backend:** `server.js` + one CommonJS module per feature in `lib/`; small router in `lib/http.js`.
+- **Panel state:** SQLite (`rhc.sqlite`, WAL) with numbered migrations — *not* PostgreSQL: the panel manages PostgreSQL
+  and must stay up when it is down.
+- **UI:** plain HTML/CSS/JS in `ui/`, no framework and no build step; `lib/page.js` assembles one page.
+- **Deploy:** `git pull` + syntax check + restart. No `npm ci`, no build, so updates and `lib/selfreload.js` stay instant
+  and rollback is a `git reset`.
+
+Considered and rejected (2026-11-20): rewriting the panel in Next.js + TypeScript + Tailwind/shadcn + PostgreSQL/Drizzle —
+it would add a build to every server's update path, break self-reload, pull hundreds of packages into a root process,
+fight the raw `/ws/ssh` WebSocket upgrade, and make the panel depend on the database it repairs. That stack is fine for
+*sites the panel hosts*. If types are wanted, the path is TypeScript file by file via Node's built-in type stripping
+(erasable syntax only — no `enum`/`namespace`), which keeps the no-build deploy.
 
 ## The panel's repo and updates
 
@@ -14,8 +37,15 @@ runs the panel takes its updates from it and commits/syncs only with it:
   re-pointed if missing), `main` tracking it, and remotes of retired repos (`roman-synergybeam/sbsrvman`) removed.
 - Updates → **⬆ Update from GitHub** fast-forwards to `origin/main`, syntax-checks, restarts, rolls back if the panel does
   not come up (`lib/updates.js`).
-- `rhc-autocommit.timer` (every 15 min, `resources/rhc-autocommit.sh` → `/usr/local/sbin/rhc-autocommit`) commits local
-  changes, merges what other servers pushed (only if clean and `node --check` passes) and pushes to that repo — no other remote.
+- Auto-commit, every 15 min: commits local changes, merges what other servers pushed and pushes to that repo — no other
+  remote. Two implementations exist:
+  - **web01:** root cron `/usr/local/sbin/rhc-srv-mon-autocommit.sh` (not in the repo), log
+    `/var/log/rhc-srv-mon-autocommit.log`, commits as `Auto-commit <time> (<host>)`. A merge conflict or failed push is
+    aborted and alerted once through `lib/notify`.
+  - **other servers:** `rhc-autocommit.timer` → `/usr/local/sbin/rhc-autocommit`, written from `resources/rhc-autocommit.sh`
+    by `lib/autocommit.js` at start (only where the service already exists; `D=` is rewritten to `APP_ROOT`); merges
+    only if clean and `node --check` passes.
+  - Both take `/var/lock/rhc-autocommit`, so landing a merge under the same `flock` is safe.
 - Edits on disk apply themselves (`lib/selfreload.js`): UI rebuilt in place, backend checked then restarted.
 - Old branches are kept as tags only: `archive/v2`, `archive/rhc-main-before-overwrite-20261107`.
 
@@ -72,7 +102,7 @@ credential at all — the same arrangement PostgreSQL has — while TCP clients 
 verified before being stored encrypted.
 
 New grants are made for `localhost` and `127.0.0.1`, never `%` — MariaDB on this host was listening on
-`0.0.0.0:3306`, so a `%` grant would have been reachable from outside. `/etc/mysql/mariadb.conf.d/150-sb-srv-mon.cnf`
+`0.0.0.0:3306`, so a `%` grant would have been reachable from outside. `/etc/mysql/mariadb.conf.d/150-rhc-srv-mon.cnf`
 sets `bind-address = 127.0.0.1` (numbered above CloudPanel's own file so it wins) and applies at the
 next MariaDB restart.
 
@@ -302,7 +332,9 @@ of a row, and pages backwards. Retention defaults to 90 days (`PUT /api/events/s
 
 ## Command line (`sbctl`)
 
-`bin/sbctl.js`, run as root; install once with `ln -s /opt/sb-srv-mon/bin/sbctl.js /usr/local/bin/sbctl`.
+`bin/sbctl.js`, run as root; install once with `ln -s <panel dir>/bin/sbctl.js /usr/local/bin/sbctl` (web01:
+`/opt/rhc-srv-mon`). It acts on the pm2 app running its own checkout's `server.js` (falling back to the folder name
+when the panel is not in pm2), so it works whatever the server calls it.
 `sbctl help` lists everything:
 
 - **Panel:** `status`, `start`, `stop` (asks; `-y`), `restart` (compiles every lib/ui/bin file and builds the UI page first,
@@ -350,17 +382,21 @@ Bigger changes: work in a worktree, not the live checkout (the auto-commit pushe
 `lib/selfreload.js` applies every saved edit to the running panel):
 
 ```sh
-git worktree add -b dev /opt/sb-srv-mon-dev main    # once; delete the branch after landing
-cd /root && PORT=8898 RHC_NO_JOBS=1 RHC_DEV=1 node /opt/sb-srv-mon-dev/server.js
+git worktree add -b dev /opt/rhc-srv-mon-dev main   # once; delete the branch after landing
+cd /root && PORT=8898 RHC_NO_JOBS=1 RHC_DEV=1 node /opt/rhc-srv-mon-dev/server.js
 ```
 
 `RHC_NO_JOBS=1` disables every scheduler (update checks, module scans, auto-update, cleanup, backups) — request-triggered
 actions still run against the real box. `RHC_DEV=1` rebuilds the page from `ui/` on every request. Landing:
 
 ```sh
-flock /var/lock/rhc-autocommit sh -c 'git merge --no-edit dev && pm2 restart sb-srv-mon'
-pm2 logs sb-srv-mon --lines 30      # expect "re-adopted" lines for open SSH sessions
+cd /opt/rhc-srv-mon
+flock /var/lock/rhc-autocommit sh -c 'git merge --no-edit dev && pm2 restart rhc-srv-mon'
+pm2 logs rhc-srv-mon --lines 30     # expect "re-adopted" lines for open SSH sessions
 ```
+
+Or `scripts/land.sh [branch]` (default `dev`): fast-forward only, under the same lock, finds the live checkout and its
+pm2 app by itself. (The paths above are web01's; on an older server use `/opt/sb-srv-mon` and `sb-srv-mon`.)
 
 ## Copying out of the SSH terminal
 

@@ -6,7 +6,7 @@
 //   login:  users | passwd <user> | 2fa-reset <user> | logout <user>|--all
 //   sites:  sites | site <domain> [status|start|stop|restart|logs]
 //
-// Install once:  ln -s /opt/sb-srv-mon/bin/sbctl.js /usr/local/bin/sbctl
+// Install once:  ln -s <panel dir>/bin/sbctl.js /usr/local/bin/sbctl   (web01: /opt/rhc-srv-mon)
 //
 // Login changes are written to auth.json; the running panel watches that file and reloads it
 // (lib/auth.js loadAuth({watch})). Site start/stop goes through the same code as the panel's
@@ -18,7 +18,17 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
-const PM2_NAME = 'sb-srv-mon';
+// The pm2 name differs per server (web01: rhc-srv-mon, older servers: sb-srv-mon): use the pm2 app
+// that runs this checkout's server.js; with none (panel not in pm2 yet) name it after the folder.
+const PM2_NAME = (() => {
+  const r = spawnSync('pm2', ['jlist'], { encoding: 'utf8', cwd: '/root' });
+  try {
+    const me = path.join(ROOT, 'server.js');
+    const p = JSON.parse(r.stdout).find((x) => x.pm2_env && x.pm2_env.pm_exec_path === me);
+    if (p) return p.name;
+  } catch (_) {}
+  return path.basename(ROOT);
+})();
 const argv = process.argv.slice(2);
 const flags = new Set(argv.filter((a) => a.startsWith('-')));
 const args = argv.filter((a) => !a.startsWith('-'));

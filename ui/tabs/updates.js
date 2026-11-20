@@ -415,6 +415,8 @@ async function triggerPanelUpdate(){
   const pc = lastUpdates && lastUpdates.components.find(x => x.key === 'panel');
   const fromVer = pc ? pc.currentVersion : '?', fromHash = pc ? pc.currentHash : null;
   const t0 = Date.now();
+  // the pm2 name differs per server (rhc-srv-mon / sb-srv-mon) — ask now, the panel may not answer later
+  const pm2NameP = fetch('api/panel', { cache: 'no-store' }).then(r => r.ok ? r.json() : {}).then(j => j.pm2 || null).catch(() => null);
   const step = (n, title) => '<div id="pu' + n + '" style="display:flex;gap:10px;align-items:flex-start;padding:6px 0"><span id="pu' + n + 'i" style="width:22px">·</span><div style="flex:1"><b>' + n + ' · ' + title + '</b><div id="pu' + n + 'd" class="dim" style="font-size:13.5px;white-space:pre-wrap"></div></div></div>';
   sshModal('<h3>Updating the panel from GitHub</h3><div class="dim" style="font-size:13.5px;margin-bottom:6px">Running version ' + esc(fromVer) + (fromHash ? ' (' + esc(fromHash) + ')' : '') + '</div>'
     + step(1, 'Download & check the new code') + step(2, 'Restart the panel') + step(3, 'Confirm the new version')
@@ -451,7 +453,7 @@ async function triggerPanelUpdate(){
     try { const r = await fetch('api/updates', { cache: 'no-store' }); if (r.ok) back = await r.json(); } catch(_){}
     if (!back) await new Promise(r => setTimeout(r, 2500));
   }
-  if (!back) { set(2, '❌', 'the panel has not answered for ' + Math.round((Date.now() - t0) / 1000) + ' s', 'var(--md-error-bright)'); set(3, '?', 'unknown'); return finish(false, 'Check the server: <span class="mono">pm2 logs sb-srv-mon</span>. If the new code fails to start, it is rolled back to ' + esc(fromVer) + ' automatically within a minute.'); }
+  if (!back) { const pn = (await pm2NameP) || 'rhc-srv-mon'; set(2, '❌', 'the panel has not answered for ' + Math.round((Date.now() - t0) / 1000) + ' s', 'var(--md-error-bright)'); set(3, '?', 'unknown'); return finish(false, 'Check the server: <span class="mono">pm2 logs ' + esc(pn) + '</span>. If the new code fails to start, it is rolled back to ' + esc(fromVer) + ' automatically within a minute.'); }
   set(2, '✅', 'back after ' + Math.round((Date.now() - t0) / 1000) + ' s');
   // 3: ask the restarted panel itself (a fresh check, not a cached answer) which version runs now —
   // retried for up to 30 s while the new process settles; a rollback report wins.
