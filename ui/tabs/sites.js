@@ -73,7 +73,7 @@ function renderSitesList(){
   const q = siteQ.trim().toLowerCase();
   const filtered = [...d.sites].filter(s => (!siteStatusFilter || s.status === siteStatusFilter) && (!q || s.domain.toLowerCase().includes(q) || (s.user||'').toLowerCase().includes(q) || (s.type||'').includes(q)));
   const byStatus = (a, b) => (sortOrder[a.status]||9) - (sortOrder[b.status]||9) || a.domain.localeCompare(b.domain);
-  if (siteViewMode === 'table') { view.innerHTML = html + siteTableHtml(filtered, byStatus) + siteTunnelHtml(d.tunnels, q); return; }
+  if (siteViewMode === 'table') { view.innerHTML = html + siteTableHtml(filtered, byStatus); return; }
   const sorted = filtered.sort(byStatus);
   html += '<div class="site-grid">';
   for (const s of sorted) {
@@ -97,12 +97,23 @@ function renderSitesList(){
   }
   if (!sorted.length) html += '<div class="upd-card dim">' + (d.sites.length ? 'No sites match.' : 'No nginx sites on this host.') + '</div>';
   html += '</div>';
-  view.innerHTML = html + siteTunnelHtml(d.tunnels, q);
+  view.innerHTML = html;
 }
-// Apps this host serves through Cloudflare Tunnel (cloudflared → 127.0.0.1:port) rather than
-// through a vhost of its own. Read-only: their routes live in Cloudflare / cloudflared's config.
+// Tunnel Apps page (left menu): hostnames this host serves through Cloudflare Tunnel
+// (cloudflared → 127.0.0.1:port) rather than through a vhost of its own. Read-only: their routes
+// live in Cloudflare / cloudflared's config. Data rides on api/sites (lastSites.tunnels).
+let tunAppQ = '';
+function renderTunnelAppsTab(){
+  const view = document.getElementById('tunnelappsview'); if (!view) return;
+  if (view.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') { const el = document.getElementById('tunAppList'); if (el) el.innerHTML = siteTunnelHtml(lastSites && lastSites.tunnels, tunAppQ.trim().toLowerCase()); return; }
+  plainTabHeader('Apps served by cloudflared, not by an nginx site — read-only');
+  if (!lastSites) { view.innerHTML = '<div class="upd-card">' + (refreshErrors.sites ? '<span class="down">⚠ Could not load — ' + esc(refreshErrors.sites) + '</span>' : 'Loading…') + '</div>'; return; }
+  view.innerHTML = '<div class="site-toolbar"><input id="tunAppQ" name="tunnel-app-filter" type="search" placeholder="Filter tunnel apps…" autocomplete="off" data-lpignore="true" data-1p-ignore value="' + esc(tunAppQ) + '" oninput="tunAppQ=this.value; renderTunnelAppsTab()">'
+    + '<span style="flex:1"></span><a class="btn" href="tunnels" onclick="event.preventDefault(); setTab(\'tunnels\')">Tunnels &amp; tokens →</a></div>'
+    + '<div id="tunAppList">' + siteTunnelHtml(lastSites.tunnels, tunAppQ.trim().toLowerCase()) + '</div>';
+}
 function siteTunnelHtml(t, q){
-  if (!t || !t.tunnels || !t.tunnels.length) return '';
+  if (!t || !t.tunnels || !t.tunnels.length) return '<div class="upd-card dim">' + (t && t.error ? '⚠ ' + esc(t.error) : t && t.generated_at ? 'No Cloudflare Tunnel apps on this server.' : 'Reading tunnels…') + '</div>';
   const rows = [];
   for (const tn of t.tunnels) for (const r of tn.routes) {
     if (q && !(r.hostname + ' ' + r.service + ' ' + (tn.name || '')).toLowerCase().includes(q)) continue;
@@ -115,7 +126,7 @@ function siteTunnelHtml(t, q){
       + '<td>' + (r.access === true ? '🔒 Access' : r.access === false ? '<span class="dim">public</span>' : '<span class="dim">?</span>') + '</td>'
       + '<td><span class="badge ' + st + '">' + (st === 'online' ? 'Online' : 'Down') + '</span></td></tr>');
   }
-  return '<div class="group" style="margin-top:18px"><h2>☁ Cloudflare Tunnel apps <span class="dim">served by cloudflared, not by an nginx site — read-only</span></h2>'
+  return '<div class="group">'
     + (t.error ? '<div class="err">⚠ ' + esc(t.error) + '</div>' : '')
     + (rows.length ? '<table class="upd-table" style="width:100%"><tr><th>Hostname</th><th>Local target</th><th>Tunnel</th><th>Login</th><th>Status</th></tr>' + rows.join('') + '</table>'
                    : '<div class="upd-card dim">' + (t.generated_at ? 'No routes match.' : 'Reading tunnels…') + '</div>')
