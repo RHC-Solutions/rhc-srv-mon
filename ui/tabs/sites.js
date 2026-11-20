@@ -257,11 +257,16 @@ function siteNewDialog(){
     + ' <label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsCf" checked> allow traffic from Cloudflare only (and log the real client IP)</label>'
     + ' <label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsTunnel" checked> publish through its own Cloudflare Tunnel (tunnel, route and DNS created automatically)</label>'
     + ' <label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsSqlite" checked> create a SQLite database for it</label>'
-    + ' <label class="chip" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="nsClaude" checked> install Claude Code CLI for the site user</label>'
+    + '<div style="margin-top:10px"><b>Apps from the App Store</b> <span class="dim" style="font-size:13px">— installed for the site user</span><div id="nsApps" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"><label class="chip" style="display:inline-flex;align-items:center;gap:6px" title="every site gets Claude Code"><input type="checkbox" checked disabled> Claude Code <span class="dim">(always)</span></label> <span class="dim" id="nsAppsLoading">loading the App Store…</span></div></div>'
     + '<div id="nsSteps" class="site-cf-detail" style="display:none"></div>'
     + '<div class="foot"><button class="btn" onclick="sshModalClose()">Cancel</button><button class="btn pri" id="nsGo" onclick="siteNewGo(this)">Create site</button></div>');
   siteNewType();
   siteApi('GET', 'api/sites/templates').then(t => { siteView.sub.nsTemplates = { data: t }; siteNewType(); }).catch(() => {});
+  siteApi('GET', 'api/appstore').then(s => {
+    const box = document.getElementById('nsApps'); if (!box) return;
+    const l = document.getElementById('nsAppsLoading'); if (l) l.remove();
+    for (const a of (s.agents || []).filter(a => a.key !== 'claude')) box.insertAdjacentHTML('beforeend', '<label class="chip" style="display:inline-flex;align-items:center;gap:6px" title="' + esc((a.vendor || '') + (a.pkg ? ' · ' + a.pkg : '')) + '"><input type="checkbox" class="nsAgent" value="' + esc(a.key) + '"> ' + esc(a.label) + '</label>');
+  }).catch(e => { const l = document.getElementById('nsAppsLoading'); if (l) l.textContent = 'App Store not available: ' + e.message; });
 }
 function siteNewType(){
   const t = (document.getElementById('nsType') || {}).value || 'nodejs';
@@ -270,18 +275,18 @@ function siteNewType(){
   if (sel) sel.innerHTML = tpls.length ? tpls.map(x => '<option value="' + esc(x.name) + '"' + (x.name === 'Generic' || x.name === 'Nodejs' || x.name === 'Static' ? ' selected' : '') + '>' + esc(x.name) + (x.php_version ? ' · php ' + x.php_version : '') + (x.root_dir ? ' · /' + esc(x.root_dir) : '') + '</option>').join('') : '<option value="">(loading…)</option>';
   const f = document.getElementById('nsTypeFields');
   if (!f) return;
-  f.innerHTML = t === 'nodejs' ? siteField('Stack', '<select id="nsStack" onchange="siteNewStack()"><option value="nextjs" selected>Next.js + TypeScript + Tailwind/shadcn + PostgreSQL/Drizzle (recommended)</option><option value="plain">Plain Node.js (placeholder app.js — bring your own)</option></select>', 'Next.js: generated, built and started under pm2 with its own PostgreSQL database (DATABASE_URL in .env) — a few minutes. A GitHub repo with code replaces it.')
+  f.innerHTML = t === 'nodejs' ? siteField('Stack', '<select id="nsStack" onchange="siteNewStack()"><option value="nextjs" selected>Next.js + TypeScript + Tailwind/shadcn + SQLite (recommended)</option><option value="plain">Plain Node.js (placeholder app.js — bring your own)</option></select>', 'Next.js: generated, built and started under pm2 with its own SQLite database (data/app.db, secrets encrypted in it — no .env) — a few minutes. A GitHub repo with code replaces it.')
       + siteField('App port *', '<input id="nsPort" type="number" min="1024" max="65535">', 'nginx proxies / to 127.0.0.1:&lt;port&gt;; pm2 runs the app on it')
     : t === 'reverse-proxy' ? siteField('Proxy target *', '<input id="nsProxy" placeholder="http://127.0.0.1:8080">')
     : t === 'php' ? '<div class="dim" style="font-size:13px;padding-top:6px">A php-fpm pool is created on the next free port, running as the site user.</div>' : '';
   siteNewStack();
   siteNewSuggest();
 }
-// The Next.js stack gets PostgreSQL, so the SQLite default is off for it (and back on otherwise).
+// The Next.js stack brings its own SQLite (data/app.db), so the panel's SQLite default is off for it.
 function siteNewStack(){
   const st = document.getElementById('nsStack'), sq = document.getElementById('nsSqlite');
   const next = !!st && st.value === 'nextjs' && (document.getElementById('nsType') || {}).value === 'nodejs';
-  if (sq) { sq.checked = !next; sq.disabled = next; sq.parentElement.title = next ? 'the Next.js stack uses PostgreSQL' : ''; }
+  if (sq) { sq.checked = !next; sq.disabled = next; sq.parentElement.title = next ? 'the Next.js stack has its own SQLite database (data/app.db)' : ''; }
 }
 let nsSuggestT = null;
 function siteNewSuggest(){
@@ -312,7 +317,7 @@ async function siteNewGo(btn){
     cf_only: !!(document.getElementById('nsCf') || {}).checked,
     tunnel: !!(document.getElementById('nsTunnel') || {}).checked,
     sqlite: !!(document.getElementById('nsSqlite') || {}).checked,
-    claude: !!(document.getElementById('nsClaude') || {}).checked };
+    agents: [...document.querySelectorAll('#nsApps .nsAgent:checked')].map(x => x.value) };
   if (v('nsPw')) body.password = v('nsPw');
   if (v('nsRepo')) body.repo = v('nsRepo');
   if (body.type === 'nodejs' && v('nsPort')) body.port = Number(v('nsPort'));
