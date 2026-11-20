@@ -155,7 +155,7 @@ async function loadKuma(force){
 function kumaFilter(f){ state.kumaF = f; saveState(); renderKuma(true); }
 // Sort within each section (state.kumaSort, kept per browser). Unknown values (no data yet) sort last.
 function kumaSorted(rows){
-  const rank = { down: 0, pending: 1, maintenance: 2, up: 3 };
+  const rank = { down: 0, pending: 1, maintenance: 2, up: 3, paused: 4 };
   const num = (v, worstHigh) => v == null ? (worstHigh ? -Infinity : Infinity) : v;
   const by = {
     status: (a, b) => (rank[a.status] ?? 1) - (rank[b.status] ?? 1) || a.name.localeCompare(b.name),
@@ -176,14 +176,14 @@ function renderKuma(fromLoad){
   const qi = document.getElementById('kumaQ'); if (qi && document.activeElement !== qi && qi.value !== (state.kumaQ || '')) qi.value = state.kumaQ || '';
   const si = document.getElementById('kumaSort'); if (si) si.value = state.kumaSort || 'status';
   document.querySelectorAll('#kumaview [data-kf]').forEach(b => b.classList.toggle('active', b.dataset.kf === f));
-  const ok = (m) => (!q || (m.name + ' ' + m.url + ' ' + m.hostname).toLowerCase().includes(q)) && (f === 'all' || (f === 'up' ? m.status === 'up' : m.status !== 'up'));
-  const dot = (st) => '<span style="color:' + (st === 'up' ? 'var(--md-success, #2e7d32)' : st === 'down' ? 'var(--md-error-bright)' : 'var(--md-warning)') + '">●</span> ' + esc(st);
+  const ok = (m) => (!q || (m.name + ' ' + m.url + ' ' + m.hostname).toLowerCase().includes(q)) && (f === 'all' || (f === 'up' ? m.status === 'up' : f === 'paused' ? m.status === 'paused' : m.status !== 'up' && m.status !== 'paused'));
+  const dot = (st) => '<span style="color:' + (st === 'up' ? 'var(--md-success, #2e7d32)' : st === 'down' ? 'var(--md-error-bright)' : st === 'paused' ? 'var(--md-on-surface-dis, #888)' : 'var(--md-warning)') + '">' + (st === 'paused' ? '⏸' : '●') + '</span> ' + esc(st);
   const pct = (v) => v == null ? '–' : (v * 100).toFixed(v >= 0.9995 ? 0 : 2) + '%';
   let h = '<div class="upd-card"><div class="site-card-hd"><h3>Uptime Kuma</h3><span>'
     + (d.publicUrl ? '<a class="btn small" href="' + esc(d.publicUrl) + '" target="_blank" rel="noopener">Open Kuma ↗</a> ' : '')
     + '<button class="btn small" onclick="loadKuma(true)">↻</button></span></div>'
     + '<div class="dim" style="font-size:14px;margin-bottom:8px">' + s.total + ' monitors · <b style="color:var(--md-success, #2e7d32)">' + s.up + ' up</b>'
-    + (s.down ? ' · <b style="color:var(--md-error-bright)">' + s.down + ' down</b>' : '') + (s.pending ? ' · ' + s.pending + ' pending' : '')
+    + (s.down ? ' · <b style="color:var(--md-error-bright)">' + s.down + ' down</b>' : '') + (s.pending ? ' · ' + s.pending + ' pending' : '') + (s.paused ? ' · ' + s.paused + ' paused' : '')
     + ' · new services, ports and sites are added automatically</div>';
   if (d.error) h += '<div class="site-why">⚠ ' + esc(d.error) + '</div>';
   for (const [key, label] of KUMA_SECTIONS) {
@@ -192,7 +192,7 @@ function renderKuma(fromLoad){
     h += '<h4 style="margin:14px 0 6px">' + esc(label) + ' <span class="dim" style="font-weight:400">' + rows.length + '</span></h4><table class="upd-table"><tr><th>Monitor</th><th>Status</th><th>Response</th><th>Uptime 24h</th><th>30d</th><th>Target</th></tr>';
     for (const m of rows) {
       const name = esc(m.name.replace(/^public · /, ''));
-      h += '<tr><td>' + (m.link ? '<a href="' + esc(m.link) + '" target="_blank" rel="noopener">' + name + '</a>' : name) + '</td><td>' + dot(m.status) + '</td>'
+      h += '<tr' + (m.status === 'paused' ? ' style="opacity:.6" title="' + esc(m.paused || 'paused') + '"' : '') + '><td>' + (m.link ? '<a href="' + esc(m.link) + '" target="_blank" rel="noopener">' + name + '</a>' : name) + '</td><td>' + dot(m.status) + (m.paused ? ' <span class="dim" style="font-size:12.5px">— ' + esc(m.paused) + '</span>' : '') + '</td>'
         + '<td>' + (m.responseMs != null ? m.responseMs + ' ms' : '–') + '</td><td>' + pct(m.uptime24h) + '</td><td>' + pct(m.uptime30d) + '</td>'
         + '<td class="mono dim" style="font-size:13px">' + esc(m.url || (m.hostname ? m.hostname + (m.port ? ':' + m.port : '') : '')) + (m.certDays != null && m.certDays >= 0 ? ' · cert ' + Math.floor(m.certDays) + 'd' : '') + '</td></tr>';
     }

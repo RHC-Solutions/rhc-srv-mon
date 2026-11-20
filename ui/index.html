@@ -78,6 +78,7 @@
     <button class="chip" data-kf="all" onclick="kumaFilter('all')">All</button>
     <button class="chip" data-kf="up" onclick="kumaFilter('up')">Up</button>
     <button class="chip down-chip" data-kf="down" onclick="kumaFilter('down')">Down</button>
+    <button class="chip" data-kf="paused" onclick="kumaFilter('paused')">Paused</button>
     <select id="kumaSort" title="Sort" onchange="state.kumaSort = this.value; saveState(); renderKuma(true)">
       <option value="status">Down first</option>
       <option value="name">Name A→Z</option>
